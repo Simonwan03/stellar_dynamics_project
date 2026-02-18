@@ -1,0 +1,447 @@
+<!DOCTYPE html><html><head>
+      <title>time _series_model</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.25/dist/katex.min.css">
+      
+      
+      
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script></head><body for="html-export">
+    
+    
+      <div class="crossnote markdown-preview  ">
+      
+<h1 id="a-literature-review-for-time-series-models-for-astrophysical-purpose">A Literature Review for Time Series Models (For Astrophysical purpose) </h1>
+<h2 id="1-survey">1 Survey </h2>
+<h3 id="foundation-models-for-time-series-a-survey">Foundation Models for Time Series: A Survey </h3>
+<ul>
+<li><strong>Authors:</strong> Siva Rama Krishna Kottapalli; Karthik Hubli; Sandeep Chandrashekhara; Garima Jain; Sunayana Hubli; Gayathri Botla; Ramesh Doddaiah</li>
+<li><strong>Publication date:</strong> 2025-04-05</li>
+<li><strong>Venue:</strong> arXiv (preprint)</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2504.04011">https://arxiv.org/abs/2504.04011</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>a recent summary for time-series foundation models across architectural choices：
+<ul>
+<li>input：<strong>patch-based vs raw</strong></li>
+<li>output：<strong>probabilistic vs deterministic</strong></li>
+<li>data：<strong>univariate vs multivariate</strong></li>
+<li><strong>model scale</strong></li>
+<li><strong>training objectives</strong></li>
+</ul>
+</li>
+<li>It focuses mainly on transformer architecture.</li>
+</ul>
+</li>
+</ul>
+<h2 id="2-transformer-based-time-series-models">2 Transformer-based time series models </h2>
+<h3 id="informer-beyond-efficient-transformer-for-long-sequence-time-series-forecasting">Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting </h3>
+<ul>
+<li><strong>Authors:</strong>  Zhou, H., Zhang, S., Peng, J., Zhang, S., Li, J., Xiong, H., &amp; Zhang, W.</li>
+<li><strong>Publication date:</strong> 2020-12</li>
+<li><strong>Venue:</strong> AAAI 2021</li>
+<li><strong>Link:</strong> <a href="https://doi.org/10.1609/aaai.v35i12.17325">https://doi.org/10.1609/aaai.v35i12.17325</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/zhouhaoyi/Informer2020">https://github.com/zhouhaoyi/Informer2020</a></li>
+<li><strong>Key innovations / contributions:</strong>   ProbSparse Attention(<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><mi>n</mi><mi>l</mi><mi>o</mi><mi>g</mi><mi>n</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(nlogn)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mord mathnormal" style="margin-right:0.01968em;">l</span><span class="mord mathnormal">o</span><span class="mord mathnormal" style="margin-right:0.03588em;">g</span><span class="mord mathnormal">n</span><span class="mclose">)</span></span></span></span> complexity) + generative-style decoder (non-autoregressive “generate in one shot”).
+<ul>
+<li>Encoder: Allowing for Processing Longer<br>
+Sequential Inputs under the Memory Usage<br>
+Limitation</li>
+<li>Decoder: Generating Long Sequential Outputs<br>
+Through One Forward Procedure</li>
+</ul>
+</li>
+</ul>
+<p><strong>This model can be used to have longer attention window and generate the whole prediction sequence in single step.</strong></p>
+<h3 id="a-time-series-is-worth-64-words-long-term-forecasting-with-transformers-patchtst">A Time Series is Worth 64 Words: Long-term Forecasting with Transformers (PatchTST) </h3>
+<ul>
+<li><strong>Authors:</strong>  Yuqi Nie; Nam H. Nguyen; Phanwadee Sinthong; Jayant Kalagnanam</li>
+<li><strong>Publication date:</strong> 2022-11-27</li>
+<li><strong>Venue:</strong> ICLR 2023</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2211.14730">https://arxiv.org/abs/2211.14730</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/PatchTST/PatchTST">https://github.com/PatchTST/PatchTST</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Patching: segmentation of time series into subseries-level patches which are served as input tokens to Transformer.</li>
+<li>Channel-independence: each channel contains a single univariate time series that shares the same embedding and Transformer weights across all the series.</li>
+</ul>
+</li>
+</ul>
+<h3 id="itransformer-inverted-transformers-are-effective-for-time-series-forecasting">iTransformer: Inverted Transformers Are Effective for Time Series Forecasting </h3>
+<ul>
+<li><strong>Authors:</strong>   Yong Liu; Tengge Hu; Haoran Zhang; Haixu Wu; Shiyu Wang; Lintao Ma; Mingsheng Long</li>
+<li><strong>Publication date:</strong> 2023-10-10</li>
+<li><strong>Venue:</strong> ICLR 2024</li>
+<li><strong>Link:</strong> <a href="https://github.com/thuml/iTransformer?tab=readme-ov-file">https://github.com/thuml/iTransformer?tab=readme-ov-file</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/thuml/iTransformer?tab=readme-ov-file">https://github.com/thuml/iTransformer?tab=readme-ov-file</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>
+<p>Invert the token dimension: Instead of treating each time step as a token (the usual setup), iTransformer treats each variable/channel as a token. Each token contains that variable’s entire historical window, so the model becomes variate-token based rather than time-token based.</p>
+</li>
+<li>
+<p>Re-align what Attention vs. FFN should learn:</p>
+<ul>
+<li>
+<p>Self-attention primarily models cross-variable dependencies (variable–variable interactions).</p>
+</li>
+<li>
+<p>The FFN primarily learns within-variable temporal patterns (nonlinear transformations of each variable’s history).</p>
+</li>
+</ul>
+<p>This division matches the structure of multivariate time series better than mixing variables inside time-step tokens.</p>
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="autoformer-decomposition-transformers-with-auto-correlation-for-long-term-series-forecasting">Autoformer: Decomposition Transformers with Auto-Correlation for Long-Term Series Forecasting </h3>
+<ul>
+<li><strong>Authors:</strong> Haixu Wu; Jiehui Xu; Jianmin Wang; Mingsheng Long</li>
+<li><strong>Publication date:</strong> 2021-06-24</li>
+<li><strong>Venue:</strong> NeurIPS 2021</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2106.13008">https://arxiv.org/abs/2106.13008</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/thuml/Autoformer">https://github.com/thuml/Autoformer</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Autoformer introduces a series decomposition block that splits the input at every layer into:
+<ul>
+<li>a Trend component (slowly varying, smooth part)</li>
+<li>a Seasonal component (fluctuating / periodic part)</li>
+</ul>
+</li>
+<li>use autoformer mechanism to replace attention, which identifies the most important time delay(lags), frequency decompostion using FFT</li>
+</ul>
+</li>
+</ul>
+<h3 id="etsformer-exponential-smoothing-transformers-for-time-series-forecasting">ETSformer: Exponential Smoothing Transformers for Time-series Forecasting </h3>
+<ul>
+<li><strong>Authors:</strong>   Gerald Woo; Chenghao Liu; Doyen Sahoo; Akshat Kumar; Steven C. H. Hoi</li>
+<li><strong>Publication date:</strong> 2022-02-03</li>
+<li><strong>Venue:</strong> Preprint</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2202.01381">https://arxiv.org/abs/2202.01381</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/azkanaon/etsformer?tab=readme-ov-file">https://github.com/azkanaon/etsformer?tab=readme-ov-file</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Exponential Smoothing Attention for Growth: <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mi>E</mi><mi>S</mi><mo stretchy="false">(</mo><mi>V</mi><msub><mo stretchy="false">)</mo><mi>t</mi></msub><mo>=</mo><mi>α</mi><msub><mi>V</mi><mi>t</mi></msub><mo>+</mo><mo stretchy="false">(</mo><mn>1</mn><mo>−</mo><mi>t</mi><mo stretchy="false">)</mo><mi>A</mi><mi>E</mi><mi>S</mi><mo stretchy="false">(</mo><mi>V</mi><msub><mo stretchy="false">)</mo><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">AES(V)_{t} = \alpha V_{t}+(1-t)AES(V)_{t-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.05764em;">ES</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em;"><span style="top:-2.55em;margin-left:-0.2222em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">t</span><span class="mclose">)</span><span class="mord mathnormal">A</span><span class="mord mathnormal" style="margin-right:0.05764em;">ES</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.22222em;">V</span><span class="mclose"><span class="mclose">)</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">t</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></li>
+<li>Frequency Attention for Seasonality: DFT</li>
+</ul>
+</li>
+</ul>
+<p><strong>Differences between Autoformer and ETSformer:</strong></p>
+<ul>
+<li>Autoformer: The core idea is moving-average decomposition plus an auto-correlation mechanism that finds the most important lags and aggregates after aligning the sequence by those lags.</li>
+<li>ETSformer: The core idea is an ETS-style decomposition into level / growth / seasonality, using ESA (Exponential Smoothing Attention) to model the trend (with exponentially decaying weights), FA (Frequency Attention) to model seasonality by selecting top-K dominant frequencies in the frequency domain, and applying growth damping to make multi-step extrapolation more stable.</li>
+</ul>
+<h2 id="3-pretrained--foundation-models-general-purpose-time-series">3 Pretrained / foundation models (general-purpose time-series) </h2>
+<h3 id="1-general-purpose-forecasting-tsfms-transformer-forecasters">1) General-purpose forecasting TSFMs (Transformer forecasters) </h3>
+<p>Models primarily pretrained to do <strong>forecasting across many datasets/horizons</strong>.</p>
+<ul>
+<li><strong><a href="https://github.com/google-research/timesfm">TimesFM (Google)</a></strong> — decoder-only, large-scale pretraining for strong zero-shot forecasting</li>
+<li><strong><a href="https://github.com/SalesforceAIResearch/uni2ts">Moirai (Uni2TS, Salesforce)</a></strong> — “universal” forecasting via large-scale pretraining (cross-frequency, multivariate-friendly)</li>
+<li><strong><a href="https://github.com/makamoa/timefound">TimeFound</a></strong> — encoder–decoder TS foundation model with multi-resolution patching for zero-shot forecasting <em>(community repo; official repo may differ)</em></li>
+<li><strong><a href="https://github.com/Nixtla/nixtla">TimeGPT-1 (Nixtla)</a></strong> — foundation-style forecasting with emphasis on usability and transfer</li>
+</ul>
+<h3 id="2-tiny--efficient-pretrained-forecasters">2) Tiny / efficient pretrained forecasters </h3>
+<p>Models optimized for <strong>speed, small size, and practical deployment</strong>, while still enabling transfer.</p>
+<ul>
+<li><strong><a href="https://github.com/ibm-granite/granite-tsfm">Tiny Time Mixers (TTMs)</a></strong> — tiny, fast pretraining for strong zero-/few-shot multivariate forecasting (TTM model code is inside this repo)</li>
+</ul>
+<h3 id="3-lm-style-tokenization--language-of-time-series">3) LM-style tokenization / “language of time series” </h3>
+<p>Models that cast time series into <strong>discrete tokens</strong> (or similar) and train like language models.</p>
+<ul>
+<li><strong><a href="https://github.com/amazon-science/chronos-forecasting">Chronos (Amazon)</a></strong> — LM framing (tokenization/quantization) to enable transfer + probabilistic forecasting</li>
+</ul>
+<h3 id="4-llm-repurposing-use-an-existing-llm-as-the-foundation">4) LLM-repurposing (use an existing LLM as the foundation) </h3>
+<p>Not a TS foundation model trained from scratch; instead it <strong>reprograms an LLM</strong> for time series.</p>
+<ul>
+<li><strong><a href="https://github.com/KimMeen/Time-LLM">Time-LLM</a></strong> — patch/token “reprogramming” of pretrained LLMs for forecasting (few-/zero-shot flavor)</li>
+</ul>
+<h3 id="5-multi-task-time-series-foundation-models-forecasting--understanding">5) Multi-task time-series foundation models (forecasting + understanding) </h3>
+<p>Pretrained for <strong>multiple tasks</strong> beyond forecasting (classification, imputation, anomaly detection, etc.).</p>
+<ul>
+<li><strong><a href="https://github.com/moment-timeseries-foundation-model/moment">MOMENT</a></strong> — open TS foundation family supporting multiple tasks with pretrained backbones</li>
+<li><strong><a href="https://github.com/mims-harvard/UniTS">UniTS (Harvard MIMs)</a></strong> — unified multi-task model via task/token prompting-style formulation</li>
+<li><strong><a href="https://github.com/Guney-olu/TimesBERT-IMPL">TimesBERT</a></strong> — BERT-style pretraining oriented toward time-series understanding tasks <em>(unofficial implementation repo)</em></li>
+</ul>
+<h3 id="6-probabilistic--generative-tsfms-explicit-uncertainty-modeling">6) Probabilistic / generative TSFMs (explicit uncertainty modeling) </h3>
+<p>Models designed to produce <strong>distributions or samples</strong>, not just point forecasts.</p>
+<ul>
+<li><strong><a href="https://github.com/time-series-foundation-models/lag-llama">Lag-Llama</a></strong> — probabilistic forecasting foundation model (explicit lag-based design)</li>
+<li><strong><a href="https://github.com/idevede/TimeDiT">TimeDiT</a></strong> — diffusion + transformer for sample-based probabilistic forecasting</li>
+<li><strong><a href="https://github.com/thuml/Sundial">Sundial</a></strong> — flow-matching style training objective for continuous-valued generative forecasting</li>
+</ul>
+<h3 id="7-scaling-via-mixture-of-experts-moe">7) Scaling via Mixture-of-Experts (MoE) </h3>
+<p>Models that scale capacity with <strong>sparse expert routing</strong> for efficiency + specialization.</p>
+<ul>
+<li><strong><a href="https://github.com/Time-MoE/Time-MoE">Time-MoE</a></strong> — billion-scale TS foundation model with sparse MoE</li>
+<li><strong><a href="https://github.com/SalesforceAIResearch/uni2ts">Moirai-MoE (Uni2TS, Salesforce)</a></strong> — MoE extension aimed at stronger specialization/efficiency in TS pretraining (implemented/released via Uni2TS)</li>
+</ul>
+<h2 id="4-diffusion-models-time-series">4 Diffusion models (time series) </h2>
+<h3 id="csdi-conditional-score-based-diffusion-models-for-probabilistic-time-series-imputation">CSDI: Conditional Score-based Diffusion Models for Probabilistic Time Series Imputation </h3>
+<ul>
+<li><strong>Authors:</strong> Yusuke Tashiro, Jiaming Song, Yang Song, Stefano Ermon</li>
+<li><strong>Publication date:</strong> 2021-06-07</li>
+<li><strong>Venue:</strong> NeurIPS 2021</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2107.03502">https://arxiv.org/abs/2107.03502</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/ermongroup/CSDI">https://github.com/ermongroup/CSDI</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Diffusion/score-based approach for missing-value imputation, trained with masking.</li>
+</ul>
+</li>
+</ul>
+<h3 id="autoregressive-denoising-diffusion-models-for-multivariate-probabilistic-time-series-forecastingtimegrad">Autoregressive Denoising Diffusion Models for Multivariate Probabilistic Time Series Forecasting(TimeGrad) </h3>
+<ul>
+<li><strong>Authors:</strong> K Rasul, C Seward, I Schuster, R Vollgraf</li>
+<li><strong>Publication date:</strong> 2021-01-28</li>
+<li><strong>Venue:</strong> ICML 2021</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2101.12072">https://arxiv.org/abs/2101.12072</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/zalandoresearch/pytorch-ts">https://github.com/zalandoresearch/pytorch-ts</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Uses an <strong>RNN</strong> to summarize history into a <strong>context</strong> representation.</li>
+<li>Applies a <strong>denoising diffusion model</strong> to generate the <strong>next-step distribution</strong> conditioned on the context.</li>
+<li>Forecasting is <strong>autoregressive</strong>: generate <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>x</mi><mrow><mi>T</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(x_{T+1})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span> → feed back into the context → repeat to generate future steps.</li>
+</ul>
+</li>
+</ul>
+<h3 id="diffusion-ts-interpretable-diffusion-for-general-time-series-generation">Diffusion-TS: Interpretable Diffusion for General Time Series Generation </h3>
+<ul>
+<li><strong>Authors:</strong> Xinyu Yuan; Yan Qiao</li>
+<li><strong>Publication date:</strong> 2024-03-04</li>
+<li><strong>Venue:</strong> ICLR 2024</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2403.01742">https://arxiv.org/abs/2403.01742</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/Y-debug-sys/Diffusion-TS">https://github.com/Y-debug-sys/Diffusion-TS</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Proposes an <strong>interpretable diffusion</strong> framework for time series generation via explicit decomposition into <strong>trend + seasonal + remainder</strong> components.</li>
+<li>Aims to improve both <strong>generation quality</strong> and <strong>interpretability</strong> compared with black-box diffusion generators.</li>
+</ul>
+</li>
+</ul>
+<h2 id="5-physics-informed-models">5 Physics-Informed Models </h2>
+<h3 id="hamiltonian-neural-networks">Hamiltonian Neural Networks </h3>
+<ul>
+<li><strong>Authors:</strong> Sam Greydanus, Misko Dzamba, Jason Yosinski</li>
+<li><strong>Publication date:</strong> 2019-06-04</li>
+<li><strong>Venue:</strong> NeurIPS 2019</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/pdf/1906.01563">https://arxiv.org/pdf/1906.01563</a></li>
+<li><strong>Github:</strong></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>The network outputs a <strong>single energy-like function</strong> <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><mi>q</mi><mo separator="true">,</mo><mi>p</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">H_\theta(q,p)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span></span></span></span>.</li>
+<li>The model’s predicted dynamics are <strong>hard-constrained</strong> to be<br>
+<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mover accent="true"><mi>q</mi><mo>˙</mo></mover><mo>=</mo><mfrac><mrow><mi mathvariant="normal">∂</mi><msub><mi>H</mi><mi>θ</mi></msub></mrow><mrow><mi mathvariant="normal">∂</mi><mi>p</mi></mrow></mfrac><mo separator="true">,</mo><mspace width="2em"></mspace><mover accent="true"><mi>p</mi><mo>˙</mo></mover><mo>=</mo><mo>−</mo><mfrac><mrow><mi mathvariant="normal">∂</mi><msub><mi>H</mi><mi>θ</mi></msub></mrow><mrow><mi mathvariant="normal">∂</mi><mi>q</mi></mrow></mfrac></mrow><annotation encoding="application/x-tex">\dot q = \frac{\partial H_\theta}{\partial p}, \qquad
+  \dot p = -\frac{\partial H_\theta}{\partial q}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8623em;vertical-align:-0.1944em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0556em;"><span class="mord">˙</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.2519em;vertical-align:-0.8804em;"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal">p</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:2em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord accent"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.6679em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal">p</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.0556em;"><span class="mord">˙</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1944em;"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:2.2519em;vertical-align:-0.8804em;"></span><span class="mord">−</span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.3714em;"><span style="top:-2.314em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span></span></span><span style="top:-3.23em;"><span class="pstrut" style="height:3em;"></span><span class="frac-line" style="border-bottom-width:0.04em;"></span></span><span style="top:-3.677em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord" style="margin-right:0.05556em;">∂</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.08125em;">H</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.0813em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.8804em;"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span><br>
+using automatic differentiation.</li>
+<li>It <strong>builds in physics structure</strong> (symplectic / Hamiltonian form), so the learned dynamics tend to be <strong>more stable</strong> and <strong>better at conserving energy</strong> (or at least not drifting wildly) compared to unconstrained black-box dynamics nets.</li>
+</ul>
+</li>
+</ul>
+<h3 id="discrete-spatial-diffusion-intensity-preserving-diffusion-modeling">Discrete Spatial Diffusion: Intensity-Preserving Diffusion Modeling </h3>
+<ul>
+<li><strong>Authors:</strong> Javier E. Santos, Agnese Marcato, Roman Colman, Nicholas Lubbers, Yen Ting Lin</li>
+<li><strong>Publication date:</strong> 2025-03-03</li>
+<li><strong>Venue:</strong> NeurIPS 2025</li>
+<li><strong>Link:</strong> <a href="https://openreview.net/forum?id=kz3w2A2y0e">https://openreview.net/forum?id=kz3w2A2y0e</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/lanl/DiscreteSpatialDiffusion">https://github.com/lanl/DiscreteSpatialDiffusion</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Discrete-state diffusion for conserved quantities: Formulates diffusion as a continuous-time, discrete-state jump process that operates directly on discrete intensities / counts (not continuous Gaussian noise).</li>
+<li>Strict intensity/mass preservation: Ensures mass (particle count / intensity) is preserved in both forward and reverse diffusion processes.</li>
+<li>The foreward process is simply Markov jump random walk, the network aims to learn the velocity vector field for reverse process.</li>
+</ul>
+</li>
+</ul>
+<h3 id="physics-informed-diffusion-models">Physics-Informed Diffusion Models </h3>
+<ul>
+<li>
+<p><strong>Authors:</strong> Jan-Hendrik Bastek, WaiChing Sun, Dennis M. Kochmann</p>
+</li>
+<li>
+<p><strong>Publication date:</strong> 2024-03-21</p>
+</li>
+<li>
+<p><strong>Venue:</strong> ICLR 2025</p>
+</li>
+<li>
+<p><strong>Link:</strong> <a href="https://arxiv.org/abs/2403.14404">https://arxiv.org/abs/2403.14404</a></p>
+</li>
+<li>
+<p><strong>Github:</strong> <a href="https://github.com/jhbastek/PhysicsInformedDiffusionModels">https://github.com/jhbastek/PhysicsInformedDiffusionModels</a></p>
+</li>
+<li>
+<p><strong>Key innovations / contributions:</strong></p>
+<ul>
+<li>
+<p>Physics constraints integrated into diffusion training: Adds a first-principles physics loss (e.g., PDE residual) to the diffusion objective so generated samples satisfy governing equations.</p>
+</li>
+<li>
+<p>Only enforcing physics constraints can lead to a degenerate outcome: as long as the generated sample satisfies the governing equations, the model may <strong>collapse to a single (or very limited) solution</strong>, which defeats the goal of learning a <em>distribution</em> over plausible solutions.</p>
+</li>
+<li>
+<p>To avoid this, the authors combine the standard diffusion (data) objective with the <strong>virtual physics likelihood</strong>:</p>
+</li>
+</ul>
+<p><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><munder><mrow><mi>max</mi><mo>⁡</mo></mrow><mi>θ</mi></munder><mtext>&nbsp;</mtext><msub><mi mathvariant="double-struck">E</mi><mrow><msub><mi>x</mi><mn>0</mn></msub><mo>∼</mo><mi>q</mi></mrow></msub><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">[</mo><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mi>θ</mi></msub><mo stretchy="false">(</mo><msub><mi>x</mi><mn>0</mn></msub><mo stretchy="false">)</mo><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">]</mo><mtext>  </mtext><mo>+</mo><mtext>  </mtext><msub><mi mathvariant="double-struck">E</mi><mrow><msub><mi>x</mi><mn>0</mn></msub><mo>∼</mo><msub><mi>p</mi><mi>θ</mi></msub></mrow></msub><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">[</mo><mi>log</mi><mo>⁡</mo><msub><mi>q</mi><mi>R</mi></msub><mo stretchy="false">(</mo><mover accent="true"><mi>r</mi><mo>^</mo></mover><mo>=</mo><mn>0</mn><mo>∣</mo><msub><mi>x</mi><mn>0</mn></msub><mo stretchy="false">)</mo><mo fence="false" stretchy="true" minsize="1.2em" maxsize="1.2em">]</mo><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\max_{\theta}\ \mathbb{E}_{x_0 \sim q}\big[\log p_{\theta}(x_0)\big]
+  \;+\;
+  \mathbb{E}_{x_0 \sim p_{\theta}}\big[\log q_{R}(\hat r = 0 \mid x_0)\big].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.6021em;vertical-align:-0.7521em;"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.4306em;"><span style="top:-2.3479em;margin-left:0em;"><span class="pstrut" style="height:3em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span><span class="mop">max</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.7521em;"><span></span></span></span></span></span><span class="mspace">&nbsp;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mrel mtight">∼</span><span class="mord mathnormal mtight" style="margin-right:0.03588em;">q</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">[</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="delimsizing size1">]</span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord mathbb">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span><span class="mrel mtight">∼</span><span class="mord mtight"><span class="mord mathnormal mtight">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em;"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.02778em;">θ</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mord"><span class="delimsizing size1">[</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop">lo<span style="margin-right:0.01389em;">g</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.00773em;">R</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.6944em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">r</span></span><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="accent-body" style="left:-0.1944em;"><span class="mord">^</span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord">0</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.35em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mord"><span class="delimsizing size1">]</span></span><span class="mord">.</span></span></span></span></span></p>
+<p>This is the key step in PIDM that <strong>unifies generative modeling with PDE satisfaction</strong>:<br>
+- the first term encourages fidelity to the data distribution,<br>
+- the second term pushes samples toward physically valid solutions.</p>
+</li>
+</ul>
+<h3 id="learning-to-simulate-complex-physics-with-graph-networks-gnsdeepmind">Learning to Simulate Complex Physics with Graph Networks (GNS)（Deepmind） </h3>
+<ul>
+<li>
+<p><strong>Authors:</strong> Alvaro Sanchez-Gonzalez, Jonathan Godwin, Tobias Pfaff, Rex Ying, Jure Leskovec, Peter W. Battaglia</p>
+</li>
+<li>
+<p><strong>Publication date:</strong> 2020-02-21</p>
+</li>
+<li>
+<p><strong>Venue:</strong> ICML 2020</p>
+</li>
+<li>
+<p><strong>Link:</strong> <a href="https://arxiv.org/abs/2002.09405">https://arxiv.org/abs/2002.09405</a></p>
+</li>
+<li>
+<p><strong>Github:</strong> <a href="https://github.com/google-deepmind/deepmind-research/blob/master/learning_to_simulate/README.md">https://github.com/google-deepmind/deepmind-research/blob/master/learning_to_simulate/README.md</a></p>
+</li>
+<li>
+<p><strong>Key innovations / contributions:</strong></p>
+<ul>
+<li>The paper proposes Graph Network-based Simulators (GNS) as a single learning framework that can model fluids, rigid solids, and deformable materials, including their interactions, using the same graph-based neural architecture and training recipe.</li>
+<li>State representation: each particle is a node with features (e.g., position, velocity, type/material flags), and edges connect nearby particles based on spatial proximity (e.g., radius graph / nearest neighbors). This encodes the physical prior that interactions are mostly local.</li>
+<li>A standard <strong>Graph Network-based Simulator (GNS)</strong> step can be summarized as:
+<ul>
+<li><strong>Encoder:</strong> Map raw node and edge attributes into latent embeddings.</li>
+<li><strong>Processor:</strong> Apply message passing repeatedly:<br>
+<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msup><mi>G</mi><mrow><mi>m</mi><mo>+</mo><mn>1</mn></mrow></msup><mo>=</mo><mi>G</mi><msup><mi>N</mi><mrow><mi>m</mi><mo>+</mo><mn>1</mn></mrow></msup><mo stretchy="false">(</mo><msup><mi>G</mi><mi>m</mi></msup><mo stretchy="false">)</mo><mo separator="true">,</mo><mspace width="1em"></mspace><mi>m</mi><mo>=</mo><mn>0</mn><mo separator="true">,</mo><mo>…</mo><mo separator="true">,</mo><mi>M</mi><mo>−</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">G^{m+1} = GN^{m+1}(G^m), \quad m = 0, \dots, M-1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8641em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.1141em;vertical-align:-0.25em;"></span><span class="mord mathnormal">G</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8641em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">m</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7144em;"><span style="top:-3.113em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:1em;"></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em;"></span><span class="mord">0</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner">…</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord mathnormal" style="margin-right:0.10903em;">M</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:0.6444em;"></span><span class="mord">1</span></span></span></span></span><br>
+and return <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>G</mi><mi>M</mi></msup></mrow><annotation encoding="application/x-tex">G^M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8413em;"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8413em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10903em;">M</span></span></span></span></span></span></span></span></span></span></span>. (The paper emphasizes this repeated message passing.)</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Decoder:</strong> Map the final latent node states to predicted <strong>dynamics quantities</strong> (often accelerations or velocity/position updates), then use a simple integrator to advance the system forward one step.</p>
+</li>
+</ul>
+<h3 id="constraint-based-graph-network-simulatorc-gns">Constraint-based Graph Network Simulator（C-GNS） </h3>
+<ul>
+<li><strong>Authors:</strong> Yulia Rubanova, Alvaro Sanchez-Gonzalez, Tobias Pfaff, Peter Battaglia</li>
+<li><strong>Publication date:</strong> 2021-12-16</li>
+<li><strong>Venue:</strong> ICML 2022</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2112.09161">https://arxiv.org/abs/2112.09161</a></li>
+<li><strong>Github:</strong></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Built on the previous GNS, Instead of directly predicting next states, it learns a scalar constraint function with a GNN and predicts by solving an optimization problem that enforces constraints.</li>
+</ul>
+</li>
+</ul>
+<h3 id="n-beats-neural-basis-expansion-analysis-for-interpretable-time-series-forecasting">N-BEATS: Neural basis expansion analysis for interpretable time series forecasting </h3>
+<ul>
+<li><strong>Authors:</strong> Boris N. Oreshkin, Dmitri Carpov, Nicolas Chapados, Yoshua Bengio</li>
+<li><strong>Publication date:</strong> 2019-05-24</li>
+<li><strong>Venue:</strong> ICLR 2020</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/1905.10437">https://arxiv.org/abs/1905.10437</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/philipperemy/n-beats">https://github.com/philipperemy/n-beats</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Pure MLP backbone with strong performance: A deep architecture built from stacks of fully connected blocks—no recurrence/conv required—achieving strong forecasting accuracy.</li>
+</ul>
+</li>
+</ul>
+<h3 id="learning-distributions-of-complex-fluid-simulations-with-diffusion-graph-networks">Learning Distributions of Complex Fluid Simulations with Diffusion Graph Networks </h3>
+<ul>
+<li><strong>Authors:</strong> Mario Lino, Tobias Pfaff, Nils Thuerey</li>
+<li><strong>Publication date:</strong> 2025-03-19</li>
+<li><strong>Venue:</strong> ICLR 2025</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2504.02843">https://arxiv.org/abs/2504.02843</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/ajain434/dgn4polymd">https://github.com/ajain434/dgn4polymd</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Distribution learning (not just mean trajectory): Targets the equilibrium/state distribution of complex unsteady flows so you can sample many plausible states and compute statistics (RMS, correlations, etc.).</li>
+<li>Graph-based diffusion / flow matching: Proposes graph-based latent diffusion (or flow-matching) models to generate samples conditioned on mesh + physical parameters.</li>
+</ul>
+</li>
+</ul>
+<h3 id="en-equivariant-graph-neural-networks">E(n) Equivariant Graph Neural Networks </h3>
+<ul>
+<li><strong>Authors:</strong> VG Satorras, E Hoogeboom, M Welling</li>
+<li><strong>Publication date:</strong> 2021-02-19</li>
+<li><strong>Venue:</strong> ICML 2021</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2102.09844">https://arxiv.org/abs/2102.09844</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/vgsatorras/egnn">https://github.com/vgsatorras/egnn</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>E(n)-equivariance with simple message passing: Introduces a GNN that is equivariant to translations, rotations, reflections (and permutation of nodes), suitable for physical/3D data.</li>
+</ul>
+</li>
+</ul>
+<h3 id="geometric-trajectory-diffusion-models">Geometric Trajectory Diffusion Models </h3>
+<ul>
+<li><strong>Authors:</strong> Jiaqi Han, Minkai Xu, Aaron Lou, Haotian Ye, Stefano Ermon</li>
+<li><strong>Publication date:</strong> 2024-10-16</li>
+<li><strong>Venue:</strong> NeurIPS 2024</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2102.09844">https://arxiv.org/abs/2102.09844</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/hanjq17/GeoTDM">https://github.com/hanjq17/GeoTDM</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>GeoTDM extends geometric diffusion models from static states to temporal dynamics by directly modeling the joint distribution of a sequence of frames. More importantly, GeoTDM features an SE(3)-equivariant spatio-temporal graph neural network and a carefully designed prior parameterization, enabling the preservation of physical symmetry and expressive distribution modeling.</li>
+<li>However it mainly focuses on molecule structure generation.</li>
+</ul>
+</li>
+</ul>
+<h3 id="predicting-the-long-term-stability-of-compact-multiplanet-systems">Predicting the long-term stability of compact multiplanet systems </h3>
+<ul>
+<li><strong>Authors:</strong> Daniel Tamayo, Miles Cranmer, Samuel Hadden, Hanno Rein, Peter Battaglia, Alysa Obertas, Philip J. Armitage, Shirley Ho, David Spergel, Christian Gilbertson, Naireen Hussain, Ari Silburt, Daniel Jontof-Hutter, Kristen Menou</li>
+<li><strong>Publication date:</strong> 2020-06-13</li>
+<li><strong>Venue:</strong> PNAS 2020</li>
+<li><strong>Link:</strong> <a href="https://arxiv.org/abs/2007.06521">https://arxiv.org/abs/2007.06521</a></li>
+<li><strong>Github:</strong> <a href="https://github.com/hanjq17/GeoTDM">https://github.com/hanjq17/GeoTDM</a></li>
+<li><strong>Key innovations / contributions:</strong>
+<ul>
+<li>Fast stability classification for N-body systems: Builds SPOCK, a classifier predicting long-term stability over <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mn>10</mn><mn>9</mn></msup></mrow><annotation encoding="application/x-tex">10^{9}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">9</span></span></span></span></span></span></span></span></span></span></span></span> orbits using features from only the first <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mn>10</mn><mn>4</mn></msup></mrow><annotation encoding="application/x-tex">10^{4}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8141em;"></span><span class="mord">1</span><span class="mord"><span class="mord">0</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">4</span></span></span></span></span></span></span></span></span></span></span></span> orbits.</li>
+<li>It does not use deep neural network for classification, but XGBoost(Gradient-Boosted Decision Trees) <a href="https://github.com/dmlc/xgboost?tab=readme-ov-file">https://github.com/dmlc/xgboost?tab=readme-ov-file</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="6-some-personal-thoughts-concerning-the-potentiel-research-focus">6 Some personal thoughts concerning the potentiel research focus </h2>
+<ol>
+<li>First of all, we need to know what kind of dataset that we can obtain, is it real data captured by the sensors or simulated data generated by traditional numerical methods? What kind of scale are they? It contains millions of stars like Galaxy or several planets like the solar system? It affects how we model the problem, more of a n-body problem or a fluid dynamics problem.</li>
+<li>Secondly, what kind of tasks are we aiming at ?
+<ul>
+<li>Predict the exact orbits of the n-body movements: maybe sole neural networks architectures are not going to exceed the performance of traditional numerical methods (Symplectic integrator for Hamiltonian systems) since the error can easily accumalate during the prediction of longer time. Perhaps it is better to combine the traditonal methods(use it to predict the backbone of the trajectory) and neural network(whether Transformer or Diffusion) to predict the slight deviation during the process. And it is preferable to use physcis-informed architecture like GNN or Hamiltonian preserved network(Hamiltonian Neural Networks or E(n) Equivariant Graph Neural Networks).</li>
+<li>At which level of time scale we want to generate the prediction ? If we want to generate the trajectore second by second, then I doubt if we are able to find a pure Neural Network that outperform traditional integrator because the attention or full connected GNN is of complexity <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false">(</mo><msup><mi>N</mi><mn>2</mn></msup><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">O(N^{2})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0641em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.02778em;">O</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.10903em;">N</span><span class="msupsub"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.8141em;"><span style="top:-3.063em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">2</span></span></span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span>, it can be very costy and meanwhile not accurate. On the contrary, if we set the time step longer, e.g. one year? Maybe the network can perform better.</li>
+<li>Alternatively, we might be able to predict the possibility of a potential collison without calculating the exact trajectory(e.g. Predicting the long-term stability of compact multiplanet systems). We can actually learn the features/distribution of instable system based on a shorter period data.</li>
+</ul>
+</li>
+<li>Lastly, we need to test whether traditonal time series model works on our problem, since the n-body problem is a Markov process. Strictly, we can predict the next state solely from the previous one. What we learn from the past(seasonality and fluctuation), are they of great importance? Maybe they are, because the orbits make the mouvement kind of periodical.</li>
+</ol>
+
+      </div>
+      
+      
+    
+    
+    
+    
+    
+    
+  
+    </body></html>

@@ -1,0 +1,19 @@
+# datasets
+data/
+dataset/
+datasets/
+
+# large files
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.csv
+*.parquet
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
