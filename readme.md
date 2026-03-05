@@ -1,5 +1,5 @@
 # Stellar Dynamics Stability Prediction
-
+## **English version below** 
 本项目聚焦于动力系统长期稳定性预测，支持两类任务：
 
 1. `Task A`: 同一初始条件下的扰动集合概率预测（输出稳定/发散概率分布）。
@@ -117,6 +117,3 @@
 - Task B：`AUC / F1 / Acc`（按不同 `T`）
 - 数据版本、切分方式（是否按 `case_id`）、随机种子
 
----
-
-如果你后续希望，我可以继续补一版“可直接运行”的 `train_task_a.py` / `train_task_b.py` 目录与命令模板，让 README 里的任务定义直接落地到训练脚本。
