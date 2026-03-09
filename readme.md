@@ -126,25 +126,10 @@ Construct labels independently for each sample:
 - `y = 1` (**stable**) if `time_unbound == 5000`
 - `y = 0` (**unstable**) otherwise
 
-The input only uses the prefix `trajectory[:, :T]` (for example, `T=700`).
+The input only uses the prefix `trajectory[:, :T]` (for example, `T=100`).
 
-## 4. Evaluation Metrics
 
-### Task A
-
-- `Brier Score` (probability calibration)
-- `NLL / Cross-Entropy`
-- `ECE` (Expected Calibration Error, optional)
-
-### Task B
-
-- `AUC`
-- `F1`
-- `Accuracy`
-
-> It is recommended to report results under different values of `T` (such as `100/200/500/700`) in order to study how the **observable prefix length** affects predictive performance.
-
-## 5. Data Splitting Principle (Important)
+## 4. Data Splitting Principle (Important)
 
 To avoid information leakage, the training / validation / test split should preferably be performed by `case_id`:
 
@@ -152,12 +137,20 @@ To avoid information leakage, the training / validation / test split should pref
 - Task A is naturally constructed at the `case_id` level.
 - Task B should ideally follow the same splitting strategy as well, to prevent the model from memorizing a family of initial conditions.
 
-## 6. Baseline Implementation Suggestions
+## 5. Baseline Implementation
 
 ### Task A Baseline
+3 models have been tested including MLP, Transformer and XGBoost,
+#### MLP 3-layers [512,256,128]
+`epoch 017 | train_mse 0.064713 | test_mse 0.098856 | test_mae 0.226948`
+`epoch 200 | train_mse 0.008179 | test_mse 0.123569 | test_mae 0.222359` (overfitting)
+#### Transformer (encoder-only Transformer + CLS pooling + sigmoid regression head)
+`epoch 066 | train_mse 0.085248 | test_mse 0.115305 | test_mae 0.244214`
+`epoch 200 | train_mse 0.023949 | test_mse 0.141674 | test_mae 0.244664`
 
-- Use set modeling over the 8 perturbation trajectories (e.g., Deep Sets / Mean Pooling / Attention Pooling).
-- Output `p_stable`.
+#### XGBoost
+`XGB | TRAIN: mse 0.005598 | mae 0.053982 | r2 0.967315`
+`XGB | TEST : mse 0.098321 | mae 0.243547 | r2 0.427884`
 
 ### Task B Baseline
 
@@ -165,7 +158,7 @@ To avoid information leakage, the training / validation / test split should pref
 - Restrict the input to a prefix of length `T`.
 - Output a binary classification logit.
 
-## 7. Result Recording Template
+## 6. Result Recording Template
 
 It is recommended to record the following consistently in `result.md`:
 
