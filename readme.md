@@ -342,6 +342,7 @@ For task B, we have tested linear SVM, 1D-CNN, TCN, and Transformer
 
 **T=500**
 
+`TEST | AUC: 0.9795 | F1: 0.9155 | Acc: 0.9350`
   
   
 
