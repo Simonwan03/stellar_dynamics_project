@@ -359,3 +359,7 @@ For task B, we have tested linear SVM, 1D-CNN, TCN, and Transformer
 **T=500**
 
 `TEST | AUC 0.9783 | F1 0.9210 | Acc 0.9410`
+
+#### GNN / 20 epochs
+**T=100**
+0.951738238317718 0.8307851775071262 0.8694
