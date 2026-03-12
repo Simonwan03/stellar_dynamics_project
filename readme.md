@@ -363,3 +363,63 @@ For task B, we have tested linear SVM, 1D-CNN, TCN, and Transformer
 #### GNN / 20 epochs
 **T=100**
 0.951738238317718 0.8307851775071262 0.8694
+
+## 5. Next steps
+Instead of predicting whether one specific trajectory will remain stable in the future, predict what fraction of a small ensemble of perturbed trajectories around the same nominal initial condition remains stable over time.
+This reformulates the task from single-trajectory outcome prediction into time-dependent distribution forecasting over a perturbation set.
+This is a very reasonable change, because it matches the nature of the problem much better:
+- the three-body problem is highly sensitive to perturbations,
+- nearly identical initial conditions can lead to very different long-term outcomes,
+- so a single hard label may be intrinsically unstable,
+- while the statistical behavior of a neighborhood of initial conditions is much more robust and learnable.
+
+### 1. Formal task definition
+
+Suppose you have a nominal initial condition $c$.
+
+Around this nominal condition, you generate or already have $M$ perturbed trajectories:
+
+$$
+\tau^{(1)}, \tau^{(2)}, \dots, \tau^{(M)}
+$$
+
+For each trajectory, define
+
+$$
+s_t^{(m)} \in \{0,1\}
+$$
+
+to indicate whether the $m$-th perturbed trajectory is still stable at time $t$:
+
+- $1$: stable
+- $0$: unstable / escaped / unbound
+
+Then define the **survival proportion** at time $t$:
+
+$$
+p_t = \frac{1}{M} \sum_{m=1}^{M} s_t^{(m)}
+$$
+
+This means:
+
+**among all perturbed trajectories associated with this nominal condition, what fraction is still stable at time $t$?**
+
+So the label is no longer a single binary value. Instead, it is a curve:
+
+$$
+\mathbf{p} = (p_{t_1}, p_{t_2}, \dots, p_{t_K})
+$$
+
+For example, you may choose
+
+$$
+t_1 = 200,\quad t_2 = 400,\quad t_3 = 600,\quad t_4 = 800,\quad t_5 = 1000
+$$
+
+Then the target becomes
+
+$$
+\mathbf{p} = (p_{200}, p_{400}, p_{600}, p_{800}, p_{1000})
+$$
+
+Each value lies in $[0,1]$.
