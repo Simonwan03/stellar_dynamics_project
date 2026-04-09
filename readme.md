@@ -423,3 +423,71 @@ $$
 $$
 
 Each value lies in $[0,1]$.
+
+## Why we do not treat the target as a standard soft label
+
+Each case contains **8 perturbed trajectories**, so the target is not a truly continuous probability. At a given horizon, the observed label can only take one of **9 discrete values**:
+
+\[
+0,\frac{1}{8},\frac{2}{8},\dots,\frac{8}{8}.
+\]
+
+For example, a label of \(5/8\) does **not** mean that the true survival probability is exactly \(0.625\). It only means that, among the 8 observed perturbation trajectories, **5 survived** up to that horizon. Therefore, directly treating the target as an ordinary soft label and optimizing it with standard regression losses such as MSE is not fully faithful to the data-generating process.
+
+## Count-based interpretation
+
+A more natural view is to treat the label as a **count observation**. For each case and horizon, let:
+
+- \(Y_i = 1\) if perturbation trajectory \(i\) survives,
+- \(Y_i = 0\) otherwise.
+
+Then define the total number of surviving trajectories as
+
+\[
+N = \sum_{i=1}^{8} Y_i.
+\]
+
+So the observed target is the integer count
+
+\[
+N \in \{0,1,\dots,8\},
+\]
+
+rather than a continuous value in \([0,1]\).
+
+## Why a Binomial likelihood is reasonable
+
+If we assume that, for a given case representation \(x\),
+
+1. each perturbed trajectory has the same latent survival probability \(p\), and  
+2. the 8 trajectory outcomes are approximately conditionally independent,
+
+then the survival count can be modeled as
+
+\[
+N \mid x \sim \mathrm{Binomial}(8, p).
+\]
+
+Under this view, the model predicts a latent survival probability \(p\), while the observed label is the result of **8 Bernoulli trials**. This is more appropriate than naive regression because it explicitly respects the fact that the supervision comes from a **small discrete ensemble**.
+
+The corresponding likelihood is
+
+\[
+\Pr(N \mid 8, p) = \binom{8}{N} p^N (1-p)^{8-N},
+\]
+
+and training can be done by minimizing the negative log-likelihood.
+
+## Important caveat
+
+This Binomial model should be understood as a **statistical approximation**, not as an exact physical truth. The 8 perturbed trajectories are generated from the same nominal initial condition, so they are not guaranteed to be strictly independent or identically distributed. Still, the Binomial likelihood provides a simple and principled **count-aware alternative** to ordinary soft-label regression.
+
+If stronger dependence or heterogeneity across perturbations becomes important, more flexible count models such as **Beta-Binomial** or **Poisson-Binomial** may be considered.
+
+## Practical takeaway
+
+In this project, the main motivation for using a Binomial-style objective is:
+
+- the target is **discrete**, not truly continuous;
+- the observation is naturally a **count among 8 perturbation trajectories**;
+- modeling the count is more faithful than regressing the empirical fraction \(N/8\) as if it were an exact probability.
