@@ -2,7 +2,7 @@
 data/
 dataset/
 datasets/
-
+dataset_v2/
 # large files
 *.zip
 *.tar
