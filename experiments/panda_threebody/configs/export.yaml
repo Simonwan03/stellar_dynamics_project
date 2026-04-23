@@ -1,0 +1,22 @@
+seed: 42
+dataset_choice: auto
+representation: orbital15
+export_root: data/panda_arrow
+system_grouping: batch_tailbin
+train_ratio: 0.7
+val_ratio: 0.1
+test_ratio: 0.2
+time_stride: 1
+context_length: 512
+prediction_length: 128
+min_sequence_length: 640
+raw_prefix_steps: 640
+max_cases: null
+sampling_id_preference:
+  - 1
+  - 0
+tail_bin_edges:
+  - 0.0
+  - 0.25
+  - 0.75
+  - 1.0

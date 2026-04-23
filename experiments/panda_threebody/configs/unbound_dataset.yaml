@@ -1,0 +1,27 @@
+run_name: unbound_orbital15_dataset
+seed: 42
+
+dataset_choice: dataset
+sampling_id_preference:
+  - 0
+
+representation: orbital15
+prefix_steps: 512
+max_cases: null
+
+train_ratio: 0.7
+val_ratio: 0.1
+test_ratio: 0.2
+
+device: cuda
+allow_cpu_fallback: false
+batch_size: 256
+epochs: 12
+learning_rate: 1.0e-3
+weight_decay: 1.0e-4
+num_workers: 0
+
+hidden_dim: 128
+dropout: 0.1
+threshold: 0.5
+output_root: outputs/unbound_dataset

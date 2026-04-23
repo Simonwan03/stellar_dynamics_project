@@ -1,0 +1,19 @@
+run_name: eval_default
+export_root: data/panda_arrow
+representation: orbital15
+split: test
+device: cpu
+prediction_length: 128
+batch_size: 16
+window_style: sampled
+window_stride: 1
+num_test_instances: 2
+num_subdirs: 12
+num_samples_per_subdir: 4
+save_forecasts: true
+save_contexts: true
+save_labels: true
+metric_names:
+  - mse
+  - mae
+  - smape

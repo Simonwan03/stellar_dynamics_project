@@ -1,0 +1,13 @@
+.venv/
+data/raw_links/**
+data/panda_arrow/**
+!data/panda_arrow/.gitkeep
+outputs/**
+!outputs/logs/.gitkeep
+!outputs/checkpoints/.gitkeep
+!outputs/eval/.gitkeep
+!outputs/figures/.gitkeep
+vendor/panda/
+vendor/panda/.venv/
+__pycache__/
+*.pyc

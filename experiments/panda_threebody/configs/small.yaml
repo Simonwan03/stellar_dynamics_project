@@ -1,0 +1,7 @@
+max_cases: 256
+context_length: 512
+prediction_length: 128
+batch_size: 4
+max_steps: 10
+num_test_instances: 2
+dataloader_num_workers: 0

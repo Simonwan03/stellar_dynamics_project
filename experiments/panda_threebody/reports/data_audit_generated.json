@@ -1,0 +1,103 @@
+{
+  "root": "/home/wan/stellar_dynamics/dataset_v2",
+  "sampling_id": 1,
+  "label_path": "/home/wan/stellar_dynamics/dataset_v2/completed_systems_sampling_1.txt",
+  "ics_path": "/home/wan/stellar_dynamics/dataset_v2/ICs_sampling_1.hdf5",
+  "result_paths": [
+    "/home/wan/stellar_dynamics/dataset_v2/results_batch_00_sampling_1.hdf5",
+    "/home/wan/stellar_dynamics/dataset_v2/results_batch_01_sampling_1.hdf5",
+    "/home/wan/stellar_dynamics/dataset_v2/results_batch_02_sampling_1.hdf5",
+    "/home/wan/stellar_dynamics/dataset_v2/results_batch_03_sampling_1.hdf5",
+    "/home/wan/stellar_dynamics/dataset_v2/results_batch_04_sampling_1.hdf5"
+  ],
+  "local_batch_ids": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "label_row_count": 400000,
+  "local_result_row_count": 40000,
+  "time_unbound_max": 10000.0,
+  "invalid_label_count": 139,
+  "time_length": 2001,
+  "feature_shapes": {
+    "APs_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "LANs_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "angMomentum_complete": [
+      8000,
+      2001,
+      3
+    ],
+    "aratios_complete": [
+      8000,
+      2001,
+      1
+    ],
+    "eccs_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "energy_complete": [
+      8000,
+      2001,
+      1
+    ],
+    "incs_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "masses_complete": [
+      8000,
+      2001,
+      3
+    ],
+    "mratios_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "periods_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "positions_complete": [
+      8000,
+      2001,
+      3,
+      3
+    ],
+    "smaxes_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "tAnos_complete": [
+      8000,
+      2001,
+      2
+    ],
+    "times_complete": [
+      8000,
+      2001
+    ],
+    "velocities_complete": [
+      8000,
+      2001,
+      3,
+      3
+    ]
+  }
+}
