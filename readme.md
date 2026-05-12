@@ -8,6 +8,31 @@ This repository contains three notebook experiments for stability prediction on 
 
 The notebooks use groups of 8 perturbed trajectories per nominal initial condition. Most experiments use the first local 5 result shards, giving 40000 trajectories or 5000 complete 8-way perturbation sets.
 
+## Local Dataset Versions
+
+### `dataset_v3` / `sampling_2`
+
+The new `sampling_2` dataset is available under `dataset_v3/` and contains the full 32-variation structure:
+
+- Initial conditions: `dataset_v3/ICs_sampling_2.hdf5`.
+- Completion table: `dataset_v3/completed_systems_sampling_2.txt`.
+- Result shards: `dataset_v3/results_batch_00_sampling_2.hdf5` through `dataset_v3/results_batch_19_sampling_2.hdf5`.
+- Total rows/runs: `160000`.
+- Unique systems: `5000`.
+- Variations per unique system: `32`.
+- Batch layout: `20` result shards, each with `8000` runs, equivalent to `250` unique systems per shard.
+- Indexing convention:
+  - `unique_system_id = run_id // 32`
+  - `variation_id = run_id % 32`
+  - `batch_id = run_id // 8000`
+  - `row_in_batch = run_id % 8000`
+- Time-series shape per result shard: `(8000, 2001, ...)`, giving `2000` time intervals.
+- Time grid: `times_complete` runs from `0` to `100000000`; with outer period `10000`, this covers `10000` outer orbits.
+
+The 32 variations are organized as two 16-variation blocks. The first 16 use the unperturbed initial conditions, and the last 16 repeat the same phase grid with a perturbed inner semimajor axis. The 16 phase variations come from a `4 x 4` grid over inner and outer orbit phases. The intended phase values are `[0, pi/2, pi, 3*pi/2]`; in the HDF5 files, the stored `tAnos` values are true anomalies, so they do not necessarily appear as exact multiples of `pi/2` for eccentric orbits.
+
+Filtering rule: as before, rows marked invalid in `completed_systems_sampling_2.txt` should be ignored. In the current local file, column 3 contains `47` rows with `-1`. Downstream loaders should also drop any run whose selected HDF5 input/target fields contain non-finite values, because some derived complete-series fields such as `periods_complete` and `tAnos_complete` can contain NaNs even when the completion table has no textual `NaN` token.
+
 ## Task A: Perturbation-Set Probability Prediction
 
 Task A predicts an empirical stability probability for each initial condition by aggregating the outcomes of its 8 perturbations.
