@@ -1,0 +1,134 @@
+{
+  "selected_features": [
+    "aratios",
+    "mratios",
+    "eccs",
+    "incs",
+    "APs",
+    "LANs"
+  ],
+  "num_features": 17,
+  "groups": [
+    {
+      "name": "aratios",
+      "source_key": "aratios_complete",
+      "raw_dim": 1,
+      "transformed_dim": 1,
+      "transform": "log1p_then_standardize",
+      "channel_start": 0,
+      "channel_end": 1,
+      "channel_names": [
+        "aratios_0"
+      ]
+    },
+    {
+      "name": "mratios",
+      "source_key": "mratios_complete",
+      "raw_dim": 2,
+      "transformed_dim": 2,
+      "transform": "log1p_then_standardize",
+      "channel_start": 1,
+      "channel_end": 3,
+      "channel_names": [
+        "mratios_0",
+        "mratios_1"
+      ]
+    },
+    {
+      "name": "eccs",
+      "source_key": "eccs_complete",
+      "raw_dim": 2,
+      "transformed_dim": 2,
+      "transform": "standardize",
+      "channel_start": 3,
+      "channel_end": 5,
+      "channel_names": [
+        "eccs_0",
+        "eccs_1"
+      ]
+    },
+    {
+      "name": "incs",
+      "source_key": "incs_complete",
+      "raw_dim": 2,
+      "transformed_dim": 4,
+      "transform": "sincos_then_standardize",
+      "channel_start": 5,
+      "channel_end": 9,
+      "channel_names": [
+        "incs_sin_0",
+        "incs_sin_1",
+        "incs_cos_0",
+        "incs_cos_1"
+      ]
+    },
+    {
+      "name": "APs",
+      "source_key": "APs_complete",
+      "raw_dim": 2,
+      "transformed_dim": 4,
+      "transform": "sincos_then_standardize",
+      "channel_start": 9,
+      "channel_end": 13,
+      "channel_names": [
+        "APs_sin_0",
+        "APs_sin_1",
+        "APs_cos_0",
+        "APs_cos_1"
+      ]
+    },
+    {
+      "name": "LANs",
+      "source_key": "LANs_complete",
+      "raw_dim": 2,
+      "transformed_dim": 4,
+      "transform": "sincos_then_standardize",
+      "channel_start": 13,
+      "channel_end": 17,
+      "channel_names": [
+        "LANs_sin_0",
+        "LANs_sin_1",
+        "LANs_cos_0",
+        "LANs_cos_1"
+      ]
+    }
+  ],
+  "channel_names": [
+    "aratios_0",
+    "mratios_0",
+    "mratios_1",
+    "eccs_0",
+    "eccs_1",
+    "incs_sin_0",
+    "incs_sin_1",
+    "incs_cos_0",
+    "incs_cos_1",
+    "APs_sin_0",
+    "APs_sin_1",
+    "APs_cos_0",
+    "APs_cos_1",
+    "LANs_sin_0",
+    "LANs_sin_1",
+    "LANs_cos_0",
+    "LANs_cos_1"
+  ],
+  "channel_to_group": [
+    "aratios",
+    "mratios",
+    "mratios",
+    "eccs",
+    "eccs",
+    "incs",
+    "incs",
+    "incs",
+    "incs",
+    "APs",
+    "APs",
+    "APs",
+    "APs",
+    "LANs",
+    "LANs",
+    "LANs",
+    "LANs"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "data_path": "dataset_v3/results_batch_00_sampling_2.hdf5",
+  "resolved_source_paths": [
+    "dataset_v3/results_batch_00_sampling_2.hdf5"
+  ],
+  "output_dir": "runs/debug_transformer_orbital_smoke",
+  "features": [
+    "aratios",
+    "mratios",
+    "eccs",
+    "incs",
+    "APs",
+    "LANs"
+  ],
+  "context_len": 128,
+  "pred_len": 32,
+  "stride": 128,
+  "batch_size": 128,
+  "epochs": 1,
+  "lr": 0.0001,
+  "weight_decay": 0.0001,
+  "d_model": 64,
+  "n_heads": 4,
+  "num_layers": 1,
+  "dim_feedforward": 256,
+  "dropout": 0.1,
+  "num_workers": 0,
+  "seed": 42,
+  "amp": true,
+  "amp_enabled": true,
+  "device": "cuda",
+  "trajectory_count": 8000,
+  "time_steps": 2001,
+  "split_trajectory_counts": {
+    "train": 5600,
+    "val": 1200,
+    "test": 1200
+  },
+  "split_window_counts": {
+    "train": 84000,
+    "val": 18000,
+    "test": 18000
+  },
+  "num_features": 17
+}

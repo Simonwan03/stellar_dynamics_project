@@ -148,3 +148,65 @@ Architecture
 - The hierarchical set-seq model is the strongest current model on test MAE.
 - Explicitly modeling the 8 perturbed trajectories is more valuable than only increasing temporal model complexity.
 - The dual-attention model is competitive, but does not materially outperform the simpler hierarchical set-seq model in the current setup.
+
+
+
+
+# results 5/14
+## Task a
+XGB TEST  | AUC 0.8458 | AP 0.9045 | F1 0.8478 | Acc 0.7900 |
+confusion matrix [[tn, fp], [fn, tp]] = [[205, 134], [76, 585]]
+
+MLP TEST | AUC 0.8489 | AP 0.9029 | F1 0.8434 | Acc 0.7890 |
+confusion matrix [[tn, fp], [fn, tp]] = [[221, 118], [93, 568]]
+## Task b 
+TCN
+early stopping at epoch 27 | best_val_auc 0.9711
+TEST | AUC: 0.9710666529890278 F1: 0.8576659038901602 Acc: 0.9066720016004801
+
+CNN
+TEST metrics: {'auc': 0.9696482992203747, 'f1': 0.849039749888343, 'accuracy': 0.8985695708712613}
+pred_prob_test shape: (19994,)
+pred_prob_test[:10]: [0.0944 0.     0.     0.5178 0.9505 0.1744 0.     0.4185 0.7675 0.    ]
+pred_label_test[:10]: [0 0 0 1 1 0 0 0 1 0]
+true_label_test[:10]: [0. 0. 0. 0. 1. 0. 0. 1. 0. 0.]
+
+attention
+early stopping at epoch 39 | best_val_auc 0.9691
+TEST | AUC 0.9689 | F1 0.8548 | Acc 0.9039
+
+## Task c
+![alt text](image.png) ![alt text](image-1.png)
+Comprehensive test metrics on ensemble fraction Q=mean_i p_i:
+                      loss  trajectory_bce  overall_mae  overall_rmse  count_mae  final_mae  early_mae  mid_mae  late_mae  mean_bias  auc_mae  monotone_fraction
+Mean baseline       0.8851          0.8851       0.3735        0.4090    11.9512     0.3480     0.3926   0.3743    0.3535    -0.0038   0.3616                1.0
+Trajectory context  0.3023          0.3023       0.0748        0.1390     2.3921     0.1076     0.0491   0.0733    0.1018     0.0446   0.0783                1.0
+Dual attention      0.2704          0.2704       0.0627        0.1174     2.0068     0.0947     0.0382   0.0613    0.0886     0.0323   0.0657                1.0
+Direct case-level   0.0612             NaN       0.0768        0.1449     2.4567     0.0857     0.0703   0.0761    0.0839    -0.0023   0.0755                1.0
+
+## Task d
+log_tau_system = np.log1p(tau_system)
+delta_a(t) = abs(a_i(t) - a_j(t))
+R_a(t) = delta_a(t) / delta_a(0)
+R_a(t) > threshold = 1e3
+tau_system = median(pair_taus)
+log_tau_system = np.log1p(tau_system)
+
+RandomForest:
+
+MAE(log_tau): 0.878    exp(0.878) ≈ 2.4
+RMSE(log_tau): 1.113
+Spearman: 0.722
+
+MLP:
+
+MAE(log_tau): 1.013
+RMSE(log_tau): 1.295
+Spearman: 0.607
+
+CNN:
+
+MAE(log_tau): 0.833
+RMSE(log_tau): 1.561
+Spearman: 0.772
+

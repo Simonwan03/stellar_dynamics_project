@@ -221,3 +221,32 @@ Task C shows the strongest and most physically structured setup. The early 200-s
 - Task B shows that short trajectory prefixes dramatically improve future stability classification, especially with temporal neural models.
 - Task C is the most complete formulation: it keeps the 8-trajectory perturbation structure, predicts multiple future horizons, and enforces physically valid monotone survival curves.
 - Across the project, preserving temporal information and perturbation-set structure is more informative than using only flattened static initial conditions.
+
+
+Ye Zhu
+3:14 PM
+Panda: A pretrained forecast model for chaotic dynamics (https://arxiv.org/abs/2505.13755) ICLR2026
+
+Ye Zhu
+3:38 PM
+[2110.07238] On the difficulty of learning chaotic dynamics with RNNs (https://arxiv.org/abs/2110.07238) - Neurips2022  
+
+[2306.04406] Generalized Teacher Forcing for Learning Chaotic Dynamics (https://arxiv.org/abs/2306.04406) - ICML2023
+
+[2306.01187v3] Training neural operators to preserve invariant measures of chaotic attractors (https://arxiv.org/abs/2306.01187v3) - Neurips2023
+
+[2402.04467] DySLIM: Dynamics Stable Learning by Invariant Measure for Chaotic Systems (https://arxiv.org/abs/2402.04467) - ICML2024  
+
+[2409.15771v3] Zero-shot forecasting of chaotic systems(https://arxiv.org/abs/2409.15771v3) ICLR2025 Pretrained models perform well on chaotic problems(**Chronos**), foundation models can still capture the attractor’s geometric and statistical structure.
+ 
+[2411.06311] When are dynamical systems learned from time series data statistically accurate](https://arxiv.org/abs/2411.06311) Neurips2024
+
+Pavan Vynatheya
+3:41 PM
+So Lyapunove time is defined for a divergence by a factor of e (or order unity). So in this context, I would suggest to look at the semimajor axis ratio parameter (eccentricity and angles vary a lot periodically even for stable systems). So predicting a timescale where two similar orbits diverge in semimajor axis ratio by an order of itself is most useful.
+
+
+3:55 PM
+Cellular automata:
+https://arxiv.org/html/2504.20858v2
+https://advanced.onlinelibrary.wiley.com/doi/10.1002/advs.202511352?af=R
