@@ -50,6 +50,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--log_every_batches", type=int, default=200)
     return parser
 
 
@@ -102,6 +103,7 @@ def main() -> None:
         "amp": bool(args.amp),
         "amp_enabled": amp_enabled,
         "device": str(device),
+        "log_every_batches": args.log_every_batches,
         "trajectory_count": prepared.trajectory_count,
         "time_steps": prepared.time_steps,
         "split_trajectory_counts": {
@@ -161,6 +163,9 @@ def main() -> None:
             optimizer=optimizer,
             device=device,
             amp_enabled=amp_enabled,
+            log_every_batches=args.log_every_batches,
+            epoch=epoch,
+            phase="train",
         )
         val_metrics, _ = evaluate_model(
             model=model,
@@ -169,6 +174,9 @@ def main() -> None:
             feature_metadata=prepared.feature_metadata,
             amp_enabled=amp_enabled,
             collect_example=False,
+            log_every_batches=args.log_every_batches,
+            epoch=epoch,
+            phase="val",
         )
 
         row = {
@@ -220,6 +228,8 @@ def main() -> None:
         feature_metadata=prepared.feature_metadata,
         amp_enabled=amp_enabled,
         collect_example=True,
+        log_every_batches=args.log_every_batches,
+        phase="test",
     )
     test_metrics["best_epoch"] = best_epoch
     save_json(output_dir / "test_metrics.json", test_metrics)
