@@ -210,3 +210,49 @@ MAE(log_tau): 0.833
 RMSE(log_tau): 1.561
 Spearman: 0.772
 
+## Task e
+64 steps -> 8 steps
+### position
+naive [20/36] 260193.07 batch/s eta=0s
+naive [30/36] 304268.89 batch/s eta=0s
+naive [36/36] 320244.81 batch/s eta=0s
+naive: raw_mse=2.55639e+08 raw_mae=4348.31 z_mse=0.909423 runtime=0.0s
+Running chronos on 4608 univariate series...
+chronos [1/36] 0.70 batch/s eta=50s
+chronos [10/36] 2.05 batch/s eta=12s
+chronos [20/36] 2.33 batch/s eta=6s
+chronos [30/36] 2.47 batch/s eta=2s
+chronos [36/36] 2.52 batch/s eta=0s
+chronos: raw_mse=6.0092e+07 raw_mae=1805.06 z_mse=0.259916 runtime=17.7s
+Running patchtst on 4608 univariate series...
+patchtst [1/36] 1.36 batch/s eta=25s
+patchtst [10/36] 12.61 batch/s eta=2s
+patchtst [20/36] 23.34 batch/s eta=0s
+patchtst [30/36] 32.11 batch/s eta=0s
+patchtst [36/36] 36.84 batch/s eta=0s
+patchtst: raw_mse=8.15002e+09 raw_mae=21171.8 z_mse=0.562308 runtime=1.6s
+
+
+
+### orbital features
+naive [20/36] 159445.13 batch/s eta=0s
+naive [30/36] 178386.67 batch/s eta=0s
+naive [36/36] 184974.90 batch/s eta=0s
+naive: raw_mse=2.55639e+08 raw_mae=4348.31 z_mse=0.909423 runtime=0.0s
+Running timesfm on 4608 univariate series...
+Running chronos on 4608 univariate series...
+chronos [1/36] 0.37 batch/s eta=1m34s
+chronos [10/36] 1.55 batch/s eta=16s
+chronos [20/36] 1.92 batch/s eta=8s
+chronos [30/36] 1.97 batch/s eta=3s
+chronos [36/36] 1.91 batch/s eta=0s
+chronos: raw_mse=5.99669e+07 raw_mae=1797.67 z_mse=0.260191 runtime=34.8s
+Running patchtst on 4608 univariate series...
+patchtst [1/36] 3.44 batch/s eta=10s
+patchtst [10/36] 26.48 batch/s eta=0s
+patchtst [20/36] 42.61 batch/s eta=0s
+patchtst [30/36] 53.29 batch/s eta=0s
+patchtst [36/36] 58.01 batch/s eta=0s
+patchtst: raw_mse=8.15002e+09 raw_mae=21171.8 z_mse=0.562308 runtime=1.1s
+
+panda: raw_mse=5.8596e+07 raw_mae=407.626 z_mse=0.213708 runtime=8.8s

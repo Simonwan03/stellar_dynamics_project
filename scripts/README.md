@@ -109,20 +109,44 @@ training-trajectory subset. Increase `--max-train-windows`, lower
 `--full-stride`, raise `--max-normalization-trajectories`, or raise the model
 size when you want a slower exhaustive run.
 
-Pretrained foundation-model zero-shot trajectory baselines. This treats each
-position/velocity channel as an independent univariate series and evaluates
-TimesFM, Chronos, PatchTST, plus a persistence baseline on sampled windows.
+Pretrained foundation-model zero-shot trajectory baselines. Univariate models
+(`timesfm`, `chronos`, `patchtst`) treat each position/velocity channel as an
+independent series; `panda` consumes the full multivariate window directly.
 
 ```bash
 conda run -n stellar python scripts/task_e_foundation_forecasters.py \
-  --models naive,timesfm,chronos,patchtst \
+  --models naive,timesfm,chronos,patchtst,panda \
+  --representation trajectory \
   --num-windows 256 \
-  --context-len 64 \
-  --pred-len 8 \
+  --context-len 512 \
+  --pred-len 128 \
   --batch-size 128 \
   --device cuda
 ```
 
-`timesfm` and `chronos` are optional dependencies. If they are not installed,
-the script records a per-model error JSON and continues with the remaining
-models.
+`timesfm`, `chronos`, and `panda` are optional dependencies. If they are not
+installed or their checkpoints are unavailable, the script records a per-model
+error JSON and continues with the remaining models. PatchTST defaults to the
+public `ibm/patchtst-etth1-forecasting` checkpoint and can try comma-separated
+fallbacks via `--patchtst-fallback-model-ids`. Foundation checkpoints are
+loaded from the local Hugging Face cache by default to avoid long offline retry
+delays; pass `--no-hf-local-files-only` when you intentionally want to download
+missing checkpoints.
+
+For Panda-compatible orbital baselines, use the `orbital15` representation:
+
+```bash
+conda run -n stellar python scripts/task_e_foundation_forecasters.py \
+  --models naive,chronos,patchtst,panda \
+  --representation orbital15 \
+  --output-dir runs/foundation_orbital_baselines \
+  --num-windows 256 \
+  --context-len 512 \
+  --pred-len 128 \
+  --batch-size 128 \
+  --device cuda
+```
+
+The default `GilpinLab/panda-72M` checkpoint expects `orbital15` style input
+with 15 channels. The script will raise a clear error if you try to use it with
+the 17-channel `orbital` representation or the 18-channel raw trajectory stack.

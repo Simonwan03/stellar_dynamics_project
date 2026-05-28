@@ -1,252 +1,612 @@
-# Stellar Dynamics Task Summary
+# Stellar Dynamics Research Repo
 
-This repository contains three notebook experiments for stability prediction on the local three-body trajectory datasets:
+This repository studies long-horizon prediction on hierarchical three-body stability datasets. The codebase started as a set of exploratory notebooks and now includes reusable training and evaluation scripts for five tasks:
 
-- `task_a.ipynb`: perturbation-set probability prediction from initial conditions.
-- `task_b.ipynb`: early-prefix classification and time-to-instability prediction.
-- `task_c.ipynb`: trajectory-level multi-horizon survival prediction.
+- `Task A`: group-level outcome prediction from initial conditions
+- `Task B`: early-prefix instability classification
+- `Task C`: multi-horizon survival prediction for full perturbation sets
+- `Task D`: Lyapunov-like semimajor-axis divergence time regression
+- `Task E`: direct forecasting baselines, including Transformers and pretrained time-series models
 
-The notebooks use groups of 8 perturbed trajectories per nominal initial condition. Most experiments use the first local 5 result shards, giving 40000 trajectories or 5000 complete 8-way perturbation sets.
+The current script entrypoints live under [scripts](</home/wan/stellar_dynamics/scripts>), shared model/data utilities live under [src](</home/wan/stellar_dynamics/src>), and the Panda subproject is isolated under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>).
 
-## Local Dataset Versions
+**Repository Layout**
 
-### `dataset_v3` / `sampling_2`
+- [dataset](</home/wan/stellar_dynamics/dataset>): original `sampling_0` data used by the early notebooks
+- [dataset_v2](</home/wan/stellar_dynamics/dataset_v2>): longer-horizon 8-variation dataset used heavily by Task C and Panda
+- [dataset_v3](</home/wan/stellar_dynamics/dataset_v3>): full 32-variation dataset used by Tasks A, B, D, and E scripts
+- [scripts](</home/wan/stellar_dynamics/scripts>): command-line task runners
+- [src](</home/wan/stellar_dynamics/src>): reusable data/model utilities
+- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): vendored Panda code plus project-specific adapters
+- [result.md](/home/wan/stellar_dynamics/result.md): working experiment notes and intermediate results
+- [results/readme.md](/home/wan/stellar_dynamics/results/readme.md): earlier project summary
 
-The new `sampling_2` dataset is available under `dataset_v3/` and contains the full 32-variation structure:
+## Datasets
 
-- Initial conditions: `dataset_v3/ICs_sampling_2.hdf5`.
-- Completion table: `dataset_v3/completed_systems_sampling_2.txt`.
-- Result shards: `dataset_v3/results_batch_00_sampling_2.hdf5` through `dataset_v3/results_batch_19_sampling_2.hdf5`.
-- Total rows/runs: `160000`.
-- Unique systems: `5000`.
-- Variations per unique system: `32`.
-- Batch layout: `20` result shards, each with `8000` runs, equivalent to `250` unique systems per shard.
-- Indexing convention:
-  - `unique_system_id = run_id // 32`
-  - `variation_id = run_id % 32`
-  - `batch_id = run_id // 8000`
-  - `row_in_batch = run_id % 8000`
-- Time-series shape per result shard: `(8000, 2001, ...)`, giving `2000` time intervals.
-- Time grid: `times_complete` runs from `0` to `100000000`; with outer period `10000`, this covers `10000` outer orbits.
+Three local dataset versions appear in this repo. They share the same physical problem family but differ in grouping structure, available horizon length, and script usage.
 
-The 32 variations are organized as two 16-variation blocks. The first 16 use the unperturbed initial conditions, and the last 16 repeat the same phase grid with a perturbed inner semimajor axis. The 16 phase variations come from a `4 x 4` grid over inner and outer orbit phases. The intended phase values are `[0, pi/2, pi, 3*pi/2]`; in the HDF5 files, the stored `tAnos` values are true anomalies, so they do not necessarily appear as exact multiples of `pi/2` for eccentric orbits.
+### `dataset/` (`sampling_0`)
 
-Filtering rule: as before, rows marked invalid in `completed_systems_sampling_2.txt` should be ignored. In the current local file, column 3 contains `47` rows with `-1`. Downstream loaders should also drop any run whose selected HDF5 input/target fields contain non-finite values, because some derived complete-series fields such as `periods_complete` and `tAnos_complete` can contain NaNs even when the completion table has no textual `NaN` token.
+This is the original 8-variation setup used by the notebook-era Tasks A and B.
 
-## Task A: Perturbation-Set Probability Prediction
+- Initial conditions: `dataset/ICs_sampling_0.hdf5`
+- Completion table: `dataset/completed_systems_sampling_0.txt`
+- Result shards: `dataset/results_batch_00_sampling_0.hdf5` through `dataset/results_batch_04_sampling_0.hdf5`
+- Total trajectories: `40000`
+- Perturbation sets: `5000`
+- Variations per set: `8`
+- Time length per trajectory: `1001` sampled steps
+- Typical instability horizon label maximum: `time_unbound = 5000`
 
-Task A predicts an empirical stability probability for each initial condition by aggregating the outcomes of its 8 perturbations.
+This dataset is still relevant for:
 
-### Data and Target
+- Task A notebook logic
+- Task B prefix classification
+- Panda-backed final-unbound classification in `experiments/panda_threebody`
 
-- Source initial conditions: `dataset/ICs_sampling_0.hdf5`.
-- Raw initial-condition rows: `40000`.
-- Grouping: every 8 rows form one perturbation set, giving `5000` groups.
-- Selected features:
-  - `aratios`
-  - `mratios`
-  - `eccs`
-  - `incs`
-  - `APs`
-  - `LANs`
-- Angular variables are encoded with sine/cosine.
-- Target: `prob_unbound`, the fraction of the 8 trajectories in a group with `time_unbound >= 5000`.
-- Train/test split:
-  - Train: `4000` groups
-  - Test: `1000` groups
-- Baseline flat feature shape: `X = (5000, 17)`.
-- Transformer token feature shape: `X_train = (4000, 26, 3)`.
+### `dataset_v2/` (`sampling_1`)
 
-### Models and Results
+This is an 8-variation dataset with a longer trajectory horizon and is the source of the clean `orbital15` representation used in Task C and Panda forecasting.
 
-| Model | Test MSE | Test MAE | Notes |
-| --- | ---: | ---: | --- |
-| MLP probability regressor | `0.0963` best MSE, `0.0984` at best-MAE epoch | `0.2158` best MAE | 200 epochs; final epoch test MSE/MAE was `0.1236` / `0.2224` |
-| Transformer probability regressor | `0.1130` best MSE, `0.1158` at best-MAE epoch | `0.2266` best MAE | 200 epochs; final epoch test MSE/MAE was `0.1417` / `0.2447` |
-| XGBoost regressor | `0.0983` | `0.2435` | Test `R2 = 0.4279`; train MSE/MAE was `0.0056` / `0.0540` |
+- Initial conditions: `dataset_v2/ICs_sampling_1.hdf5`
+- Completion table: `dataset_v2/completed_systems_sampling_1.txt`
+- Local result shards currently present: `dataset_v2/results_batch_00_sampling_1.hdf5` through `results_batch_04_sampling_1.hdf5`
+- Local trajectories represented by available shards: `40000`
+- Complete perturbation sets from local shards: `5000`
+- Variations per set: `8`
+- Time length per trajectory: `2001` sampled steps
+- Typical instability horizon label maximum: `time_unbound = 10000`
 
-### Takeaway
+This dataset is mainly used for:
 
-The task is feasible from initial-condition features alone, but the neural models overfit after early epochs. The MLP reached the best recorded MAE, while XGBoost reached similar MSE with stronger train/test overfitting.
+- Task C survival prediction
+- Panda orbital15 export, zero-shot evaluation, and finetuning
 
-## Task B: Prefix-to-Outcome Classification and Time Prediction
+### `dataset_v3/` (`sampling_2`)
 
-Task B predicts long-term instability from an early trajectory prefix.
+This is the current full 32-variation dataset used by the reusable scripts for Tasks A, B, D, and E.
 
-### Data and Target
+- Initial conditions: `dataset_v3/ICs_sampling_2.hdf5`
+- Completion table: `dataset_v3/completed_systems_sampling_2.txt`
+- Result shards: `dataset_v3/results_batch_00_sampling_2.hdf5` through `results_batch_19_sampling_2.hdf5`
+- Total trajectories: `160000`
+- Unique systems: `5000`
+- Variations per system: `32`
+- Time length per trajectory: `2001` sampled steps
+- Local result layout: `20` shards, `8000` runs per shard, `250` unique systems per shard
 
-- Source trajectory files: `dataset/results_batch_00..04_sampling_0.hdf5`.
-- Loaded trajectories: `40000`.
-- Prefix length in the notebook: `T = 100`.
-- After finite filtering: `39746` trajectories.
-- Censored-at-horizon samples: `14203`.
-- Observed unbound samples: `25543`.
-- Train/test split:
-  - Train: `34746`
-  - Test: `5000`
-- Hard label:
-  - censored/stable at horizon vs observed unbound.
-- Soft target:
-  - `64`-bin distribution over `time_unbound`.
-- Main engineered feature stack:
-  - orbital/physical channels with sine/cosine angles
-  - pairwise distance/speed/radial-speed geometry
-  - optional normalized time channel
-  - notebook SVM feature tensor: `(34746, 36, 100)`
+Useful indexing conventions:
 
-NaN-heavy channels were identified and avoided or cleaned:
+- `unique_system_id = run_id // 32`
+- `variation_id = run_id % 32`
+- `batch_id = run_id // 8000`
+- `row_in_batch = run_id % 8000`
 
-| Channel | Bad samples in first `T=100` |
-| --- | ---: |
-| `periods_complete` | `16847 / 40000` |
-| `tAnos_complete` | `14509 / 40000` |
-| `positions_complete` | `254 / 40000` |
+The 32 variations form two 16-variation blocks. The second block repeats the same phase grid with a perturbed inner semimajor axis.
 
-### Notebook Results
+### Common Feature Families
 
-| Model | Target | Test Result |
-| --- | --- | --- |
-| Linear SVM | hard binary label | train accuracy `0.8395`, test accuracy `0.8022` |
-| 1D CNN | 64-bin soft time distribution | test soft CE `1.7869`, MAE all `537.42`, MAE observed `546.94` |
-| TCN | hard binary label | AUC `0.9795`, F1 `0.9156`, accuracy `0.9350` |
-| Transformer attention classifier | hard binary label | AUC `0.9783`, F1 `0.9210`, accuracy `0.9410` |
+Across the datasets you will encounter these recurring arrays:
 
-Additional classification sweeps recorded in `result.md`:
+- Initial-condition features:
+  - `aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
+  - plus raw Cartesian state arrays such as `positions`, `velocities`
+- Time-series features:
+  - `*_complete` versions of the same orbital features
+  - `positions_complete`, `velocities_complete`
+  - optional derived quantities such as `energy_complete`, `angMomentum_complete`, `periods_complete`, `tAnos_complete`
 
-| Model | Prefix `T` | Test AUC | Test F1 | Test Accuracy |
-| --- | ---: | ---: | ---: | ---: |
-| 1D CNN | `100` | `0.9544` | `0.8284` | `0.8674` |
-| 1D CNN | `200` | `0.9630` | `0.8568` | `0.8886` |
-| 1D CNN | `500` | `0.9783` | `0.9087` | `0.9308` |
-| Attention | `100` | `0.9515` | `0.8307` | `0.8670` |
-| Attention | `200` | `0.9637` | `0.8648` | `0.8974` |
-| Attention | `500` | `0.9783` | `0.9210` | `0.9410` |
+Two canonical feature stacks show up repeatedly:
 
-### Panda-Backed Prefix Classification
+- `orbital15`
+  - `aratios_complete`: `1`
+  - `mratios_complete`: `2`
+  - `eccs_complete`: `2`
+  - `incs_complete`: `2`
+  - `sin/cos(APs_complete)`: `4`
+  - `sin/cos(LANs_complete)`: `4`
+  - total channels: `15`
+- `trajectory/raw_state18`
+  - flattened `positions_complete` (`3 bodies x 3 coords = 9`)
+  - flattened `velocities_complete` (`3 bodies x 3 coords = 9`)
+  - total channels: `18`
 
-An isolated Panda experiment was added under `experiments/panda_threebody/` to test whether the pretrained Panda time-series backbone is useful for the Task B final-unbound classification problem.
+### Data Quality Notes
 
-- Source data: `dataset/`.
-- Input representation: `orbital15`.
-- Input window: first `512` sampled steps, shape `(40000, 512, 15)`.
-- Physical time covered by the input: `t = 0` to `t = 25,550,000`.
-- Full trajectory horizon: `1001` sampled steps, ending at `t = 50,000,000`.
-- Label: `final_unbound = time_unbound < 5000`.
-- Backbone: `GilpinLab/panda-72M`.
-- Training setup: frozen Panda backbone, trainable linear classification head only.
-- Trainable parameters: `769`.
-- Split:
-  - Train: `28008`
-  - Validation: `3992`
-  - Test: `8000`
+- Rows marked invalid in the completion tables should be dropped.
+- Some `*_complete` channels can contain NaNs even when the completion table is valid.
+- `periods_complete` and `tAnos_complete` are especially NaN-heavy in earlier datasets.
+- Many scripts therefore use filtered orbital subsets (`orbital15`) or explicit finite-value screening before training.
 
-Results from `experiments/panda_threebody/outputs/panda_unbound_dataset/panda_unbound_orbital15_dataset/metrics.json`:
+## Shared Task Conventions
 
-| Model | Prefix steps | Trainable parameters | Test AUC | Test F1 | Test Accuracy | Notes |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Frozen Panda-72M + linear head | `512` | `769` | `0.9784` | `0.9520` | `0.9393` | Panda hidden representation pooled over channels and patches |
+Most task scripts follow the same structural ideas:
 
-For reference, a non-Panda Conv1D baseline on the same `orbital15` prefix reached test AUC `0.9509`, F1 `0.9040`, and accuracy `0.8844`. This baseline is useful as a sanity check, but the Panda-backed result above is the relevant comparison for testing Panda on the three-body stability task.
+- Split at the case/system level, not per trajectory, when perturbation grouping matters.
+- Keep all perturbations from the same base system in the same train/val/test split whenever possible.
+- Use early prefixes as inputs and late-time outcomes or future rollouts as targets.
+- Record results under `runs/`, `outputs/`, or `results/` rather than mutating the source notebooks.
 
-### Takeaway
+For notebook-era work, the perturbation-set size was often `8`. For the newer `dataset_v3` scripts, the natural grouping size is `32`.
 
-Early trajectory prefixes contain strong predictive signal for future instability. Deep temporal models substantially outperform the linear SVM, and longer prefixes improve classification. The frozen Panda-72M representation with only a linear head matches the strongest notebook-era Task B results, giving test AUC `0.9784` and the best recorded F1/accuracy in this summary.
+## Task A
 
-## Task C: Trajectory-Level Multi-Horizon Survival Prediction
+**Goal**
 
-Task C upgrades survival prediction from a case-level curve to per-trajectory, multi-horizon survival prediction for each 8-way perturbation ensemble.
+Predict a system-level outcome summary from initial conditions alone. Historically this was framed as perturbation-set stability probability regression on the 8-variation dataset; the reusable script version is group-level stability classification on the 32-variation dataset.
 
-### Data and Target
+### Inputs and Targets
 
-- Source dataset: `dataset_v2`.
-- Local result shards used: `results_batch_00..04_sampling_1.hdf5`.
-- Available local subset: 5 of 50 requested shards.
-- Cleaned trajectories: `40000`.
-- Complete perturbation sets: `5000`.
-- Input tensor: `(5000, 8, 200, 15)`.
-- Trajectory target tensor: `(5000, 8, 9)`.
-- Ensemble fraction target: `(5000, 9)`.
-- Ensemble count target: `(5000, 9)`.
-- Train/val/test split:
-  - Train: `3500` cases
-  - Validation: `500` cases
-  - Test: `1000` cases
-- Future survival times:
-  - `1100`
-  - `1500`
-  - `2000`
-  - `3000`
-  - `4000`
-  - `5000`
-  - `7000`
-  - `8500`
-  - `10000`
+Notebook-era Task A:
 
-The model predicts hard-monotone trajectory survival logits by parameterizing each horizon logit as an initial value minus cumulative non-negative drops. This guarantees non-increasing survival probability over time. Ensemble-level survival is then aggregated as:
+- Input: grouped initial-condition features from `dataset/ICs_sampling_0.hdf5`
+- Group size: `8`
+- Features: orbital descriptors with sine/cosine expansion for angular variables
+- Target: empirical stability probability or grouped stable/unstable outcome summary
 
-- `Q_hat = mean_i sigmoid(logits_i)`
-- `N_hat = sum_i sigmoid(logits_i)`
+Scripted Task A (`scripts/task_a_stability_classifier.py`):
 
-### Models and Results
+- Dataset: `dataset_v3`
+- Group size: `32`
+- Input: grouped initial-condition tokens derived from `ICs_sampling_2.hdf5`
+- Target: stable-at-horizon classification at the group level
 
-| Model | Test Loss | Fraction MAE | Fraction RMSE | Count MAE | Final-Horizon MAE | Monotone Fraction |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Mean trajectory baseline | `0.8934` | `0.3801` | `0.4170` | `3.0411` | `0.3540` | `1.0000` |
-| Trajectory context model | `0.3235` | `0.0958` | `0.1682` | `0.7662` | `0.1204` | `1.0000` |
-| Dual-attention model | `0.3002` | `0.0845` | `0.1588` | `0.6762` | `0.1094` | `1.0000` |
+### Pipeline
 
-Trajectory-context details:
+1. Load initial-condition arrays.
+2. Regroup trajectories into full perturbation sets.
+3. Build feature tokens from orbital parameters.
+4. Train group-level classifiers or regressors.
+5. Save grouped metrics and artifacts.
 
-- Shared CNN encoder processes each trajectory independently.
-- The 8 trajectory embeddings are mean-pooled into an ensemble context.
-- Per-trajectory head predicts hard-monotone survival logits.
-- Best validation epoch: `21`.
-- Test ensemble-fraction MAE improvement over baseline: `0.2844`.
+### Current Script Entry
 
-Dual-attention details:
+```bash
+conda run -n stellar python scripts/task_a_stability_classifier.py \
+  --output-dir results/task_a \
+  --models mlp,xgboost \
+  --epochs 20
+```
 
-- Transformer-style temporal self-attention encodes each trajectory.
-- The same hard-monotone survival head predicts trajectory-level survival.
-- Best validation epoch: `19`.
-- Test ensemble-fraction MAE improvement over baseline: `0.2956`.
-- Test ensemble-fraction MAE improvement over trajectory context: `0.0112`.
+If regrouped tokens need to be rebuilt:
 
-### Takeaway
+```bash
+conda run -n stellar python scripts/task_a_stability_classifier.py \
+  --output-dir results/task_a \
+  --models mlp,xgboost \
+  --epochs 20 \
+  --regroup \
+  --overwrite-tokenized
+```
 
-Task C shows the strongest and most physically structured setup. The early 200-step prefix predicts long-horizon survival well, and the hard-monotone parameterization enforces valid survival curves for every tested model. The dual-attention model is the best current Task C model, reducing ensemble-fraction MAE from `0.3801` to `0.0845`.
+### Existing Findings
 
-## Overall Conclusions
+From notebook and working-note results:
 
-- Task A establishes that grouped initial-condition features can predict perturbation-level outcome probabilities, but static features alone are limited.
-- Task B shows that short trajectory prefixes dramatically improve future stability classification, especially with temporal neural models.
-- Task C is the most complete formulation: it keeps the 8-trajectory perturbation structure, predicts multiple future horizons, and enforces physically valid monotone survival curves.
-- Across the project, preserving temporal information and perturbation-set structure is more informative than using only flattened static initial conditions.
+- MLP and XGBoost both extract signal from static orbital features.
+- Performance is meaningful but clearly below prefix-based temporal models.
+- Static features alone are insufficient for the strongest long-horizon predictions.
 
+## Task B
 
-Ye Zhu
-3:14 PM
-Panda: A pretrained forecast model for chaotic dynamics (https://arxiv.org/abs/2505.13755) ICLR2026
+**Goal**
 
-Ye Zhu
-3:38 PM
-[2110.07238] On the difficulty of learning chaotic dynamics with RNNs (https://arxiv.org/abs/2110.07238) - Neurips2022  
+Predict whether a trajectory will later become unstable using only an early prefix of the time series.
 
-[2306.04406] Generalized Teacher Forcing for Learning Chaotic Dynamics (https://arxiv.org/abs/2306.04406) - ICML2023
+### Inputs and Targets
 
-[2306.01187v3] Training neural operators to preserve invariant measures of chaotic attractors (https://arxiv.org/abs/2306.01187v3) - Neurips2023
+- Main trajectory source: `dataset/` in the notebooks, `dataset_v3` in the reusable script
+- Typical prefix lengths explored: `100`, `200`, `500`
+- Typical target:
+  - hard binary label: stable vs unstable by horizon
+  - sometimes softened as a distribution over unbinding time bins
 
-[2402.04467] DySLIM: Dynamics Stable Learning by Invariant Measure for Chaotic Systems (https://arxiv.org/abs/2402.04467) - ICML2024  
+The common input feature families are:
 
-[2409.15771v3] Zero-shot forecasting of chaotic systems(https://arxiv.org/abs/2409.15771v3) ICLR2025 Pretrained models perform well on chaotic problems(**Chronos**), foundation models can still capture the attractor’s geometric and statistical structure.
- 
-[2411.06311] When are dynamical systems learned from time series data statistically accurate](https://arxiv.org/abs/2411.06311) Neurips2024
+- orbital features with angle encodings
+- pairwise geometric features
+- optional raw prefix features
 
-Pavan Vynatheya
-3:41 PM
-So Lyapunove time is defined for a divergence by a factor of e (or order unity). So in this context, I would suggest to look at the semimajor axis ratio parameter (eccentricity and angles vary a lot periodically even for stable systems). So predicting a timescale where two similar orbits diverge in semimajor axis ratio by an order of itself is most useful.
+### Pipeline
 
+1. Load trajectories from HDF5 shards.
+2. Truncate to an early prefix.
+3. Filter invalid or non-finite samples.
+4. Build binary labels from `time_unbound` or related horizon logic.
+5. Train prefix-based classifiers such as:
+   - SVM
+   - CNN
+   - TCN
+   - Transformer attention
+   - IC + prefix hybrids
 
-3:55 PM
-Cellular automata:
-https://arxiv.org/html/2504.20858v2
-https://advanced.onlinelibrary.wiley.com/doi/10.1002/advs.202511352?af=R
+### Current Script Entry
+
+```bash
+conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+  --output-dir results/task_b \
+  --prefix-len 100 \
+  --models svm,cnn,tcn,attention,ic_prefix \
+  --epochs 20
+```
+
+Quick smoke test:
+
+```bash
+conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+  --output-dir /tmp/task_b_smoke \
+  --max-shards 1 \
+  --rows-per-shard 512 \
+  --prefix-len 32 \
+  --time-stride 4 \
+  --models svm,cnn \
+  --epochs 1
+```
+
+### Existing Findings
+
+Recorded working results show:
+
+- TCN and attention models reach AUC around `0.97+`
+- Longer prefixes help materially
+- Prefix-based temporal models are much stronger than static IC-only baselines
+
+The repo also includes a Panda-backed classification experiment under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>) using:
+
+- representation: `orbital15`
+- prefix length: `512`
+- backbone: `GilpinLab/panda-72M`
+
+That subproject is isolated from the main task scripts.
+
+## Task C
+
+**Goal**
+
+Predict multi-horizon survival for all perturbations in a full system, then aggregate to system-level survival statistics.
+
+### Inputs and Targets
+
+- Dataset: `dataset_v2`
+- Local complete perturbation sets: `5000`
+- Input tensor used in the main setup: `(5000, 8, 200, 15)`
+- Representation: `orbital15`
+- Target:
+  - trajectory-level survival at multiple future horizons
+  - ensemble-level survival fraction and count
+
+Typical future horizons in the current cleaned setup:
+
+- `1100`, `1500`, `2000`, `3000`, `4000`, `5000`, `7000`, `8500`, `10000`
+
+### Pipeline
+
+1. Load locally available `dataset_v2` shards.
+2. Build the clean `orbital15` feature tensor.
+3. Keep only complete 8-way perturbation sets.
+4. Split by case ID.
+5. Train models that predict monotone survival curves.
+6. Aggregate per-trajectory survival into ensemble statistics.
+
+### Model Families
+
+- Mean trajectory baseline
+- Trajectory-context encoder
+- Dual-attention temporal + set model
+- Earlier notebook variants including flat case-level GRU and hierarchical set-seq
+
+### Current Script Entry
+
+```bash
+conda run -n stellar python scripts/task_c_survival.py \
+  --output-dir results/task_c \
+  --prefix-len 200 \
+  --time-stride 2 \
+  --models baseline,direct,traj,dual \
+  --epochs 40
+```
+
+### Existing Findings
+
+The strongest current Task C models:
+
+- preserve perturbation-set structure
+- enforce monotone survival over future horizons
+- significantly outperform mean-curve baselines
+
+This is the most physically structured prediction task in the repo.
+
+## Task D
+
+**Goal**
+
+Estimate a Lyapunov-like system divergence time from early information, using semimajor-axis ratio divergence as the instability proxy.
+
+### Definition
+
+The current Task D pipeline defines pairwise divergence times from semimajor-axis ratio separation:
+
+- `delta_a(t) = |a_i(t) - a_j(t)|`
+- `R_a(t) = delta_a(t) / delta_a(0)`
+- declare divergence when `R_a(t) > threshold`
+
+Then system-level targets are aggregated from valid pairwise times, typically with:
+
+- threshold: `1e3`
+- aggregation: `median`
+- target transform: `log_tau_system = log1p(tau_system)`
+
+### Inputs and Targets
+
+- Dataset: `dataset_v3`
+- Natural group size: `32`
+- Features:
+  - static orbital summaries
+  - optional prefix-derived sequence summaries
+  - optional raw position/velocity features
+
+### Pipeline
+
+1. Load and regroup 32-variation systems.
+2. Compute valid pairwise semimajor-axis divergence times.
+3. Aggregate pairwise times into one system-level target.
+4. Build static or prefix-augmented system features.
+5. Train regressors:
+   - Random forest
+   - MLP
+   - CNN
+
+### Current Script Entry
+
+```bash
+conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+  --output-dir outputs/task_d_lyapunov \
+  --mlp-epochs 80 \
+  --cnn-epochs 80
+```
+
+Useful optional flags include:
+
+- `--include-prefix-features`
+- `--prefix-len 200`
+- `--include-positions-velocities`
+- `--sequence-aggregation mean_std|flatten`
+
+### Existing Findings
+
+Current working notes show:
+
+- Random forest is a strong baseline
+- CNN can achieve the best Spearman rank correlation among the tested neural models
+- Predicting `log1p(tau_system)` is more stable than direct raw-time regression
+
+## Task E
+
+**Goal**
+
+Forecast future orbital or Cartesian trajectory segments directly from an early prefix. This task contains both learned Transformers and pretrained foundation-model baselines.
+
+### Subtasks
+
+Task E currently has three main branches:
+
+1. Transformer orbital forecasting
+2. Transformer direct trajectory forecasting
+3. Pretrained foundation-model forecasting
+
+### Task E.1: Transformer Orbital Forecasting
+
+- Script: [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py)
+- Dataset: `dataset_v3`
+- Input features: orbital channels from result shards
+- Debug setup: smaller synthetic subset and shorter run
+- Full setup defaults:
+  - `context_len = 256`
+  - `pred_len = 64`
+  - `stride = 32`
+
+Command:
+
+```bash
+conda run -n stellar python scripts/task_e_transformer_orbital.py \
+  --mode debug \
+  --conda-env stellar \
+  --debug-epochs 3
+```
+
+Full run:
+
+```bash
+conda run -n stellar python scripts/task_e_transformer_orbital.py \
+  --mode full \
+  --conda-env stellar \
+  --full-epochs 50 \
+  --amp
+```
+
+### Task E.2: Transformer Direct Trajectory Forecasting
+
+- Script: [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py)
+- Default channels: `positions_complete,velocities_complete`
+- Full-run defaults:
+  - `context_len = 64`
+  - `pred_len = 8`
+  - `stride = 128`
+  - compact 2-layer Transformer for faster sweeps
+
+Command:
+
+```bash
+conda run -n stellar python scripts/task_e_transformer_trajectory.py \
+  --mode debug \
+  --conda-env stellar \
+  --debug-epochs 3
+```
+
+Full run:
+
+```bash
+conda run -n stellar python scripts/task_e_transformer_trajectory.py \
+  --mode full \
+  --conda-env stellar \
+  --full-epochs 10 \
+  --amp
+```
+
+### Task E.3: Pretrained Foundation Forecasting
+
+- Script: [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
+- Supported model keys:
+  - `naive`
+  - `timesfm`
+  - `chronos`
+  - `patchtst`
+  - `panda`
+- Supported representations:
+  - `trajectory`
+  - `orbital`
+  - `orbital15`
+
+#### Representation Behavior
+
+- `trajectory`
+  - uses flattened `positions_complete + velocities_complete`
+  - `18` channels
+  - univariate models are evaluated channel-by-channel
+- `orbital`
+  - uses a 17-channel orbital stack with log transforms for ratios and `sin/cos` expansion for angles
+- `orbital15`
+  - matches the Panda-oriented orbital representation
+  - required for the default `GilpinLab/panda-72M` checkpoint path to make semantic sense
+
+#### Current Default Window
+
+The current default forecasting window is:
+
+- `context_len = 512`
+- `pred_len = 128`
+
+#### Univariate vs Multivariate Baselines
+
+- `timesfm`, `chronos`, `patchtst`
+  - treated as univariate baselines in this script
+  - one multivariate sample with `C` channels becomes `C` separate series
+- `panda`
+  - consumes the full multivariate window directly
+
+This is why `trajectory` mode with `256` windows becomes:
+
+- `256 x 18 = 4608` univariate series for `timesfm`, `chronos`, and `patchtst`
+- but still only `256` multivariate windows for `panda`
+
+#### Default Commands
+
+Trajectory foundation baselines:
+
+```bash
+conda run -n stellar python scripts/task_e_foundation_forecasters.py \
+  --models naive,timesfm,chronos,patchtst \
+  --representation trajectory \
+  --output-dir runs/foundation_trajectory_baselines \
+  --num-windows 256 \
+  --context-len 512 \
+  --pred-len 128 \
+  --batch-size 128 \
+  --device cuda
+```
+
+Panda-compatible orbital baselines:
+
+```bash
+conda run -n stellar python scripts/task_e_foundation_forecasters.py \
+  --models naive,chronos,patchtst,panda \
+  --representation orbital15 \
+  --output-dir runs/foundation_orbital_baselines \
+  --num-windows 256 \
+  --context-len 512 \
+  --pred-len 128 \
+  --batch-size 128 \
+  --device cuda \
+  --no-hf-local-files-only
+```
+
+Important operational notes:
+
+- `timesfm`, `chronos`, and `panda` are optional dependencies.
+- The script records per-model failures and continues unless `--fail-fast` is set.
+- Hugging Face checkpoints default to `local_files_only=True`; use `--no-hf-local-files-only` to allow download.
+- `timesfm` is often the slowest model because it combines the largest parameter count with a list-based forecasting API and many univariate series.
+- `panda` uses the vendored Panda implementation from `experiments/panda_threebody/vendor/panda`, not a separate custom reimplementation.
+
+## Panda Subproject
+
+The Panda integration under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>) is intentionally isolated from the rest of the repo.
+
+It contains:
+
+- a vendored Panda source snapshot
+- adapters that export three-body trajectories into Panda Arrow format
+- zero-shot and finetune scripts for `orbital15`
+- a Panda-backed classifier for final-unbound prediction
+
+The vendored Panda code itself is not where the main task logic was written. The project-specific glue is in:
+
+- [experiments/panda_threebody/scripts](</home/wan/stellar_dynamics/experiments/panda_threebody/scripts>)
+- [experiments/panda_threebody/adapters](</home/wan/stellar_dynamics/experiments/panda_threebody/adapters>)
+- [experiments/panda_threebody/configs](</home/wan/stellar_dynamics/experiments/panda_threebody/configs>)
+
+For Panda-specific usage details, read [experiments/panda_threebody/README.md](/home/wan/stellar_dynamics/experiments/panda_threebody/README.md).
+
+## Environment and Dependencies
+
+Most examples in this repo assume the `stellar` conda environment.
+
+Common dependencies:
+
+- `h5py`
+- `numpy`
+- `pandas`
+- `matplotlib`
+- `scikit-learn`
+- `torch`
+- `transformers`
+
+Optional Task E foundation dependencies:
+
+- `timesfm`
+- `chronos`
+- Panda vendor dependencies under `experiments/panda_threebody`
+
+## Outputs and Artifacts
+
+You will typically find outputs under:
+
+- `results/`: earlier notebook-linked summaries
+- `runs/`: Task E and fast experiment artifacts
+- `outputs/`: Task D and Panda subproject artifacts
+
+Typical saved files include:
+
+- `config.json`
+- `metrics.json`
+- `summary_metrics.csv`
+- horizon-wise metric CSVs
+- example forecast CSVs
+- model checkpoints
+- plots such as loss curves and example predictions
+
+## Recommended Entry Points
+
+If you want the fastest orientation path:
+
+1. Read [scripts/README.md](/home/wan/stellar_dynamics/scripts/README.md) for executable commands.
+2. Read [experiments/panda_threebody/README.md](/home/wan/stellar_dynamics/experiments/panda_threebody/README.md) for the Panda branch.
+3. Check [result.md](/home/wan/stellar_dynamics/result.md) for the latest working notes and metric snapshots.
+
+If you want to reproduce the main code-driven tasks:
+
+1. Task A: `scripts/task_a_stability_classifier.py`
+2. Task B: `scripts/task_b_prefix_classifiers.py`
+3. Task C: `scripts/task_c_survival.py`
+4. Task D: `scripts/task_d_lyapunov_regression.py`
+5. Task E: `scripts/task_e_transformer_*` and `scripts/task_e_foundation_forecasters.py`

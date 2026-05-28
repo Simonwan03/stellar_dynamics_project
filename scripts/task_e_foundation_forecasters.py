@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import inspect
 import json
 import math
 import sys
@@ -18,6 +19,10 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRAJECTORY_KEYS = ("positions_complete", "velocities_complete")
+DEFAULT_ORBITAL_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
+ANGLE_FEATURES = {"incs", "APs", "LANs"}
+LOG1P_FEATURES = {"aratios", "mratios"}
+ORBITAL15_ANGLE_FEATURES = {"APs", "LANs"}
 
 
 @dataclass(frozen=True)
@@ -39,15 +44,17 @@ class EvalData:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate pretrained TimesFM, Chronos, and PatchTST on direct three-body trajectory forecasting. "
-            "Each position/velocity channel is treated as an independent univariate time series."
+            "Evaluate pretrained TimesFM, Chronos, Panda, and PatchTST on direct three-body trajectory forecasting. "
+            "Univariate models treat each channel independently; Panda consumes the full multivariate window."
         )
     )
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "dataset_v3")
     parser.add_argument("--sampling-id", type=int, default=2)
+    parser.add_argument("--representation", choices=["trajectory", "orbital", "orbital15"], default="trajectory")
     parser.add_argument("--trajectory-keys", type=str, default=",".join(DEFAULT_TRAJECTORY_KEYS))
-    parser.add_argument("--context-len", type=int, default=64)
-    parser.add_argument("--pred-len", type=int, default=8)
+    parser.add_argument("--orbital-features", type=str, default=",".join(DEFAULT_ORBITAL_FEATURES))
+    parser.add_argument("--context-len", type=int, default=512)
+    parser.add_argument("--pred-len", type=int, default=128)
     parser.add_argument("--num-windows", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--models", type=str, default="naive,timesfm,chronos,patchtst")
@@ -55,11 +62,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--torch-dtype", choices=["auto", "float32", "bfloat16", "float16"], default="auto")
+    parser.add_argument(
+        "--hf-local-files-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Load Hugging Face checkpoints from the local cache only. This avoids long network "
+            "retry delays on offline machines; pass --no-hf-local-files-only to allow downloads."
+        ),
+    )
     parser.add_argument("--freq", type=int, default=0, help="TimesFM frequency bucket. 0 is high-frequency/default.")
     parser.add_argument("--chronos-model-id", type=str, default="amazon/chronos-t5-small")
     parser.add_argument("--chronos-num-samples", type=int, default=20)
-    parser.add_argument("--timesfm-model-id", type=str, default="google/timesfm-2.0-500m-pytorch")
-    parser.add_argument("--patchtst-model-id", type=str, default="namctin/patchtst_etth1_forecast")
+    parser.add_argument("--panda-model-id", type=str, default="GilpinLab/panda-72M")
+    parser.add_argument(
+        "--timesfm-model-id",
+        type=str,
+        default="google/timesfm-2.5-200m-pytorch",
+        help=(
+            "TimesFM checkpoint. The current official PyTorch API exposed by recent timesfm installs "
+            "expects a 2.5 checkpoint such as google/timesfm-2.5-200m-pytorch."
+        ),
+    )
+    parser.add_argument("--patchtst-model-id", type=str, default="ibm/patchtst-etth1-forecasting")
+    parser.add_argument(
+        "--patchtst-fallback-model-ids",
+        type=str,
+        default="ibm-granite/granite-timeseries-patchtst",
+        help="Comma-separated fallback PatchTST checkpoints to try if the primary checkpoint is gated or unavailable.",
+    )
     parser.add_argument("--log-every-batches", type=int, default=10)
     parser.add_argument("--fail-fast", action="store_true")
     return parser
@@ -70,13 +101,18 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     device = resolve_device(args.device)
     trajectory_keys = [item.strip() for item in args.trajectory_keys.split(",") if item.strip()]
-    if not trajectory_keys:
+    orbital_features = [item.strip() for item in args.orbital_features.split(",") if item.strip()]
+    if args.representation == "trajectory" and not trajectory_keys:
         raise ValueError("No trajectory keys were selected.")
+    if args.representation == "orbital" and not orbital_features:
+        raise ValueError("No orbital features were selected.")
 
     data = load_eval_data(
         dataset_dir=args.dataset_dir,
         sampling_id=args.sampling_id,
+        representation=args.representation,
         trajectory_keys=trajectory_keys,
+        orbital_features=orbital_features,
         context_len=args.context_len,
         pred_len=args.pred_len,
         num_windows=args.num_windows,
@@ -87,7 +123,9 @@ def main() -> None:
         {
             "dataset_dir": str(args.dataset_dir),
             "sampling_id": args.sampling_id,
+            "representation": args.representation,
             "trajectory_keys": trajectory_keys,
+            "orbital_features": orbital_features,
             "context_len": args.context_len,
             "pred_len": args.pred_len,
             "num_windows": args.num_windows,
@@ -95,8 +133,10 @@ def main() -> None:
             "channel_names": data.channel_names,
             "device": device,
             "models": parse_name_list(args.models),
+            "hf_local_files_only": args.hf_local_files_only,
             "timesfm_model_id": args.timesfm_model_id,
             "chronos_model_id": args.chronos_model_id,
+            "panda_model_id": args.panda_model_id,
             "patchtst_model_id": args.patchtst_model_id,
         },
     )
@@ -111,17 +151,32 @@ def main() -> None:
     for model_name in model_names:
         started = time.perf_counter()
         try:
-            print(f"Running {model_name} on {series_context.shape[0]} univariate series...", flush=True)
             predictor = build_predictor(model_name, args, device)
-            prediction = run_batched_prediction(
-                predictor=predictor,
-                context=series_context,
-                pred_len=args.pred_len,
-                batch_size=args.batch_size,
-                log_every_batches=args.log_every_batches,
-                label=model_name,
-            )
-            prediction_windows = unflatten_series_to_windows(prediction, data.context.shape[0], len(data.channel_names))
+            if uses_multivariate_context(model_name):
+                print(
+                    f"Running {model_name} on {data.context.shape[0]} multivariate windows "
+                    f"with {len(data.channel_names)} channels...",
+                    flush=True,
+                )
+                prediction_windows = run_batched_prediction_multivariate(
+                    predictor=predictor,
+                    context=data.context,
+                    pred_len=args.pred_len,
+                    batch_size=args.batch_size,
+                    log_every_batches=args.log_every_batches,
+                    label=model_name,
+                )
+            else:
+                print(f"Running {model_name} on {series_context.shape[0]} univariate series...", flush=True)
+                prediction = run_batched_prediction(
+                    predictor=predictor,
+                    context=series_context,
+                    pred_len=args.pred_len,
+                    batch_size=args.batch_size,
+                    log_every_batches=args.log_every_batches,
+                    label=model_name,
+                )
+                prediction_windows = unflatten_series_to_windows(prediction, data.context.shape[0], len(data.channel_names))
             metrics = compute_metrics(prediction_windows, data.target, metric_scale)
             metrics["model"] = model_name
             metrics["runtime_sec"] = time.perf_counter() - started
@@ -160,13 +215,16 @@ def main() -> None:
 def load_eval_data(
     dataset_dir: Path,
     sampling_id: int,
+    representation: str,
     trajectory_keys: list[str],
+    orbital_features: list[str],
     context_len: int,
     pred_len: int,
     num_windows: int,
     seed: int,
 ) -> EvalData:
-    sources = inspect_sources(dataset_dir, sampling_id, trajectory_keys)
+    selected_keys = resolve_selected_keys(representation, trajectory_keys, orbital_features)
+    sources = inspect_sources(dataset_dir, sampling_id, selected_keys)
     rng = np.random.default_rng(seed)
     total_trajectories = sum(source.row_count for source in sources)
     total_window = context_len + pred_len
@@ -174,44 +232,58 @@ def load_eval_data(
     if starts_per_trajectory <= 0:
         raise ValueError(f"Trajectory length is shorter than context_len + pred_len = {total_window}.")
 
-    channel_names = build_channel_names(sources[0], trajectory_keys)
+    channel_names = build_channel_names(sources[0], selected_keys, representation)
     num_channels = len(channel_names)
     context = np.empty((num_windows, context_len, num_channels), dtype=np.float32)
     target = np.empty((num_windows, pred_len, num_channels), dtype=np.float32)
     metadata: list[dict[str, Any]] = []
 
     source_offsets = np.cumsum([0] + [source.row_count for source in sources])
-    for sample_idx in range(num_windows):
-        global_idx = int(rng.integers(0, total_trajectories))
-        source_id = int(np.searchsorted(source_offsets, global_idx, side="right") - 1)
-        local_idx = int(global_idx - source_offsets[source_id])
-        start = int(rng.integers(0, starts_per_trajectory))
-        stop = start + total_window
-        source = sources[source_id]
+    handles: dict[int, h5py.File] = {}
+    try:
+        for sample_idx in range(num_windows):
+            global_idx = int(rng.integers(0, total_trajectories))
+            source_id = int(np.searchsorted(source_offsets, global_idx, side="right") - 1)
+            local_idx = int(global_idx - source_offsets[source_id])
+            start = int(rng.integers(0, starts_per_trajectory))
+            stop = start + total_window
+            source = sources[source_id]
 
-        blocks = []
-        with h5py.File(source.path, "r") as handle:
-            for key in trajectory_keys:
+            blocks = []
+            if source_id not in handles:
+                handles[source_id] = h5py.File(source.path, "r")
+            handle = handles[source_id]
+            for key in selected_keys:
                 raw = np.asarray(handle[key][local_idx, start:stop], dtype=np.float32)
-                blocks.append(raw.reshape(total_window, -1))
-        window = np.concatenate(blocks, axis=-1)
-        window = np.nan_to_num(window, nan=0.0, posinf=0.0, neginf=0.0)
-        context[sample_idx] = window[:context_len]
-        target[sample_idx] = window[context_len:]
-        metadata.append(
-            {
-                "source_path": str(source.path),
-                "source_row": local_idx,
-                "global_row": global_idx,
-                "start": start,
-                "stop": stop,
-            }
-        )
+                transformed = transform_feature_array(key, raw, representation)
+                blocks.append(transformed.reshape(total_window, -1))
+            window = np.concatenate(blocks, axis=-1)
+            window = np.nan_to_num(window, nan=0.0, posinf=0.0, neginf=0.0)
+            context[sample_idx] = window[:context_len]
+            target[sample_idx] = window[context_len:]
+            metadata.append(
+                {
+                    "source_path": str(source.path),
+                    "source_row": local_idx,
+                    "global_row": global_idx,
+                    "start": start,
+                    "stop": stop,
+                }
+            )
+    finally:
+        for handle in handles.values():
+            handle.close()
 
     return EvalData(context=context, target=target, channel_names=channel_names, window_metadata=metadata)
 
 
-def inspect_sources(dataset_dir: Path, sampling_id: int, trajectory_keys: list[str]) -> list[Source]:
+def resolve_selected_keys(representation: str, trajectory_keys: list[str], orbital_features: list[str]) -> list[str]:
+    if representation == "trajectory":
+        return trajectory_keys
+    return [feature if feature.endswith("_complete") else f"{feature}_complete" for feature in orbital_features]
+
+
+def inspect_sources(dataset_dir: Path, sampling_id: int, selected_keys: list[str]) -> list[Source]:
     paths = sorted(dataset_dir.glob(f"results_batch_*_sampling_{sampling_id}.hdf5"))
     if not paths:
         raise FileNotFoundError(f"No result shards found in {dataset_dir} for sampling id {sampling_id}.")
@@ -219,12 +291,12 @@ def inspect_sources(dataset_dir: Path, sampling_id: int, trajectory_keys: list[s
     sources = []
     for path in paths:
         with h5py.File(path, "r") as handle:
-            if not all(key in handle for key in trajectory_keys):
+            if not all(key in handle for key in selected_keys):
                 continue
             row_count = None
             time_steps = None
             shapes: dict[str, tuple[int, ...]] = {}
-            for key in trajectory_keys:
+            for key in selected_keys:
                 dataset = handle[key]
                 if dataset.ndim < 3:
                     raise ValueError(f"Expected {key} in {path} to have shape [N, T, ...], got {dataset.shape}.")
@@ -237,16 +309,26 @@ def inspect_sources(dataset_dir: Path, sampling_id: int, trajectory_keys: list[s
             assert row_count is not None and time_steps is not None
             sources.append(Source(path=path, row_count=row_count, time_steps=time_steps, shapes=shapes))
     if not sources:
-        raise FileNotFoundError(f"No result shards contain all keys {trajectory_keys}.")
+        raise FileNotFoundError(f"No result shards contain all keys {selected_keys}.")
     return sources
 
 
-def build_channel_names(source: Source, trajectory_keys: list[str]) -> list[str]:
+def build_channel_names(source: Source, selected_keys: list[str], representation: str) -> list[str]:
     coord_labels = ["x", "y", "z"]
     names = []
-    for key in trajectory_keys:
+    for key in selected_keys:
+        feature_name = key.removesuffix("_complete")
         prefix = "pos" if key == "positions_complete" else "vel" if key == "velocities_complete" else key
         shape = source.shapes[key]
+        if representation in {"orbital", "orbital15"}:
+            raw_dim = int(np.prod(shape))
+            angle_features = ANGLE_FEATURES if representation == "orbital" else ORBITAL15_ANGLE_FEATURES
+            if feature_name in angle_features:
+                names.extend([f"{feature_name}_sin_{idx}" for idx in range(raw_dim)])
+                names.extend([f"{feature_name}_cos_{idx}" for idx in range(raw_dim)])
+            else:
+                names.extend([f"{feature_name}_{idx}" for idx in range(raw_dim)])
+            continue
         body_count = shape[0] if len(shape) >= 1 else 1
         coord_count = shape[1] if len(shape) >= 2 else 1
         for body_idx in range(body_count):
@@ -254,6 +336,25 @@ def build_channel_names(source: Source, trajectory_keys: list[str]) -> list[str]
                 suffix = coord_labels[coord_idx] if coord_idx < len(coord_labels) else str(coord_idx)
                 names.append(f"{prefix}_body{body_idx}_{suffix}")
     return names
+
+
+def transform_feature_array(key: str, raw: np.ndarray, representation: str) -> np.ndarray:
+    raw = np.asarray(raw, dtype=np.float32)
+    if representation == "trajectory":
+        return raw
+    feature_name = key.removesuffix("_complete")
+    if representation == "orbital15":
+        if feature_name in ORBITAL15_ANGLE_FEATURES:
+            flat = raw.reshape(raw.shape[0], -1)
+            return np.concatenate([np.sin(flat), np.cos(flat)], axis=-1).astype(np.float32)
+        return raw
+    if feature_name in LOG1P_FEATURES:
+        with np.errstate(invalid="ignore"):
+            return np.log1p(raw).astype(np.float32)
+    if feature_name in ANGLE_FEATURES:
+        flat = raw.reshape(raw.shape[0], -1)
+        return np.concatenate([np.sin(flat), np.cos(flat)], axis=-1).astype(np.float32)
+    return raw
 
 
 def flatten_windows_to_series(context: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -284,9 +385,15 @@ def build_predictor(model_name: str, args: argparse.Namespace, device: str) -> C
         return build_timesfm_predictor(args, device)
     if model_name == "chronos":
         return build_chronos_predictor(args, device)
+    if model_name == "panda":
+        return build_panda_predictor(args, device)
     if model_name == "patchtst":
         return build_patchtst_predictor(args, device)
-    raise ValueError(f"Unknown model '{model_name}'. Supported: naive,timesfm,chronos,patchtst")
+    raise ValueError(f"Unknown model '{model_name}'. Supported: naive,timesfm,chronos,panda,patchtst")
+
+
+def uses_multivariate_context(model_name: str) -> bool:
+    return model_name == "panda"
 
 
 def build_timesfm_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
@@ -299,14 +406,28 @@ def build_timesfm_predictor(args: argparse.Namespace, device: str) -> Callable[[
         ) from exc
 
     if hasattr(timesfm, "TimesFM_2p5_200M_torch"):
-        model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(args.timesfm_model_id)
+        if is_legacy_timesfm_checkpoint(args.timesfm_model_id):
+            raise ValueError(
+                "The installed timesfm package exposes the TimesFM 2.5 PyTorch API, but "
+                f"--timesfm-model-id={args.timesfm_model_id!r} is a legacy 2.0 checkpoint. "
+                "Use google/timesfm-2.5-200m-pytorch, or install a timesfm version that still "
+                "exposes the legacy TimesFm API."
+            )
+        _ModelCls = timesfm.TimesFM_2p5_200M_torch
+
+        patch_timesfm_2p5_init(_ModelCls)
+
+        model = _ModelCls.from_pretrained(args.timesfm_model_id, local_files_only=args.hf_local_files_only)
         if hasattr(model, "to"):
             model = model.to(device)
         if hasattr(model, "compile") and hasattr(timesfm, "ForecastConfig"):
             model.compile(timesfm.ForecastConfig(max_context=args.context_len, max_horizon=args.pred_len))
 
         def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
-            point_forecast, _ = model.forecast([row.astype(np.float32) for row in batch], freq=[args.freq] * len(batch))
+            point_forecast, _ = model.forecast(
+                horizon=pred_len,
+                inputs=[row.astype(np.float32) for row in batch],
+            )
             return np.asarray(point_forecast, dtype=np.float32)[:, :pred_len]
 
         return predict
@@ -330,6 +451,29 @@ def build_timesfm_predictor(args: argparse.Namespace, device: str) -> Callable[[
     raise RuntimeError("Unsupported installed timesfm package API.")
 
 
+def is_legacy_timesfm_checkpoint(model_id: str) -> bool:
+    normalized = model_id.lower()
+    return "timesfm-2.0" in normalized or "timesfm_2.0" in normalized or "500m" in normalized
+
+
+def patch_timesfm_2p5_init(model_cls: type[Any]) -> None:
+    if getattr(model_cls, "_stellar_init_patch_applied", False):
+        return
+
+    # Newer huggingface_hub forwards loader kwargs such as proxies and
+    # resume_download into the model constructor.  The official TimesFM class
+    # does not accept them, so keep only constructor-supported kwargs.
+    orig_init = model_cls.__init__
+    init_params = set(inspect.signature(orig_init).parameters)
+
+    def patched_init(self, *init_args, **init_kwargs):
+        filtered = {key: value for key, value in init_kwargs.items() if key in init_params}
+        orig_init(self, *init_args, **filtered)
+
+    model_cls.__init__ = patched_init
+    setattr(model_cls, "_stellar_init_patch_applied", True)
+
+
 def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
     try:
         try:
@@ -346,7 +490,11 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
     dtype = resolve_torch_dtype(args.torch_dtype, device)
     if dtype is not None:
         pipeline_kwargs["torch_dtype"] = dtype
-    pipeline = ChronosPipeline.from_pretrained(args.chronos_model_id, **pipeline_kwargs)
+    pipeline = ChronosPipeline.from_pretrained(
+        args.chronos_model_id,
+        local_files_only=args.hf_local_files_only,
+        **pipeline_kwargs,
+    )
 
     def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
         context = torch.as_tensor(batch, dtype=torch.float32)
@@ -360,28 +508,123 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
     return predict
 
 
+def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
+    vendor_root = ROOT / "experiments" / "panda_threebody" / "vendor" / "panda"
+    if str(vendor_root) not in sys.path:
+        sys.path.insert(0, str(vendor_root))
+
+    try:
+        from panda.patchtst.patchtst import PatchTSTForPrediction  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Panda is not importable. Ensure experiments/panda_threebody/vendor/panda is present "
+            "and the required dependencies are installed."
+        ) from exc
+
+    try:
+        model = PatchTSTForPrediction.from_pretrained(
+            args.panda_model_id,
+            local_files_only=args.hf_local_files_only,
+        ).to(device)
+    except Exception as exc:
+        raise RuntimeError(format_checkpoint_load_error("Panda", args.panda_model_id, args.hf_local_files_only, exc)) from exc
+
+    model.eval()
+    model_context_len = int(getattr(model.config, "context_length", args.context_len))
+
+    def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
+        adapted = adapt_multivariate_context_length(batch, model_context_len)
+        context_tensor = torch.as_tensor(adapted, dtype=torch.float32, device=device)
+        predictions: list[np.ndarray] = []
+        remaining = pred_len
+
+        while remaining > 0:
+            observed = torch.ones_like(context_tensor, dtype=torch.bool)
+            with torch.no_grad():
+                outputs = model.generate(
+                    past_values=context_tensor,
+                    past_observed_mask=observed,
+                )
+            sample_forecast = outputs.sequences
+            step_forecast = sample_forecast.median(dim=1).values
+            step_count = min(remaining, int(step_forecast.shape[1]))
+            predictions.append(step_forecast[:, :step_count, :].detach().cpu().float().numpy())
+            remaining -= step_count
+            if remaining <= 0:
+                break
+            context_tensor = torch.cat([context_tensor, step_forecast], dim=1)
+            context_tensor = context_tensor[:, -model_context_len:, :]
+
+        return np.concatenate(predictions, axis=1).astype(np.float32)
+
+    return predict
+
+
 def build_patchtst_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
     try:
         from transformers import PatchTSTForPrediction  # type: ignore
     except ImportError as exc:
         raise ImportError("Transformers with PatchTST support is not installed.") from exc
 
-    model = PatchTSTForPrediction.from_pretrained(args.patchtst_model_id).to(device)
+    model_ids = [args.patchtst_model_id] + parse_name_list(args.patchtst_fallback_model_ids)
+    errors = []
+    model = None
+    loaded_model_id = None
+    for model_id in model_ids:
+        try:
+            model = PatchTSTForPrediction.from_pretrained(
+                model_id,
+                local_files_only=args.hf_local_files_only,
+            ).to(device)
+            loaded_model_id = model_id
+            break
+        except Exception as exc:
+            errors.append(f"{model_id}: {exc}")
+            print(f"PatchTST checkpoint failed, trying next if available: {model_id}: {exc}", file=sys.stderr, flush=True)
+    if model is None:
+        raise RuntimeError("Could not load any PatchTST checkpoint:\n" + "\n".join(errors))
+    if loaded_model_id != args.patchtst_model_id:
+        print(f"Loaded fallback PatchTST checkpoint: {loaded_model_id}", flush=True)
     model.eval()
     model_context_len = int(getattr(model.config, "context_length", args.context_len))
     model_pred_len = int(getattr(model.config, "prediction_length", args.pred_len))
+    model_channels = int(getattr(model.config, "num_input_channels", 1))
 
     def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
         adapted = adapt_context_length(batch, model_context_len)
+        if model_channels == 1:
+            model_input = adapted[:, :, None]
+            original_count = adapted.shape[0]
+        else:
+            model_input, original_count = pack_univariate_series(adapted, model_channels)
         with torch.no_grad():
-            out = model(past_values=torch.as_tensor(adapted[:, :, None], dtype=torch.float32, device=device))
-        prediction = out.prediction_outputs.detach().cpu().float().numpy()[:, :, 0]
+            out = model(past_values=torch.as_tensor(model_input, dtype=torch.float32, device=device))
+        prediction = out.prediction_outputs.detach().cpu().float().numpy()
+        if model_channels == 1:
+            prediction = prediction[:, :, 0]
+        else:
+            prediction = unpack_univariate_series(prediction, original_count)
         if model_pred_len < pred_len:
             pad = np.repeat(prediction[:, -1:], pred_len - model_pred_len, axis=1)
             prediction = np.concatenate([prediction, pad], axis=1)
         return prediction[:, :pred_len]
 
     return predict
+
+
+def pack_univariate_series(batch: np.ndarray, model_channels: int) -> tuple[np.ndarray, int]:
+    original_count, context_len = batch.shape
+    pad_count = (-original_count) % model_channels
+    if pad_count:
+        pad = np.repeat(batch[-1:, :], pad_count, axis=0)
+        batch = np.concatenate([batch, pad], axis=0)
+    packed = batch.reshape(-1, model_channels, context_len).transpose(0, 2, 1)
+    return packed, original_count
+
+
+def unpack_univariate_series(prediction: np.ndarray, original_count: int) -> np.ndarray:
+    unpacked = prediction.transpose(0, 2, 1).reshape(-1, prediction.shape[1])
+    return unpacked[:original_count]
 
 
 def adapt_context_length(batch: np.ndarray, context_len: int) -> np.ndarray:
@@ -391,6 +634,16 @@ def adapt_context_length(batch: np.ndarray, context_len: int) -> np.ndarray:
         return batch[:, -context_len:]
     pad_len = context_len - batch.shape[1]
     pad = np.repeat(batch[:, :1], pad_len, axis=1)
+    return np.concatenate([pad, batch], axis=1)
+
+
+def adapt_multivariate_context_length(batch: np.ndarray, context_len: int) -> np.ndarray:
+    if batch.shape[1] == context_len:
+        return batch
+    if batch.shape[1] > context_len:
+        return batch[:, -context_len:, :]
+    pad_len = context_len - batch.shape[1]
+    pad = np.repeat(batch[:, :1, :], pad_len, axis=1)
     return np.concatenate([pad, batch], axis=1)
 
 
@@ -414,6 +667,38 @@ def run_batched_prediction(
             eta = (total_batches - batch_idx) / rate if rate > 0 else 0.0
             print(f"{label} [{batch_idx}/{total_batches}] {rate:.2f} batch/s eta={format_duration(eta)}", flush=True)
     return np.concatenate(outputs, axis=0).astype(np.float32)
+
+
+def run_batched_prediction_multivariate(
+    predictor: Callable[[np.ndarray, int], np.ndarray],
+    context: np.ndarray,
+    pred_len: int,
+    batch_size: int,
+    log_every_batches: int,
+    label: str,
+) -> np.ndarray:
+    outputs = []
+    total_batches = math.ceil(context.shape[0] / batch_size)
+    started = time.perf_counter()
+    for batch_idx, start in enumerate(range(0, context.shape[0], batch_size), start=1):
+        batch = context[start : start + batch_size]
+        outputs.append(predictor(batch, pred_len))
+        if log_every_batches > 0 and (batch_idx == 1 or batch_idx == total_batches or batch_idx % log_every_batches == 0):
+            elapsed = max(time.perf_counter() - started, 1e-9)
+            rate = batch_idx / elapsed
+            eta = (total_batches - batch_idx) / rate if rate > 0 else 0.0
+            print(f"{label} [{batch_idx}/{total_batches}] {rate:.2f} batch/s eta={format_duration(eta)}", flush=True)
+    return np.concatenate(outputs, axis=0).astype(np.float32)
+
+
+def format_checkpoint_load_error(model_family: str, model_id: str, local_files_only: bool, exc: Exception) -> str:
+    if local_files_only:
+        return (
+            f"{model_family} checkpoint {model_id!r} was not available in the local Hugging Face cache. "
+            "Either warm the cache first, or rerun with --no-hf-local-files-only where network access is available. "
+            f"Original error: {exc}"
+        )
+    return f"Failed to load {model_family} checkpoint {model_id!r}: {exc}"
 
 
 def reduce_forecast_array(arr: np.ndarray, pred_len: int) -> np.ndarray:

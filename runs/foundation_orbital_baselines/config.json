@@ -1,0 +1,50 @@
+{
+  "dataset_dir": "/home/wan/stellar_dynamics/dataset_v3",
+  "sampling_id": 2,
+  "representation": "orbital15",
+  "trajectory_keys": [
+    "positions_complete",
+    "velocities_complete"
+  ],
+  "orbital_features": [
+    "aratios",
+    "mratios",
+    "eccs",
+    "incs",
+    "APs",
+    "LANs"
+  ],
+  "context_len": 512,
+  "pred_len": 128,
+  "num_windows": 256,
+  "num_channels": 15,
+  "channel_names": [
+    "aratios_0",
+    "mratios_0",
+    "mratios_1",
+    "eccs_0",
+    "eccs_1",
+    "incs_0",
+    "incs_1",
+    "APs_sin_0",
+    "APs_sin_1",
+    "APs_cos_0",
+    "APs_cos_1",
+    "LANs_sin_0",
+    "LANs_sin_1",
+    "LANs_cos_0",
+    "LANs_cos_1"
+  ],
+  "device": "cuda",
+  "models": [
+    "naive",
+    "chronos",
+    "patchtst",
+    "panda"
+  ],
+  "hf_local_files_only": false,
+  "timesfm_model_id": "google/timesfm-2.5-200m-pytorch",
+  "chronos_model_id": "amazon/chronos-t5-small",
+  "panda_model_id": "GilpinLab/panda-72M",
+  "patchtst_model_id": "ibm/patchtst-etth1-forecasting"
+}
