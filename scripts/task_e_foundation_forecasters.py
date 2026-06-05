@@ -509,27 +509,7 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
 
 
 def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
-    vendor_root = ROOT / "experiments" / "panda_threebody" / "vendor" / "panda"
-    if str(vendor_root) not in sys.path:
-        sys.path.insert(0, str(vendor_root))
-
-    try:
-        from panda.patchtst.patchtst import PatchTSTForPrediction  # type: ignore
-    except ImportError as exc:
-        raise ImportError(
-            "Panda is not importable. Ensure experiments/panda_threebody/vendor/panda is present "
-            "and the required dependencies are installed."
-        ) from exc
-
-    try:
-        model = PatchTSTForPrediction.from_pretrained(
-            args.panda_model_id,
-            local_files_only=args.hf_local_files_only,
-        ).to(device)
-    except Exception as exc:
-        raise RuntimeError(format_checkpoint_load_error("Panda", args.panda_model_id, args.hf_local_files_only, exc)) from exc
-
-    model.eval()
+    model = load_panda_model(args, device)
     model_context_len = int(getattr(model.config, "context_length", args.context_len))
 
     def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
@@ -558,6 +538,31 @@ def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np
         return np.concatenate(predictions, axis=1).astype(np.float32)
 
     return predict
+
+
+def load_panda_model(args: argparse.Namespace, device: str) -> torch.nn.Module:
+    vendor_root = ROOT / "experiments" / "panda_threebody" / "vendor" / "panda"
+    if str(vendor_root) not in sys.path:
+        sys.path.insert(0, str(vendor_root))
+
+    try:
+        from panda.patchtst.patchtst import PatchTSTForPrediction  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Panda is not importable. Ensure experiments/panda_threebody/vendor/panda is present "
+            "and the required dependencies are installed."
+        ) from exc
+
+    try:
+        model = PatchTSTForPrediction.from_pretrained(
+            args.panda_model_id,
+            local_files_only=args.hf_local_files_only,
+        ).to(device)
+    except Exception as exc:
+        raise RuntimeError(format_checkpoint_load_error("Panda", args.panda_model_id, args.hf_local_files_only, exc)) from exc
+
+    model.eval()
+    return model
 
 
 def build_patchtst_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:

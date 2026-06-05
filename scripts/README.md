@@ -150,3 +150,27 @@ conda run -n stellar python scripts/task_e_foundation_forecasters.py \
 The default `GilpinLab/panda-72M` checkpoint expects `orbital15` style input
 with 15 channels. The script will raise a clear error if you try to use it with
 the 17-channel `orbital` representation or the 18-channel raw trajectory stack.
+
+Panda temporal-window adapter fine-tuning. This freezes Panda by default and
+trains two temporal MLPs around it:
+`input_len -> panda_context_len` before Panda and `panda_pred_len -> output_len`
+after Panda. The default setup adapts `256 -> 512` context steps and
+`128 -> 64` forecast steps.
+
+```bash
+conda run -n stellar python scripts/train_panda_temporal_adapter.py \
+  --representation orbital15 \
+  --input-len 256 \
+  --output-len 64 \
+  --num-windows 4096 \
+  --epochs 10 \
+  --batch-size 32 \
+  --device cuda \
+  --amp
+```
+
+Use `--no-freeze-panda` only when you intentionally want to fine-tune the Panda
+backbone as well as the temporal adapters.
+The adapter trainer drops windows with non-finite values or any absolute channel
+value above `--max-abs-value` (`1e4` by default), because extreme orbital
+element outliers can make the Panda backbone return NaNs.
