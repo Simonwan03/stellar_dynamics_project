@@ -1,612 +1,380 @@
 # Stellar Dynamics Research Repo
 
-This repository studies long-horizon prediction on hierarchical three-body stability datasets. The codebase started as a set of exploratory notebooks and now includes reusable training and evaluation scripts for five tasks:
+这个仓库围绕 hierarchical three-body stability 数据集做 5 类任务：
 
-- `Task A`: group-level outcome prediction from initial conditions
-- `Task B`: early-prefix instability classification
-- `Task C`: multi-horizon survival prediction for full perturbation sets
-- `Task D`: Lyapunov-like semimajor-axis divergence time regression
-- `Task E`: direct forecasting baselines, including Transformers and pretrained time-series models
+- `Task A`: 只用初始条件做 system-level 稳定性预测
+- `Task B`: 用早期轨道前缀做 instability 分类或 group stable fraction 预测
+- `Task C`: 对完整 32-variation 系统做 multi-horizon survival 预测
+- `Task D`: 用半长轴发散时间定义 Lyapunov-like 回归目标
+- `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
 
-The current script entrypoints live under [scripts](</home/wan/stellar_dynamics/scripts>), shared model/data utilities live under [src](</home/wan/stellar_dynamics/src>), and the Panda subproject is isolated under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>).
+当前主线代码在 [scripts](</home/wan/stellar_dynamics/scripts>) 和 [src](</home/wan/stellar_dynamics/src>)；Panda 相关实验单独放在 [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>)。
 
-**Repository Layout**
+## Repository Layout
 
-- [dataset](</home/wan/stellar_dynamics/dataset>): original `sampling_0` data used by the early notebooks
-- [dataset_v2](</home/wan/stellar_dynamics/dataset_v2>): longer-horizon 8-variation dataset used heavily by Task C and Panda
-- [dataset_v3](</home/wan/stellar_dynamics/dataset_v3>): full 32-variation dataset used by Tasks A, B, D, and E scripts
-- [scripts](</home/wan/stellar_dynamics/scripts>): command-line task runners
-- [src](</home/wan/stellar_dynamics/src>): reusable data/model utilities
-- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): vendored Panda code plus project-specific adapters
-- [result.md](/home/wan/stellar_dynamics/result.md): working experiment notes and intermediate results
-- [results/readme.md](/home/wan/stellar_dynamics/results/readme.md): earlier project summary
+- [dataset_v3](</home/wan/stellar_dynamics/dataset_v3>): 当前主数据集，`Task A-E` 都围绕它展开
+- [scripts](</home/wan/stellar_dynamics/scripts>): 任务级入口脚本
+- [src](</home/wan/stellar_dynamics/src>): 通用数据处理、模型、训练工具
+- [results](</home/wan/stellar_dynamics/results>) / [runs](</home/wan/stellar_dynamics/runs>) / [outputs](</home/wan/stellar_dynamics/outputs>): 各任务产物
+- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): Panda zero-shot / adapter / classifier 子项目
 
-## Datasets
+## `dataset_v3`
 
-Three local dataset versions appear in this repo. They share the same physical problem family but differ in grouping structure, available horizon length, and script usage.
+### Core Files
 
-### `dataset/` (`sampling_0`)
+| File | Role |
+| --- | --- |
+| `dataset_v3/ICs_sampling_2.hdf5` | 16 万条 trajectory 的静态初始条件 |
+| `dataset_v3/completed_systems_sampling_2.txt` | 每条 trajectory 的完成状态、`time_unbound`、诊断标记 |
+| `dataset_v3/results_batch_00_sampling_2.hdf5` ... `results_batch_19_sampling_2.hdf5` | 20 个时间序列结果分片 |
 
-This is the original 8-variation setup used by the notebook-era Tasks A and B.
+### Scale
 
-- Initial conditions: `dataset/ICs_sampling_0.hdf5`
-- Completion table: `dataset/completed_systems_sampling_0.txt`
-- Result shards: `dataset/results_batch_00_sampling_0.hdf5` through `dataset/results_batch_04_sampling_0.hdf5`
-- Total trajectories: `40000`
-- Perturbation sets: `5000`
-- Variations per set: `8`
-- Time length per trajectory: `1001` sampled steps
-- Typical instability horizon label maximum: `time_unbound = 5000`
+- `160000` trajectories
+- `5000` base systems
+- 每个 system 有 `32` 个 perturbation variations
+- 每条 trajectory 有 `2001` 个时间步
+- 每个 result shard 有 `8000` trajectories
+- completion table 中有 `159953` 条有效 trajectory
+- 有 `4998` 个 system 保留了完整且有效的 `32` 条 variations
 
-This dataset is still relevant for:
+### Indexing Convention
 
-- Task A notebook logic
-- Task B prefix classification
-- Panda-backed final-unbound classification in `experiments/panda_threebody`
-
-### `dataset_v2/` (`sampling_1`)
-
-This is an 8-variation dataset with a longer trajectory horizon and is the source of the clean `orbital15` representation used in Task C and Panda forecasting.
-
-- Initial conditions: `dataset_v2/ICs_sampling_1.hdf5`
-- Completion table: `dataset_v2/completed_systems_sampling_1.txt`
-- Local result shards currently present: `dataset_v2/results_batch_00_sampling_1.hdf5` through `results_batch_04_sampling_1.hdf5`
-- Local trajectories represented by available shards: `40000`
-- Complete perturbation sets from local shards: `5000`
-- Variations per set: `8`
-- Time length per trajectory: `2001` sampled steps
-- Typical instability horizon label maximum: `time_unbound = 10000`
-
-This dataset is mainly used for:
-
-- Task C survival prediction
-- Panda orbital15 export, zero-shot evaluation, and finetuning
-
-### `dataset_v3/` (`sampling_2`)
-
-This is the current full 32-variation dataset used by the reusable scripts for Tasks A, B, D, and E.
-
-- Initial conditions: `dataset_v3/ICs_sampling_2.hdf5`
-- Completion table: `dataset_v3/completed_systems_sampling_2.txt`
-- Result shards: `dataset_v3/results_batch_00_sampling_2.hdf5` through `results_batch_19_sampling_2.hdf5`
-- Total trajectories: `160000`
-- Unique systems: `5000`
-- Variations per system: `32`
-- Time length per trajectory: `2001` sampled steps
-- Local result layout: `20` shards, `8000` runs per shard, `250` unique systems per shard
-
-Useful indexing conventions:
-
-- `unique_system_id = run_id // 32`
+- `case_id = run_id // 32`
 - `variation_id = run_id % 32`
 - `batch_id = run_id // 8000`
 - `row_in_batch = run_id % 8000`
 
-The 32 variations form two 16-variation blocks. The second block repeats the same phase grid with a perturbed inner semimajor axis.
+`32` 条 variations 可以看成两组 `16`。`Task D` 默认用 `(i, i+16)` 这种配对方式，比较相同 phase grid 下、不同内轨半长轴扰动的响应差异。
 
-### Common Feature Families
+### Static Initial Conditions
 
-Across the datasets you will encounter these recurring arrays:
+`ICs_sampling_2.hdf5` 的常用字段：
 
-- Initial-condition features:
-  - `aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
-  - plus raw Cartesian state arrays such as `positions`, `velocities`
-- Time-series features:
-  - `*_complete` versions of the same orbital features
-  - `positions_complete`, `velocities_complete`
-  - optional derived quantities such as `energy_complete`, `angMomentum_complete`, `periods_complete`, `tAnos_complete`
+| Key | Shape | Meaning |
+| --- | --- | --- |
+| `aratios` | `(160000, 1)` | 半长轴比 |
+| `mratios` | `(160000, 2)` | 质量比 |
+| `eccs` | `(160000, 2)` | 偏心率 |
+| `incs` | `(160000, 2)` | 倾角 |
+| `APs` | `(160000, 2)` | 近地点角 |
+| `LANs` | `(160000, 2)` | 升交点经度 |
+| `positions` | `(160000, 3, 3)` | 3 个天体的初始位置 |
+| `velocities` | `(160000, 3, 3)` | 3 个天体的初始速度 |
 
-Two canonical feature stacks show up repeatedly:
+此外还有 `masses`, `smaxes`, `periods`, `tAnos`, `rel_positions`, `rel_velocities` 等字段，但主线任务最常用的是上表这些 orbital / state features。
 
-- `orbital15`
-  - `aratios_complete`: `1`
-  - `mratios_complete`: `2`
-  - `eccs_complete`: `2`
-  - `incs_complete`: `2`
-  - `sin/cos(APs_complete)`: `4`
-  - `sin/cos(LANs_complete)`: `4`
-  - total channels: `15`
-- `trajectory/raw_state18`
-  - flattened `positions_complete` (`3 bodies x 3 coords = 9`)
-  - flattened `velocities_complete` (`3 bodies x 3 coords = 9`)
-  - total channels: `18`
+### Time-Series Result Shards
+
+每个 `results_batch_XX_sampling_2.hdf5` 的常用字段：
+
+| Key | Shape per shard | Meaning |
+| --- | --- | --- |
+| `times_complete` | `(8000, 2001)` | 时间网格 |
+| `aratios_complete` | `(8000, 2001, 1)` | 半长轴比随时间变化 |
+| `mratios_complete` | `(8000, 2001, 2)` | 质量比随时间变化 |
+| `eccs_complete` | `(8000, 2001, 2)` | 偏心率轨道序列 |
+| `incs_complete` | `(8000, 2001, 2)` | 倾角序列 |
+| `APs_complete` | `(8000, 2001, 2)` | 角变量序列 |
+| `LANs_complete` | `(8000, 2001, 2)` | 角变量序列 |
+| `smaxes_complete` | `(8000, 2001, 2)` | 半长轴序列 |
+| `positions_complete` | `(8000, 2001, 3, 3)` | 位置序列 |
+| `velocities_complete` | `(8000, 2001, 3, 3)` | 速度序列 |
+| `energy_complete` | `(8000, 2001, 1)` | 能量 |
+| `angMomentum_complete` | `(8000, 2001, 3)` | 角动量 |
 
 ### Data Quality Notes
 
-- Rows marked invalid in the completion tables should be dropped.
-- Some `*_complete` channels can contain NaNs even when the completion table is valid.
-- `periods_complete` and `tAnos_complete` are especially NaN-heavy in earlier datasets.
-- Many scripts therefore use filtered orbital subsets (`orbital15`) or explicit finite-value screening before training.
+- 通常先用 `completed_systems_sampling_2.txt` 过滤 `time_unbound < 0` 或 `diagnosis != 0` 的样本。
+- 个别 `*_complete` 通道即使在有效样本里也会有 NaN / inf。
+- 所以主线脚本一般会做 finite-value screening，或者退回到更稳健的特征子集。
 
-## Shared Task Conventions
+## Common Input Representations
 
-Most task scripts follow the same structural ideas:
+不同任务虽然目标不同，但输入基本落在下面 4 类表示里。
 
-- Split at the case/system level, not per trajectory, when perturbation grouping matters.
-- Keep all perturbations from the same base system in the same train/val/test split whenever possible.
-- Use early prefixes as inputs and late-time outcomes or future rollouts as targets.
-- Record results under `runs/`, `outputs/`, or `results/` rather than mutating the source notebooks.
+### 1. IC token representation
 
-For notebook-era work, the perturbation-set size was often `8`. For the newer `dataset_v3` scripts, the natural grouping size is `32`.
+给 `Task A` 和 `Task B` 的 `ic_prefix` / grouped IC 分支用，但两者现在不再完全相同。
 
-## Task A
+- 原始字段：`aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
+- `Task A` 当前默认只取每组 `32` 条 variations 里的第一个初始条件
+- `Task A` 默认对 `APs` / `LANs` 做 `sin/cos`，保留原始 `incs`
+- 因而 `Task A` 当前默认输入与 `orbital15` 的静态初值版本一致，总计 `15` 维
+- `Task B` 的 grouped static IC 分支仍然保留整组 `32` 条 variations 的结构
 
-**Goal**
+### 2. Prefix trajectory representation
 
-Predict a system-level outcome summary from initial conditions alone. Historically this was framed as perturbation-set stability probability regression on the 8-variation dataset; the reusable script version is group-level stability classification on the 32-variation dataset.
+给 `Task B` 和 `Task C` 用。
 
-### Inputs and Targets
+- 从 result shards 中截取前 `prefix_len` 个时间步
+- 默认基础通道来自 orbital 序列：
+  - `aratios_complete`
+  - `mratios_complete`
+  - `masses_complete`
+  - `eccs_complete`
+  - `smaxes_complete`
+  - `energy_complete`
+  - `angMomentum_complete`
+  - `APs_complete`
+  - `LANs_complete`
+  - `incs_complete`
+- 角变量做 `sin/cos`
+- 可追加：
+  - pairwise geometry features
+  - 归一化时间通道
 
-Notebook-era Task A:
+### 3. `orbital15`
 
-- Input: grouped initial-condition features from `dataset/ICs_sampling_0.hdf5`
-- Group size: `8`
-- Features: orbital descriptors with sine/cosine expansion for angular variables
-- Target: empirical stability probability or grouped stable/unstable outcome summary
+这是 `Task E` 里 Panda 相关分支最重要的表示。
 
-Scripted Task A (`scripts/task_a_stability_classifier.py`):
+- `aratios`: `1`
+- `mratios`: `2`
+- `eccs`: `2`
+- `incs`: `2`
+- `sin/cos(APs)`: `4`
+- `sin/cos(LANs)`: `4`
+- 总计 `15` channels
 
-- Dataset: `dataset_v3`
-- Group size: `32`
-- Input: grouped initial-condition tokens derived from `ICs_sampling_2.hdf5`
-- Target: stable-at-horizon classification at the group level
+`orbital15` 和通用 orbital stack 的区别在于：它保留 `incs` 原值，不对 `incs` 做 `sin/cos` 展开，所以是 `15` 维而不是 `17` 维。
 
-### Pipeline
+### 4. `trajectory/raw_state18`
 
-1. Load initial-condition arrays.
-2. Regroup trajectories into full perturbation sets.
-3. Build feature tokens from orbital parameters.
-4. Train group-level classifiers or regressors.
-5. Save grouped metrics and artifacts.
+这是直接状态预测的默认表示。
 
-### Current Script Entry
+- `positions_complete`: `3 bodies x 3 coords = 9`
+- `velocities_complete`: `3 bodies x 3 coords = 9`
+- 总计 `18` channels
 
-```bash
-conda run -n stellar python scripts/task_a_stability_classifier.py \
-  --output-dir results/task_a \
-  --models mlp,xgboost \
-  --epochs 20
-```
+## Tasks
 
-If regrouped tokens need to be rebuilt:
+### Task A: Group Stability from Initial Conditions
 
-```bash
-conda run -n stellar python scripts/task_a_stability_classifier.py \
-  --output-dir results/task_a \
-  --models mlp,xgboost \
-  --epochs 20 \
-  --regroup \
-  --overwrite-tokenized
-```
+入口脚本：[scripts/task_a_stability_classifier.py](/home/wan/stellar_dynamics/scripts/task_a_stability_classifier.py)
 
-### Existing Findings
+**任务定义**
 
-From notebook and working-note results:
+- 输入：一个 system 的 `32` 条 variation 的初始条件
+- 默认目标：`stable_fraction`
+  - 即这 `32` 条里有多少比例在 `time_horizon` 内保持稳定
 
-- MLP and XGBoost both extract signal from static orbital features.
-- Performance is meaningful but clearly below prefix-based temporal models.
-- Static features alone are insufficient for the strongest long-horizon predictions.
+**输入形式**
 
-## Task B
+- 数据源：`ICs_sampling_2.hdf5` + `completed_systems_sampling_2.txt`
+- 先把初始条件重排成 `group_size=32`
+- 但建模时默认只取每组 `32` 条 variations 里的第一个初始条件
+- 特征定义与 `orbital15` 对齐：
+  - `aratios`: `1`
+  - `mratios`: `2`
+  - `eccs`: `2`
+  - `incs`: `2`
+  - `sin/cos(APs)`: `4`
+  - `sin/cos(LANs)`: `4`
+  - 总计 `15` 维
+- 这样做的原因是：同组 `32` 条 variations 的初始条件几乎完全相同，保留整组会引入大量重复输入
 
-**Goal**
+**模型族**
 
-Predict whether a trajectory will later become unstable using only an early prefix of the time series.
+- `mlp`
+- `xgboost`
 
-### Inputs and Targets
+这项任务强调的是：不看时间演化，只凭初值能预测多少 system-level 稳定性信息。
 
-- Main trajectory source: `dataset/` in the notebooks, `dataset_v3` in the reusable script
-- Typical prefix lengths explored: `100`, `200`, `500`
-- Typical target:
-  - hard binary label: stable vs unstable by horizon
-  - sometimes softened as a distribution over unbinding time bins
+### Task B: Prefix-Based Instability Prediction
 
-The common input feature families are:
+入口脚本：[scripts/task_b_prefix_classifiers.py](/home/wan/stellar_dynamics/scripts/task_b_prefix_classifiers.py)
 
-- orbital features with angle encodings
-- pairwise geometric features
-- optional raw prefix features
+**任务定义**
 
-### Pipeline
+Task B 有两个模式：
 
-1. Load trajectories from HDF5 shards.
-2. Truncate to an early prefix.
-3. Filter invalid or non-finite samples.
-4. Build binary labels from `time_unbound` or related horizon logic.
-5. Train prefix-based classifiers such as:
-   - SVM
-   - CNN
-   - TCN
-   - Transformer attention
-   - IC + prefix hybrids
+- `trajectory_binary`
+  - 输入单条 trajectory 的早期 prefix
+  - 目标是预测它在 horizon 内是否仍然稳定
+- `group_fraction`
+  - 输入一个 system 的 `32` 条 trajectory prefixes
+  - 目标是预测整个 system 的 stable fraction
 
-### Current Script Entry
+**输入形式**
 
-```bash
-conda run -n stellar python scripts/task_b_prefix_classifiers.py \
-  --output-dir results/task_b \
-  --prefix-len 100 \
-  --models svm,cnn,tcn,attention,ic_prefix \
-  --epochs 20
-```
+- 数据源：`results_batch_*_sampling_2.hdf5`
+- 默认只截取前 `prefix_len=100` 个时间步
+- 常见输入张量：
+  - trajectory 模式：`[N, T, C]`
+  - group 模式：
+    - `concat`: `[G, T, 32*C]`
+    - `set_attention`: `[G, T, 32, C]`
+- 可选加入静态初值分支，形成 `IC + prefix` 融合模型
 
-Quick smoke test:
+**模型族**
 
-```bash
-conda run -n stellar python scripts/task_b_prefix_classifiers.py \
-  --output-dir /tmp/task_b_smoke \
-  --max-shards 1 \
-  --rows-per-shard 512 \
-  --prefix-len 32 \
-  --time-stride 4 \
-  --models svm,cnn \
-  --epochs 1
-```
+- `svm`: prefix flatten 后的线性 baseline
+- `cnn`: 1D temporal CNN
+- `tcn`: dilated temporal convolution
+- `attention`: Transformer encoder over time
+- `ic_prefix`: prefix CNN + static IC MLP 融合
+- `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
 
-### Existing Findings
+这项任务是仓库里最直接的 early-warning 分类线。
 
-Recorded working results show:
+### Task C: Multi-Horizon Survival for 32-Variation Systems
 
-- TCN and attention models reach AUC around `0.97+`
-- Longer prefixes help materially
-- Prefix-based temporal models are much stronger than static IC-only baselines
+入口脚本：[scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
 
-The repo also includes a Panda-backed classification experiment under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>) using:
+**任务定义**
 
-- representation: `orbital15`
-- prefix length: `512`
-- backbone: `GilpinLab/panda-72M`
+- 输入：一个完整 system 的 `32` 条 trajectory prefixes
+- 输出：多个 future horizons 上的 survival curve
+- 标签是 `y_cases[variation, horizon]`
+  - 某条 variation 在给定未来时刻是否仍然稳定
+- 评估时还会对 `32` 条 variations 求均值，得到 system-level survival fraction 曲线
 
-That subproject is isolated from the main task scripts.
+**输入形式**
 
-## Task C
+- 数据源：`results_batch_*_sampling_2.hdf5`
+- 默认先做 prefix truncation，再按 `case_id` 组回 `32` 条 variations
+- 输入张量是 `[num_cases, 32, time, channels]`
+- 默认 future horizons 是：
+  - `500,1000,2000,4000,6000,8000,10000`
 
-**Goal**
+**模型族**
 
-Predict multi-horizon survival for all perturbations in a full system, then aggregate to system-level survival statistics.
+- `baseline`: 直接用训练集平均 survival curve
+- `direct`: 先把 32 条 variation 做均值，再直接回归整条 survival curve
+- `traj`: 每条 variation 先做 temporal encoding，再与 group context 融合
+- `dual`: 同时建模时间维和 variation 集合结构的 dual-attention 模型
 
-### Inputs and Targets
+这是最强调 perturbation-set 结构的任务。
 
-- Dataset: `dataset_v2`
-- Local complete perturbation sets: `5000`
-- Input tensor used in the main setup: `(5000, 8, 200, 15)`
-- Representation: `orbital15`
-- Target:
-  - trajectory-level survival at multiple future horizons
-  - ensemble-level survival fraction and count
+### Task D: Lyapunov-Like Divergence Time Regression
 
-Typical future horizons in the current cleaned setup:
+入口脚本：[scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
 
-- `1100`, `1500`, `2000`, `3000`, `4000`, `5000`, `7000`, `8500`, `10000`
+底层实现：[src/task_d_lyapunov.py](/home/wan/stellar_dynamics/src/task_d_lyapunov.py)
 
-### Pipeline
+**任务定义**
 
-1. Load locally available `dataset_v2` shards.
-2. Build the clean `orbital15` feature tensor.
-3. Keep only complete 8-way perturbation sets.
-4. Split by case ID.
-5. Train models that predict monotone survival curves.
-6. Aggregate per-trajectory survival into ensemble statistics.
+`Task D` 不直接预测 stable / unstable，而是定义一个 system-level 发散时间：
 
-### Model Families
+- 对有效 pair 计算
+  - `delta_a(t) = |a_i(t) - a_j(t)|`
+  - `R_a(t) = delta_a(t) / delta_a(0)`
+- 当 `R_a(t) > threshold` 时认为 pair 已发散
+- 把多个 pair 的发散时间聚合成 system-level `tau_system`
+- 实际训练目标是 `log_tau_system = log1p(tau_system)`
 
-- Mean trajectory baseline
-- Trajectory-context encoder
-- Dual-attention temporal + set model
-- Earlier notebook variants including flat case-level GRU and hierarchical set-seq
+**输入形式**
 
-### Current Script Entry
+- 静态 summary features
+- 可选 prefix sequence summaries
+- 可选位置/速度派生特征
+- 默认配对方式是 `DEFAULT_VALID_PAIRS = ((0,16), (1,17), ... , (15,31))`
 
-```bash
-conda run -n stellar python scripts/task_c_survival.py \
-  --output-dir results/task_c \
-  --prefix-len 200 \
-  --time-stride 2 \
-  --models baseline,direct,traj,dual \
-  --epochs 40
-```
+**模型族**
 
-### Existing Findings
+- `random forest`
+- `mlp`
+- `cnn`
 
-The strongest current Task C models:
+这项任务更接近“从早期结构推断发散时间尺度”的物理 proxy 回归。
 
-- preserve perturbation-set structure
-- enforce monotone survival over future horizons
-- significantly outperform mean-curve baselines
+### Task E: Forecasting Baselines
 
-This is the most physically structured prediction task in the repo.
+相关入口：
 
-## Task D
+- [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py)
+- [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py)
+- [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
 
-**Goal**
+`Task E` 分成 3 条线。
 
-Estimate a Lyapunov-like system divergence time from early information, using semimajor-axis ratio divergence as the instability proxy.
+#### E.1 Orbital Transformer
 
-### Definition
+- 目标：从早期 orbital window 预测未来 orbital window
+- 实际训练入口：[train_transformer_orbital.py](/home/wan/stellar_dynamics/train_transformer_orbital.py)
+- 默认特征是通用 orbital stack：
+  - `aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
+  - 其中 `aratios`, `mratios` 做 `log1p`
+  - `incs`, `APs`, `LANs` 做 `sin/cos`
+  - 总计 `17` channels
+- 默认 full run：
+  - `context_len=256`
+  - `pred_len=64`
+  - `stride=32`
+  - `d_model=256`
+  - `4` 层 Transformer
 
-The current Task D pipeline defines pairwise divergence times from semimajor-axis ratio separation:
+#### E.2 Trajectory Transformer
 
-- `delta_a(t) = |a_i(t) - a_j(t)|`
-- `R_a(t) = delta_a(t) / delta_a(0)`
-- declare divergence when `R_a(t) > threshold`
+- 目标：从早期 `positions_complete + velocities_complete` 预测未来状态窗口
+- 实际训练入口：[train_transformer_trajectory.py](/home/wan/stellar_dynamics/train_transformer_trajectory.py)
+- 默认表示是 `trajectory/raw_state18`
+- 默认 full run：
+  - `context_len=64`
+  - `pred_len=8`
+  - `stride=128`
+  - `d_model=128`
+  - `2` 层 Transformer
 
-Then system-level targets are aggregated from valid pairwise times, typically with:
+这个分支刻意做得更轻，方便快速扫实验。
 
-- threshold: `1e3`
-- aggregation: `median`
-- target transform: `log_tau_system = log1p(tau_system)`
+#### E.3 Foundation Forecasting
 
-### Inputs and Targets
-
-- Dataset: `dataset_v3`
-- Natural group size: `32`
-- Features:
-  - static orbital summaries
-  - optional prefix-derived sequence summaries
-  - optional raw position/velocity features
-
-### Pipeline
-
-1. Load and regroup 32-variation systems.
-2. Compute valid pairwise semimajor-axis divergence times.
-3. Aggregate pairwise times into one system-level target.
-4. Build static or prefix-augmented system features.
-5. Train regressors:
-   - Random forest
-   - MLP
-   - CNN
-
-### Current Script Entry
-
-```bash
-conda run -n stellar python scripts/task_d_lyapunov_regression.py \
-  --output-dir outputs/task_d_lyapunov \
-  --mlp-epochs 80 \
-  --cnn-epochs 80
-```
-
-Useful optional flags include:
-
-- `--include-prefix-features`
-- `--prefix-len 200`
-- `--include-positions-velocities`
-- `--sequence-aggregation mean_std|flatten`
-
-### Existing Findings
-
-Current working notes show:
-
-- Random forest is a strong baseline
-- CNN can achieve the best Spearman rank correlation among the tested neural models
-- Predicting `log1p(tau_system)` is more stable than direct raw-time regression
-
-## Task E
-
-**Goal**
-
-Forecast future orbital or Cartesian trajectory segments directly from an early prefix. This task contains both learned Transformers and pretrained foundation-model baselines.
-
-### Subtasks
-
-Task E currently has three main branches:
-
-1. Transformer orbital forecasting
-2. Transformer direct trajectory forecasting
-3. Pretrained foundation-model forecasting
-
-### Task E.1: Transformer Orbital Forecasting
-
-- Script: [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py)
-- Dataset: `dataset_v3`
-- Input features: orbital channels from result shards
-- Debug setup: smaller synthetic subset and shorter run
-- Full setup defaults:
-  - `context_len = 256`
-  - `pred_len = 64`
-  - `stride = 32`
-
-Command:
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_orbital.py \
-  --mode debug \
-  --conda-env stellar \
-  --debug-epochs 3
-```
-
-Full run:
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_orbital.py \
-  --mode full \
-  --conda-env stellar \
-  --full-epochs 50 \
-  --amp
-```
-
-### Task E.2: Transformer Direct Trajectory Forecasting
-
-- Script: [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py)
-- Default channels: `positions_complete,velocities_complete`
-- Full-run defaults:
-  - `context_len = 64`
-  - `pred_len = 8`
-  - `stride = 128`
-  - compact 2-layer Transformer for faster sweeps
-
-Command:
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_trajectory.py \
-  --mode debug \
-  --conda-env stellar \
-  --debug-epochs 3
-```
-
-Full run:
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_trajectory.py \
-  --mode full \
-  --conda-env stellar \
-  --full-epochs 10 \
-  --amp
-```
-
-### Task E.3: Pretrained Foundation Forecasting
-
-- Script: [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
-- Supported model keys:
+- 目标：在同样的 forecasting 任务上评估 pretrained baselines
+- 支持表示：
+  - `trajectory`
+  - `orbital`
+  - `orbital15`
+- 支持模型：
   - `naive`
   - `timesfm`
   - `chronos`
   - `patchtst`
   - `panda`
-- Supported representations:
-  - `trajectory`
-  - `orbital`
-  - `orbital15`
 
-#### Representation Behavior
-
-- `trajectory`
-  - uses flattened `positions_complete + velocities_complete`
-  - `18` channels
-  - univariate models are evaluated channel-by-channel
-- `orbital`
-  - uses a 17-channel orbital stack with log transforms for ratios and `sin/cos` expansion for angles
-- `orbital15`
-  - matches the Panda-oriented orbital representation
-  - required for the default `GilpinLab/panda-72M` checkpoint path to make semantic sense
-
-#### Current Default Window
-
-The current default forecasting window is:
-
-- `context_len = 512`
-- `pred_len = 128`
-
-#### Univariate vs Multivariate Baselines
+**模型差异**
 
 - `timesfm`, `chronos`, `patchtst`
-  - treated as univariate baselines in this script
-  - one multivariate sample with `C` channels becomes `C` separate series
+  - 在当前脚本里按 univariate baseline 处理
+  - 一个 `C` 通道窗口会拆成 `C` 条独立序列
 - `panda`
-  - consumes the full multivariate window directly
+  - 直接消费 multivariate window
+  - 默认 checkpoint `GilpinLab/panda-72M` 期望 `orbital15`
 
-This is why `trajectory` mode with `256` windows becomes:
+## Script Entry Points
 
-- `256 x 18 = 4608` univariate series for `timesfm`, `chronos`, and `patchtst`
-- but still only `256` multivariate windows for `panda`
+- `Task A`: [scripts/task_a_stability_classifier.py](/home/wan/stellar_dynamics/scripts/task_a_stability_classifier.py)
+- `Task B`: [scripts/task_b_prefix_classifiers.py](/home/wan/stellar_dynamics/scripts/task_b_prefix_classifiers.py)
+- `Task C`: [scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
+- `Task D`: [scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
+- `Task E`: [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py), [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py), [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
 
-#### Default Commands
+## Environment
 
-Trajectory foundation baselines:
+大多数脚本默认在 `stellar` conda 环境下运行。基础依赖可以从 [environment.yml](/home/wan/stellar_dynamics/environment.yml) 和 [requirement.txt](/home/wan/stellar_dynamics/requirement.txt) 查看；foundation-model 额外依赖见 [requirements-foundation.txt](/home/wan/stellar_dynamics/requirements-foundation.txt)。
 
-```bash
-conda run -n stellar python scripts/task_e_foundation_forecasters.py \
-  --models naive,timesfm,chronos,patchtst \
-  --representation trajectory \
-  --output-dir runs/foundation_trajectory_baselines \
-  --num-windows 256 \
-  --context-len 512 \
-  --pred-len 128 \
-  --batch-size 128 \
-  --device cuda
-```
+## Model Settings
 
-Panda-compatible orbital baselines:
+### Task A
+- **XGBoost**
+- **MLP-flatten-base**: `544 → 256 → 128 → 64 → K` — params ~180K
 
-```bash
-conda run -n stellar python scripts/task_e_foundation_forecasters.py \
-  --models naive,chronos,patchtst,panda \
-  --representation orbital15 \
-  --output-dir runs/foundation_orbital_baselines \
-  --num-windows 256 \
-  --context-len 512 \
-  --pred-len 128 \
-  --batch-size 128 \
-  --device cuda \
-  --no-hf-local-files-only
-```
+### Task B
+- **CNN-Base**: `64-128-128` — params ~100K
+- **TCN-Base**: `64-64-128-128` — params ~300K
+- **Transformer-Base**: `d=128, layers=4, heads=4` — params ~0.8M–1M
 
-Important operational notes:
+### Task C
+- **Shared CNN-DeepSets-Base** — params ~300K
+- **Dual Attention**: `d=128, time_layers=2, set_layers=2` — params ~1M–1.5M
 
-- `timesfm`, `chronos`, and `panda` are optional dependencies.
-- The script records per-model failures and continues unless `--fail-fast` is set.
-- Hugging Face checkpoints default to `local_files_only=True`; use `--no-hf-local-files-only` to allow download.
-- `timesfm` is often the slowest model because it combines the largest parameter count with a list-based forecasting API and many univariate series.
-- `panda` uses the vendored Panda implementation from `experiments/panda_threebody/vendor/panda`, not a separate custom reimplementation.
+### Task D
+- **XGBoost**
+- **MLP-Base**: `summary → 256 → 128 → 64 → 1` — params ~100K
+- **CNN-Base prefix** — params ~100K–150K
 
-## Panda Subproject
-
-The Panda integration under [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>) is intentionally isolated from the rest of the repo.
-
-It contains:
-
-- a vendored Panda source snapshot
-- adapters that export three-body trajectories into Panda Arrow format
-- zero-shot and finetune scripts for `orbital15`
-- a Panda-backed classifier for final-unbound prediction
-
-The vendored Panda code itself is not where the main task logic was written. The project-specific glue is in:
-
-- [experiments/panda_threebody/scripts](</home/wan/stellar_dynamics/experiments/panda_threebody/scripts>)
-- [experiments/panda_threebody/adapters](</home/wan/stellar_dynamics/experiments/panda_threebody/adapters>)
-- [experiments/panda_threebody/configs](</home/wan/stellar_dynamics/experiments/panda_threebody/configs>)
-
-For Panda-specific usage details, read [experiments/panda_threebody/README.md](/home/wan/stellar_dynamics/experiments/panda_threebody/README.md).
-
-## Environment and Dependencies
-
-Most examples in this repo assume the `stellar` conda environment.
-
-Common dependencies:
-
-- `h5py`
-- `numpy`
-- `pandas`
-- `matplotlib`
-- `scikit-learn`
-- `torch`
-- `transformers`
-
-Optional Task E foundation dependencies:
-
-- `timesfm`
-- `chronos`
-- Panda vendor dependencies under `experiments/panda_threebody`
-
-## Outputs and Artifacts
-
-You will typically find outputs under:
-
-- `results/`: earlier notebook-linked summaries
-- `runs/`: Task E and fast experiment artifacts
-- `outputs/`: Task D and Panda subproject artifacts
-
-Typical saved files include:
-
-- `config.json`
-- `metrics.json`
-- `summary_metrics.csv`
-- horizon-wise metric CSVs
-- example forecast CSVs
-- model checkpoints
-- plots such as loss curves and example predictions
-
-## Recommended Entry Points
-
-If you want the fastest orientation path:
-
-1. Read [scripts/README.md](/home/wan/stellar_dynamics/scripts/README.md) for executable commands.
-2. Read [experiments/panda_threebody/README.md](/home/wan/stellar_dynamics/experiments/panda_threebody/README.md) for the Panda branch.
-3. Check [result.md](/home/wan/stellar_dynamics/result.md) for the latest working notes and metric snapshots.
-
-If you want to reproduce the main code-driven tasks:
-
-1. Task A: `scripts/task_a_stability_classifier.py`
-2. Task B: `scripts/task_b_prefix_classifiers.py`
-3. Task C: `scripts/task_c_survival.py`
-4. Task D: `scripts/task_d_lyapunov_regression.py`
-5. Task E: `scripts/task_e_transformer_*` and `scripts/task_e_foundation_forecasters.py`
+### Task E
+- **TCN-Forecast-Base** — params ~0.5M–1M
+- **Orbital Transformer-Base**: `context=256, pred=64, d_model=256, layers=4` — params ~3M–4M
+- **Raw Transformer-Base**: `context=128, pred=16, d_model=192, layers=3` — params ~1M–2M
+- **Panda / Chronos / TimesFM / PatchTST** as foundation baselines

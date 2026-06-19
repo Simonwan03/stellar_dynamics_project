@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
@@ -27,6 +28,7 @@ from experiment_utils import (
 
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
 RUNS_PER_BATCH = 8000
+GROUP_SIZE = 32
 ORBITAL_KEYS = (
     "aratios_complete",
     "mratios_complete",
@@ -208,6 +210,56 @@ def filter_valid_samples(
     return X, y, labels, mask
 
 
+def build_group_fraction_samples(
+    X: np.ndarray,
+    y: np.ndarray,
+    labels: pd.DataFrame,
+    group_size: int = GROUP_SIZE,
+    aggregation: str = "concat",
+) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+    labels = labels.copy()
+    labels["raw_case_id"] = labels["index"] // group_size
+    labels["variation_id"] = labels["index"] % group_size
+    labels["_row"] = np.arange(len(labels), dtype=np.int64)
+    group_rows: list[np.ndarray] = []
+    meta_rows: list[dict[str, Any]] = []
+    for case_id, frame in labels.groupby("raw_case_id", sort=True):
+        if len(frame) != group_size:
+            continue
+        frame = frame.sort_values("variation_id")
+        if not np.array_equal(frame["variation_id"].to_numpy(dtype=np.int64), np.arange(group_size)):
+            continue
+        rows = frame["_row"].to_numpy(dtype=np.int64)
+        if not np.isfinite(X[rows]).all():
+            continue
+        group_rows.append(rows)
+        stable = y[rows].astype(np.float32)
+        meta_rows.append(
+            {
+                "raw_case_id": int(case_id),
+                "stable_count": int(stable.sum()),
+                "stable_fraction": float(stable.mean()),
+                "valid_variations": int(group_size),
+                "min_time_unbound": float(frame["time_unbound"].min()),
+                "median_time_unbound": float(frame["time_unbound"].median()),
+                "max_time_unbound": float(frame["time_unbound"].max()),
+            }
+        )
+    if not group_rows:
+        raise ValueError("No complete finite trajectory groups were found for group_fraction mode.")
+    rows_arr = np.stack(group_rows, axis=0)
+    X_group = X[rows_arr]  # [G, group, T, C]
+    X_group = X_group.transpose(0, 2, 1, 3)  # [G, T, group, C]
+    if aggregation == "concat":
+        X_group = X_group.reshape(X_group.shape[0], X_group.shape[1], -1)
+    elif aggregation == "set_attention":
+        pass
+    else:
+        raise ValueError(f"Unsupported group aggregation: {aggregation}")
+    y_group = np.asarray([row["stable_fraction"] for row in meta_rows], dtype=np.float32)
+    return X_group.astype(np.float32), y_group, pd.DataFrame(meta_rows)
+
+
 def standardize_sequence_train(
     X_train: np.ndarray,
     *arrays: np.ndarray,
@@ -236,6 +288,17 @@ def standardize_static_train(
         [((arr - mu) / std).astype(np.float32) for arr in arrays],
         {"mean": mu.astype(np.float32), "std": std.astype(np.float32)},
     )
+
+
+def regression_metrics_from_preds(y_true: np.ndarray, pred: np.ndarray) -> dict[str, float]:
+    y_true = np.asarray(y_true).reshape(-1).astype(np.float64)
+    pred = np.clip(np.asarray(pred).reshape(-1).astype(np.float64), 0.0, 1.0)
+    return {
+        "mse": float(mean_squared_error(y_true, pred)),
+        "rmse": float(mean_squared_error(y_true, pred) ** 0.5),
+        "mae": float(mean_absolute_error(y_true, pred)),
+        "r2": float(r2_score(y_true, pred)) if y_true.size > 1 else float("nan"),
+    }
 
 
 class SequenceDataset(Dataset):
@@ -352,6 +415,61 @@ class AttentionClassifier(nn.Module):
         return self.head(h[:, 0])
 
 
+class GroupVariationAttentionRegressor(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        group_size: int = GROUP_SIZE,
+        hidden: int = 96,
+        heads: int = 4,
+        variation_layers: int = 1,
+        temporal_layers: int = 2,
+        dropout: float = 0.2,
+    ):
+        super().__init__()
+        self.group_size = group_size
+        self.input_proj = nn.Linear(input_dim, hidden)
+        self.variation_embedding = nn.Parameter(torch.zeros(1, 1, group_size, hidden))
+        self.variation_cls = nn.Parameter(torch.zeros(1, 1, 1, hidden))
+        variation_layer = nn.TransformerEncoderLayer(
+            d_model=hidden,
+            nhead=heads,
+            dim_feedforward=hidden * 4,
+            dropout=dropout,
+            batch_first=True,
+            activation="gelu",
+        )
+        self.variation_encoder = nn.TransformerEncoder(variation_layer, num_layers=variation_layers)
+        self.temporal_cls = nn.Parameter(torch.zeros(1, 1, hidden))
+        self.pos = PositionalEncoding(hidden)
+        temporal_layer = nn.TransformerEncoderLayer(
+            d_model=hidden,
+            nhead=heads,
+            dim_feedforward=hidden * 4,
+            dropout=dropout,
+            batch_first=True,
+            activation="gelu",
+        )
+        self.temporal_encoder = nn.TransformerEncoder(temporal_layer, num_layers=temporal_layers)
+        self.head = nn.Linear(hidden, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.ndim != 4:
+            raise ValueError(f"GroupVariationAttentionRegressor expects [B, T, group, C], got {tuple(x.shape)}")
+        bsz, steps, group, channels = x.shape
+        if group != self.group_size:
+            raise ValueError(f"Expected group size {self.group_size}, got {group}")
+        h = self.input_proj(x.reshape(bsz * steps, group, channels)).reshape(bsz, steps, group, -1)
+        h = h + self.variation_embedding[:, :, :group, :]
+        cls = self.variation_cls.expand(bsz, steps, -1, -1)
+        h = torch.cat([cls, h], dim=2).reshape(bsz * steps, group + 1, -1)
+        group_h = self.variation_encoder(h)[:, 0].reshape(bsz, steps, -1)
+        temporal_cls = self.temporal_cls.expand(bsz, -1, -1)
+        temporal = torch.cat([temporal_cls, group_h], dim=1)
+        temporal = self.temporal_encoder(self.pos(temporal))
+        return self.head(temporal[:, 0])
+
+
 class ICPrefixClassifier(nn.Module):
     def __init__(self, input_dim: int, static_dim: int, hidden: int = 96, dropout: float = 0.2):
         super().__init__()
@@ -373,6 +491,15 @@ class ICPrefixClassifier(nn.Module):
 
 
 class LinearSVM(nn.Module):
+    def __init__(self, in_dim: int):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear(x).squeeze(-1)
+
+
+class LinearRegressor(nn.Module):
     def __init__(self, in_dim: int):
         super().__init__()
         self.linear = nn.Linear(in_dim, 1)
@@ -430,6 +557,62 @@ def train_linear_svm(
     return model, history
 
 
+def train_linear_regressor(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    weight_decay: float,
+    device: torch.device,
+) -> tuple[LinearRegressor, list[dict[str, float]]]:
+    X_train_2d = X_train.reshape(X_train.shape[0], -1)
+    X_val_2d = X_val.reshape(X_val.shape[0], -1)
+    mu = X_train_2d.mean(axis=0, keepdims=True)
+    std = X_train_2d.std(axis=0, keepdims=True)
+    std = np.where(std < 1e-8, 1.0, std)
+    X_train_2d = ((X_train_2d - mu) / std).astype(np.float32)
+    X_val_2d = ((X_val_2d - mu) / std).astype(np.float32)
+    train_loader = DataLoader(
+        TensorDataset(torch.from_numpy(X_train_2d).float(), torch.from_numpy(y_train).float()),
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    model = LinearRegressor(X_train_2d.shape[1]).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    criterion = nn.MSELoss()
+    history: list[dict[str, float]] = []
+    best_state = None
+    best_mae = float("inf")
+    for epoch in range(1, epochs + 1):
+        model.train()
+        loss_sum = 0.0
+        count = 0
+        for xb, yb in train_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            pred = torch.sigmoid(model(xb))
+            loss = criterion(pred, yb)
+            loss.backward()
+            optimizer.step()
+            loss_sum += float(loss.item()) * xb.size(0)
+            count += xb.size(0)
+        val_pred = predict_linear_regressor(model, X_val_2d, device)
+        metrics = regression_metrics_from_preds(y_val, val_pred)
+        history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_mse": metrics["mse"], "val_mae": metrics["mae"]})
+        if metrics["mae"] < best_mae:
+            best_mae = float(metrics["mae"])
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    model.norm_mean = torch.from_numpy(mu.astype(np.float32))
+    model.norm_std = torch.from_numpy(std.astype(np.float32))
+    return model, history
+
+
 @torch.no_grad()
 def predict_svm(model: LinearSVM, X_2d: np.ndarray, device: torch.device) -> np.ndarray:
     model.eval()
@@ -439,6 +622,17 @@ def predict_svm(model: LinearSVM, X_2d: np.ndarray, device: torch.device) -> np.
         score = model(xb.to(device))
         probs.append(torch.sigmoid(score).cpu().numpy())
     return np.concatenate(probs)
+
+
+@torch.no_grad()
+def predict_linear_regressor(model: LinearRegressor, X_2d: np.ndarray, device: torch.device) -> np.ndarray:
+    model.eval()
+    loader = DataLoader(torch.from_numpy(X_2d).float(), batch_size=4096, shuffle=False)
+    preds: list[np.ndarray] = []
+    for xb in loader:
+        pred = torch.sigmoid(model(xb.to(device)))
+        preds.append(pred.cpu().numpy())
+    return np.concatenate(preds)
 
 
 def train_classifier(
@@ -486,6 +680,48 @@ def train_classifier(
     return model, history
 
 
+def train_sequence_regressor(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: torch.device,
+) -> tuple[nn.Module, list[dict[str, float]]]:
+    model = model.to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    criterion = nn.MSELoss()
+    history: list[dict[str, float]] = []
+    best_state = None
+    best_mae = float("inf")
+    for epoch in range(1, epochs + 1):
+        model.train()
+        loss_sum = 0.0
+        count = 0
+        for batch in train_loader:
+            xb, yb = batch
+            xb = xb.to(device)
+            yb = yb.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            pred = torch.sigmoid(model(xb))
+            loss = criterion(pred, yb)
+            loss.backward()
+            optimizer.step()
+            loss_sum += float(loss.item()) * yb.size(0)
+            count += yb.size(0)
+        y_val, pred = predict_sequence_regressor(model, val_loader, device)
+        metrics = regression_metrics_from_preds(y_val, pred)
+        history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_mse": metrics["mse"], "val_mae": metrics["mae"]})
+        if metrics["mae"] < best_mae:
+            best_mae = float(metrics["mae"])
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        print(f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} val_mae={history[-1]['val_mae']:.5f}")
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return model, history
+
+
 @torch.no_grad()
 def predict_classifier(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
@@ -503,11 +739,36 @@ def predict_classifier(model: nn.Module, loader: DataLoader, device: torch.devic
     return np.concatenate(y_all), np.concatenate(p_all)
 
 
+@torch.no_grad()
+def predict_sequence_regressor(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    model.eval()
+    y_all: list[np.ndarray] = []
+    p_all: list[np.ndarray] = []
+    for xb, yb in loader:
+        pred = torch.sigmoid(model(xb.to(device)))
+        y_all.append(yb.numpy().reshape(-1))
+        p_all.append(pred.cpu().numpy().reshape(-1))
+    return np.concatenate(y_all), np.concatenate(p_all)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Task B: hard-label prefix trajectory classifiers.")
+    parser = argparse.ArgumentParser(description="Task B: prefix trajectory models.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
     parser.add_argument("--output-dir", type=Path, default=Path("results/task_b"))
+    parser.add_argument(
+        "--target-mode",
+        choices=["trajectory_binary", "group_fraction"],
+        default="trajectory_binary",
+        help="trajectory_binary predicts one trajectory label; group_fraction predicts stable fraction across each 32-trajectory system group.",
+    )
+    parser.add_argument("--group-size", type=int, default=GROUP_SIZE)
+    parser.add_argument(
+        "--group-aggregation",
+        choices=["concat", "set_attention"],
+        default="concat",
+        help="How group_fraction combines the 32 prefixes: concat flattens variations into channels; set_attention keeps a variation axis for group_attention.",
+    )
     parser.add_argument("--max-shards", type=int, default=None)
     parser.add_argument("--rows-per-shard", type=int, default=None)
     parser.add_argument("--prefix-len", type=int, default=100)
@@ -549,13 +810,31 @@ def main() -> None:
     labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
     X, feature_names = build_prefix_features(data, add_time=not args.no_time, include_geom=not args.no_geom)
     X, y, labels, valid_mask = filter_valid_samples(X, labels, data, args.time_horizon)
+    if args.target_mode == "group_fraction":
+        X, y, labels = build_group_fraction_samples(
+            X,
+            y,
+            labels,
+            group_size=args.group_size,
+            aggregation=args.group_aggregation,
+        )
     X_static = None
     static_names: list[str] = []
-    if "ic_prefix" in models:
+    if "ic_prefix" in models and args.target_mode == "trajectory_binary":
         global_indices = labels["index"].to_numpy(dtype=np.int64)
         X_static, static_names = load_initial_features(args.dataset_dir / f"ICs_sampling_{args.sampling_id}.hdf5", global_indices)
 
-    train_idx, val_idx, test_idx = stratified_split_indices(y, test_size=args.test_size, val_size=args.val_size, seed=args.seed)
+    if args.target_mode == "trajectory_binary":
+        train_idx, val_idx, test_idx = stratified_split_indices(y, test_size=args.test_size, val_size=args.val_size, seed=args.seed)
+    else:
+        rng = np.random.default_rng(args.seed)
+        indices = np.arange(len(y))
+        rng.shuffle(indices)
+        n_test = int(round(len(indices) * args.test_size))
+        n_val = int(round(len(indices) * args.val_size))
+        test_idx = indices[:n_test]
+        val_idx = indices[n_test : n_test + n_val]
+        train_idx = indices[n_test + n_val :]
     X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
     y_train, y_val, y_test = y[train_idx], y[val_idx], y[test_idx]
     X_train, [X_val, X_test], seq_norm = standardize_sequence_train(X_train, X_val, X_test)
@@ -577,7 +856,9 @@ def main() -> None:
             "device": str(device),
             "result_paths": result_paths,
             "num_samples": int(len(y)),
-            "positive_rate": float(y.mean()),
+            "target_mean": float(y.mean()),
+            "target_min": float(y.min()),
+            "target_max": float(y.max()),
             "input_shape": tuple(X.shape[1:]),
             "feature_names": feature_names,
             "static_feature_names": static_names,
@@ -593,6 +874,61 @@ def main() -> None:
     val_loader = DataLoader(SequenceDataset(X_val, y_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     test_loader = DataLoader(SequenceDataset(X_test, y_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     metrics: dict[str, Any] = {}
+
+    if args.target_mode == "group_fraction":
+        if "ic_prefix" in models:
+            print("Skipping ic_prefix in group_fraction mode; grouped static IC fusion is not implemented.")
+        if "svm" in models:
+            reg, history = train_linear_regressor(
+                X_train,
+                y_train,
+                X_val,
+                y_val,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                device=device,
+            )
+            X_test_2d = X_test.reshape(X_test.shape[0], -1)
+            X_test_2d = ((X_test_2d - reg.norm_mean.numpy()) / reg.norm_std.numpy()).astype(np.float32)
+            pred = predict_linear_regressor(reg, X_test_2d, device)
+            metrics["linear"] = {"test": regression_metrics_from_preds(y_test, pred)}
+            save_csv(output_dir / "linear_train_log.csv", history)
+            torch.save({"model_state_dict": reg.state_dict()}, output_dir / "linear_model.pt")
+
+        if args.group_aggregation == "concat":
+            model_factories = {
+                "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
+                "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
+                "attention": lambda: AttentionClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
+            }
+        else:
+            unsupported = sorted((models & {"cnn", "tcn", "attention"}) - {"group_attention"})
+            if unsupported:
+                print(f"Skipping {unsupported} in set_attention mode; use --models group_attention or svm.")
+            model_factories = {
+                "group_attention": lambda: GroupVariationAttentionRegressor(
+                    X_train.shape[-1],
+                    group_size=args.group_size,
+                    hidden=args.hidden_dim,
+                    dropout=args.dropout,
+                ),
+            }
+        for name, factory in model_factories.items():
+            if name not in models:
+                continue
+            model, history = train_sequence_regressor(factory(), train_loader, val_loader, args.epochs, args.lr, args.weight_decay, device)
+            y_eval, pred = predict_sequence_regressor(model, test_loader, device)
+            metrics[name] = {"test": regression_metrics_from_preds(y_eval, pred)}
+            save_csv(output_dir / f"{name}_train_log.csv", history)
+            torch.save({"model_state_dict": model.state_dict()}, output_dir / f"{name}_model.pt")
+
+        save_json(output_dir / "metrics.json", metrics)
+        print(f"Task B complete. Outputs: {output_dir}")
+        for name, payload in metrics.items():
+            print(name, payload["test"])
+        return
 
     if "svm" in models:
         svm, history = train_linear_svm(

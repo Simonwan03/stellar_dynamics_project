@@ -1,3 +1,8 @@
+# task a
+Task A complete. Outputs: results/task_a_binary_all
+mlp {'accuracy': 0.843, 'precision': 0.5030674846625767, 'recall': 0.5189873417721519, 'f1': 0.5109034267912772, 'confusion_matrix': [[761, 81], [76, 82]], 'positive_rate': 0.158, 'predicted_positive_rate': 0.163, 'auc': 0.842245707928681, 'average_precision': 0.49244131737556407}
+xgboost {'accuracy': 0.829, 'precision': 0.46596858638743455, 'recall': 0.5632911392405063, 'f1': 0.5100286532951289, 'confusion_matrix': [[740, 102], [69, 89]], 'positive_rate': 0.158, 'predicted_positive_rate': 0.191, 'auc': 0.8403665173336541, 'average_precision': 0.5116661244574336}
+# task b
 ## Linear SVM / 200 epochs
 **T=100**
 train_acc: 0.8500
@@ -232,7 +237,9 @@ patchtst [30/36] 32.11 batch/s eta=0s
 patchtst [36/36] 36.84 batch/s eta=0s
 patchtst: raw_mse=8.15002e+09 raw_mae=21171.8 z_mse=0.562308 runtime=1.6s
 
-
+256->64
+Panda
+TEST | norm_mse=1.01748 norm_mae=0.585153 raw_mse=6.45925e+12 raw_mae=878347
 
 ### orbital features
 naive [20/36] 159445.13 batch/s eta=0s
@@ -256,3 +263,7 @@ patchtst [36/36] 58.01 batch/s eta=0s
 patchtst: raw_mse=8.15002e+09 raw_mae=21171.8 z_mse=0.562308 runtime=1.1s
 
 panda: raw_mse=5.8596e+07 raw_mae=407.626 z_mse=0.213708 runtime=8.8s
+
+256->64
+panda with mlp 4k raw_mse=7026.94 raw_mae=5.81212 z_mse=0.229276
+              20k raw_mse=1992.26 raw_mae=2.50967 z_mse=0.173401

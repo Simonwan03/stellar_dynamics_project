@@ -7,7 +7,9 @@ conda environment; on AWS, use whichever environment contains `h5py`, `numpy`, `
 
 ## Task A
 
-Group-level stable-at-horizon classification from tokenized initial conditions.
+Group-level stable-at-horizon modeling from tokenized initial conditions.
+By default this predicts the empirical stable fraction across the 32 perturbations
+for each system, matching the original Task A distribution-label objective.
 
 ```bash
 conda run -n stellar python scripts/task_a_stability_classifier.py \
@@ -15,6 +17,20 @@ conda run -n stellar python scripts/task_a_stability_classifier.py \
   --models mlp,xgboost \
   --epochs 20
 ```
+
+MLP presets:
+- `--mlp-size small`: hidden `(64,64,32)`, dropout `0.1`
+- `--mlp-size base`: hidden `(128,128,64)`, dropout `0.2`
+- `--mlp-size large`: hidden `(256,256,128)`, dropout `0.2`
+
+MLP loss modes:
+- `--mlp-loss mse`: `Sigmoid + MSELoss`
+- `--mlp-loss bce`: `Linear + BCEWithLogitsLoss` with the same `stable_fraction` labels
+
+XGBoost presets:
+- `--xgb-size small`: `300` trees, depth `2`
+- `--xgb-size base`: `1000` trees, depth `3`
+- `--xgb-size strong`: `2000` trees, depth `4`
 
 Use `--regroup --overwrite-tokenized` if you need to rebuild
 `dataset_v3/ICs_sampling_2_groupof32.hdf5`.
@@ -30,6 +46,22 @@ conda run -n stellar python scripts/task_b_prefix_classifiers.py \
   --models svm,cnn,tcn,attention,ic_prefix \
   --epochs 20
 ```
+
+To predict the stable fraction across each 32-trajectory perturbation group
+from early prefixes:
+
+```bash
+conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+  --output-dir results/task_b_group_fraction \
+  --target-mode group_fraction \
+  --group-aggregation set_attention \
+  --prefix-len 100 \
+  --models group_attention \
+  --epochs 20
+```
+
+Use `--group-aggregation concat --models svm,cnn,tcn,attention` for the simpler
+baseline that flattens the 32 variations into the feature channel dimension.
 
 For a quick AWS smoke test:
 
@@ -70,6 +102,18 @@ conda run -n stellar python scripts/task_d_lyapunov_regression.py \
 ```
 
 ## Task E
+
+Dataset trajectory visualization:
+
+```bash
+conda run -n stellar python scripts/visualize_dataset_v3_trajectories.py \
+  --row 0 \
+  --time-stride 4 \
+  --output-dir results/dataset_v3_trajectory_viz
+```
+
+Add `--animation --time-stride 20` to save a GIF animation without making the
+file too large.
 
 Transformer orbital forecasting baseline. Debug first, then full.
 
@@ -174,3 +218,22 @@ backbone as well as the temporal adapters.
 The adapter trainer drops windows with non-finite values or any absolute channel
 value above `--max-abs-value` (`1e4` by default), because extreme orbital
 element outliers can make the Panda backbone return NaNs.
+
+For position/velocity features instead of `orbital15`, use the trajectory
+adapter. It defaults to the center-of-mass reference frame, standardizes the 18
+relative state channels, maps `18 -> Panda channels` before Panda, then maps
+back to 18 channels after Panda:
+
+```bash
+conda run -n stellar python scripts/train_panda_trajectory_adapter.py \
+  --input-len 256 \
+  --output-len 64 \
+  --num-windows 4096 \
+  --epochs 10 \
+  --batch-size 32 \
+  --device cuda \
+  --output-dir runs/panda_trajectory_adapter_full
+```
+
+Use `--reference-frame absolute` to train on raw absolute coordinates, or
+`--reference-frame body0` to use body 0 as the origin.
