@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from experiment_utils import ensure_dir, parse_name_list, save_csv, save_json, select_device, set_random_seed
 from task_b_prefix_classifiers import (
+    FULL_RESULT_KEYS,
     build_prefix_features,
     discover_result_paths,
     filter_valid_samples,
@@ -528,6 +529,7 @@ def main() -> None:
     result_paths = discover_result_paths(args.dataset_dir, args.sampling_id, args.max_shards)
     data, batch_ids, rows_loaded = load_result_prefixes(
         result_paths,
+        result_keys=FULL_RESULT_KEYS,
         prefix_len=args.prefix_len,
         time_stride=args.time_stride,
         rows_per_shard=args.rows_per_shard,
@@ -535,7 +537,12 @@ def main() -> None:
         add_time=not args.no_time,
     )
     labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
-    X_traj, feature_names = build_prefix_features(data, add_time=not args.no_time, include_geom=not args.no_geom)
+    X_traj, feature_names = build_prefix_features(
+        data,
+        result_keys=FULL_RESULT_KEYS,
+        add_time=not args.no_time,
+        include_geom=not args.no_geom,
+    )
     X_traj, _, labels, _ = filter_valid_samples(X_traj, labels, data, time_horizon=None)
     X_cases, y_cases, case_ids = build_case_tensors(X_traj, labels, args.group_size, future_times, max_cases=args.max_cases)
     q_cases = y_cases.mean(axis=1)

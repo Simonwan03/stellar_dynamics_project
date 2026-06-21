@@ -22,14 +22,14 @@ from experiment_utils import (
     save_json,
     select_device,
     set_random_seed,
-    stratified_split_indices,
 )
 
 
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
 RUNS_PER_BATCH = 8000
 GROUP_SIZE = 32
-ORBITAL_KEYS = (
+DEFAULT_TIME_HORIZON = 10000.0
+FULL_RESULT_KEYS = (
     "aratios_complete",
     "mratios_complete",
     "masses_complete",
@@ -41,9 +41,15 @@ ORBITAL_KEYS = (
     "LANs_complete",
     "incs_complete",
 )
-INITIAL_KEYS = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
-ANGLE_RESULT_KEYS = {"APs_complete", "LANs_complete", "incs_complete"}
-ANGLE_INITIAL_KEYS = {"APs", "LANs", "incs"}
+ORBITAL15_RESULT_KEYS = (
+    "aratios_complete",
+    "mratios_complete",
+    "eccs_complete",
+    "incs_complete",
+    "APs_complete",
+    "LANs_complete",
+)
+ANGLE_RESULT_KEYS = {"APs_complete", "LANs_complete"}
 
 
 def batch_id_from_path(path: str | Path) -> int:
@@ -82,13 +88,14 @@ def pairwise_geom(pos: np.ndarray, vel: np.ndarray, eps: float = 1e-8) -> np.nda
 
 def load_result_prefixes(
     result_paths: list[Path],
+    result_keys: tuple[str, ...],
     prefix_len: int,
     time_stride: int,
     rows_per_shard: int | None,
     include_geom: bool,
     add_time: bool,
 ) -> tuple[dict[str, np.ndarray], list[int], list[int]]:
-    data_parts: dict[str, list[np.ndarray]] = {key: [] for key in ORBITAL_KEYS}
+    data_parts: dict[str, list[np.ndarray]] = {key: [] for key in result_keys}
     if include_geom:
         data_parts["positions_complete"] = []
         data_parts["velocities_complete"] = []
@@ -153,12 +160,13 @@ def load_aligned_labels(
 
 def build_prefix_features(
     data: dict[str, np.ndarray],
+    result_keys: tuple[str, ...],
     add_time: bool = True,
     include_geom: bool = True,
 ) -> tuple[np.ndarray, list[str]]:
     channels: list[np.ndarray] = []
     names: list[str] = []
-    for key in ORBITAL_KEYS:
+    for key in result_keys:
         arr = data[key]
         if key in ANGLE_RESULT_KEYS:
             arr = sincos(arr)
@@ -177,20 +185,6 @@ def build_prefix_features(
         names.append("time_norm")
     X = np.concatenate(channels, axis=-1).astype(np.float32)
     return X, names
-
-
-def load_initial_features(ics_path: str | Path, global_indices: np.ndarray) -> tuple[np.ndarray, list[str]]:
-    arrays: list[np.ndarray] = []
-    names: list[str] = []
-    with h5py.File(ics_path, "r") as handle:
-        for key in INITIAL_KEYS:
-            arr = np.asarray(handle[key][global_indices], dtype=np.float32)
-            if key in ANGLE_INITIAL_KEYS:
-                arr = sincos(arr)
-            flat = arr.reshape(arr.shape[0], -1)
-            arrays.append(flat)
-            names.extend([f"{key}_{i}" for i in range(flat.shape[1])])
-    return np.concatenate(arrays, axis=1).astype(np.float32), names
 
 
 def filter_valid_samples(
@@ -260,6 +254,84 @@ def build_group_fraction_samples(
     return X_group.astype(np.float32), y_group, pd.DataFrame(meta_rows)
 
 
+def grouped_case_split_indices(
+    y: np.ndarray,
+    sample_case_ids: np.ndarray,
+    test_size: int | float = 0.2,
+    val_size: int | float = 0.0,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    y = np.asarray(y).reshape(-1).astype(np.float32)
+    sample_case_ids = np.asarray(sample_case_ids).reshape(-1).astype(np.int64)
+    if y.size != sample_case_ids.size:
+        raise ValueError(f"y and sample_case_ids must have the same length, got {y.size} and {sample_case_ids.size}.")
+
+    unique_case_ids, inverse = np.unique(sample_case_ids, return_inverse=True)
+    n_cases = unique_case_ids.size
+    if n_cases < 3:
+        raise ValueError(f"Need at least 3 cases for train/val/test split, got {n_cases}.")
+
+    def resolve_size(size: int | float, base: int) -> int:
+        if isinstance(size, float) and 0.0 < size < 1.0:
+            return int(round(base * size))
+        return int(size)
+
+    case_scores = np.zeros(n_cases, dtype=np.float32)
+    for case_idx in range(n_cases):
+        rows = inverse == case_idx
+        case_scores[case_idx] = float(y[rows].mean())
+
+    # Coarse buckets keep split balance while avoiding sparse 33-class stratification on stable_count.
+    case_bins = np.zeros(n_cases, dtype=np.int64)
+    case_bins[(case_scores > 0.0) & (case_scores < 0.5)] = 1
+    case_bins[(case_scores >= 0.5) & (case_scores < 1.0)] = 2
+    case_bins[case_scores >= 1.0] = 3
+
+    rng = np.random.default_rng(seed)
+    all_case_idx = np.arange(n_cases)
+
+    def sample_stratified_cases(pool: np.ndarray, target_size: int) -> np.ndarray:
+        target_size = max(0, min(int(target_size), pool.size - 1))
+        if target_size == 0:
+            return np.array([], dtype=np.int64)
+        classes = np.unique(case_bins[pool])
+        selected: list[np.ndarray] = []
+        remaining = target_size
+        for cls in classes[:-1]:
+            cls_idx = pool[case_bins[pool] == cls]
+            take = int(round(target_size * cls_idx.size / pool.size))
+            take = min(take, cls_idx.size)
+            if take > 0:
+                selected.append(rng.choice(cls_idx, size=take, replace=False))
+                remaining -= take
+        cls_idx = pool[case_bins[pool] == classes[-1]]
+        take = min(remaining, cls_idx.size)
+        if take > 0:
+            selected.append(rng.choice(cls_idx, size=take, replace=False))
+        out = np.concatenate(selected) if selected else np.array([], dtype=np.int64)
+        if out.size < target_size:
+            extras = np.setdiff1d(pool, out, assume_unique=False)
+            out = np.concatenate([out, rng.choice(extras, size=target_size - out.size, replace=False)])
+        rng.shuffle(out)
+        return out.astype(np.int64)
+
+    test_case_count = resolve_size(test_size, n_cases)
+    test_case_idx = sample_stratified_cases(all_case_idx, test_case_count)
+    train_val_case_idx = np.setdiff1d(all_case_idx, test_case_idx, assume_unique=False)
+    val_case_count = resolve_size(val_size, train_val_case_idx.size)
+    val_case_idx = sample_stratified_cases(train_val_case_idx, val_case_count)
+    train_case_idx = np.setdiff1d(train_val_case_idx, val_case_idx, assume_unique=False)
+    rng.shuffle(train_case_idx)
+
+    def expand(case_idx: np.ndarray) -> np.ndarray:
+        mask = np.isin(inverse, case_idx)
+        rows = np.flatnonzero(mask).astype(np.int64)
+        rng.shuffle(rows)
+        return rows
+
+    return expand(train_case_idx), expand(val_case_idx), expand(test_case_idx)
+
+
 def standardize_sequence_train(
     X_train: np.ndarray,
     *arrays: np.ndarray,
@@ -267,21 +339,6 @@ def standardize_sequence_train(
 ) -> tuple[np.ndarray, list[np.ndarray], dict[str, np.ndarray]]:
     mu = X_train.mean(axis=(0, 1), keepdims=True)
     std = X_train.std(axis=(0, 1), keepdims=True)
-    std = np.where(std < eps, 1.0, std)
-    return (
-        ((X_train - mu) / std).astype(np.float32),
-        [((arr - mu) / std).astype(np.float32) for arr in arrays],
-        {"mean": mu.astype(np.float32), "std": std.astype(np.float32)},
-    )
-
-
-def standardize_static_train(
-    X_train: np.ndarray,
-    *arrays: np.ndarray,
-    eps: float = 1e-8,
-) -> tuple[np.ndarray, list[np.ndarray], dict[str, np.ndarray]]:
-    mu = X_train.mean(axis=0, keepdims=True)
-    std = X_train.std(axis=0, keepdims=True)
     std = np.where(std < eps, 1.0, std)
     return (
         ((X_train - mu) / std).astype(np.float32),
@@ -301,19 +358,44 @@ def regression_metrics_from_preds(y_true: np.ndarray, pred: np.ndarray) -> dict[
     }
 
 
+def infer_temporal_model_scale(num_steps: int) -> dict[str, dict[str, int]]:
+    if num_steps <= 100:
+        return {
+            "cnn": {"hidden": 128},
+            "tcn": {"hidden": 128, "levels": 4},
+            "attention": {"hidden": 128, "layers": 2, "heads": 4},
+        }
+    if num_steps <= 200:
+        return {
+            "cnn": {"hidden": 160},
+            "tcn": {"hidden": 128, "levels": 5},
+            "attention": {"hidden": 128, "layers": 3, "heads": 4},
+        }
+    return {
+        "cnn": {"hidden": 192},
+        "tcn": {"hidden": 160, "levels": 5},
+        "attention": {"hidden": 160, "layers": 3, "heads": 4},
+    }
+
+
+def is_improved(metric: float, best_metric: float, mode: str, min_delta: float = 0.0) -> bool:
+    if mode == "max":
+        return metric > (best_metric + min_delta)
+    if mode == "min":
+        return metric < (best_metric - min_delta)
+    raise ValueError(f"Unsupported early-stopping mode: {mode}")
+
+
 class SequenceDataset(Dataset):
-    def __init__(self, X: np.ndarray, y: np.ndarray, X_static: np.ndarray | None = None):
+    def __init__(self, X: np.ndarray, y: np.ndarray):
         self.X = torch.from_numpy(X).float()
         self.y = torch.from_numpy(y.reshape(-1, 1)).float()
-        self.X_static = None if X_static is None else torch.from_numpy(X_static).float()
 
     def __len__(self) -> int:
         return self.y.size(0)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, ...]:
-        if self.X_static is None:
-            return self.X[index], self.y[index]
-        return self.X[index], self.X_static[index], self.y[index]
+        return self.X[index], self.y[index]
 
 
 class CNN1DClassifier(nn.Module):
@@ -470,26 +552,6 @@ class GroupVariationAttentionRegressor(nn.Module):
         return self.head(temporal[:, 0])
 
 
-class ICPrefixClassifier(nn.Module):
-    def __init__(self, input_dim: int, static_dim: int, hidden: int = 96, dropout: float = 0.2):
-        super().__init__()
-        self.prefix = CNN1DClassifier(input_dim=input_dim, hidden=hidden, dropout=dropout)
-        self.prefix.head = nn.Identity()
-        self.static = nn.Sequential(
-            nn.Linear(static_dim, hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, hidden),
-            nn.GELU(),
-        )
-        self.head = nn.Sequential(nn.Linear(hidden * 2, hidden), nn.GELU(), nn.Dropout(dropout), nn.Linear(hidden, 1))
-
-    def forward(self, x: torch.Tensor, x_static: torch.Tensor) -> torch.Tensor:
-        hp = self.prefix.net(x.transpose(1, 2)).squeeze(-1)
-        hs = self.static(x_static)
-        return self.head(torch.cat([hp, hs], dim=-1))
-
-
 class LinearSVM(nn.Module):
     def __init__(self, in_dim: int):
         super().__init__()
@@ -518,6 +580,7 @@ def train_linear_svm(
     lr: float,
     weight_decay: float,
     device: torch.device,
+    early_stopping_patience: int = 0,
 ) -> tuple[LinearSVM, list[dict[str, float]]]:
     X_train_2d = X_train.reshape(X_train.shape[0], -1)
     X_val_2d = X_val.reshape(X_val.shape[0], -1)
@@ -535,6 +598,9 @@ def train_linear_svm(
     model = LinearSVM(X_train_2d.shape[1]).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     history: list[dict[str, float]] = []
+    best_state = None
+    best_auc = -float("inf")
+    epochs_without_improvement = 0
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
@@ -552,6 +618,17 @@ def train_linear_svm(
         prob = predict_svm(model, X_val_2d, device)
         metrics = binary_metrics_from_probs(y_val, prob)
         history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_auc": metrics["auc"]})
+        if is_improved(metrics["auc"], best_auc, mode="max"):
+            best_auc = float(metrics["auc"])
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+        if early_stopping_patience > 0 and epochs_without_improvement >= early_stopping_patience:
+            print(f"early_stopping epoch={epoch:03d} val_auc={metrics['auc']:.4f} best_auc={best_auc:.4f}")
+            break
+    if best_state is not None:
+        model.load_state_dict(best_state)
     model.norm_mean = torch.from_numpy(mu.astype(np.float32))
     model.norm_std = torch.from_numpy(std.astype(np.float32))
     return model, history
@@ -567,6 +644,7 @@ def train_linear_regressor(
     lr: float,
     weight_decay: float,
     device: torch.device,
+    early_stopping_patience: int = 0,
 ) -> tuple[LinearRegressor, list[dict[str, float]]]:
     X_train_2d = X_train.reshape(X_train.shape[0], -1)
     X_val_2d = X_val.reshape(X_val.shape[0], -1)
@@ -586,6 +664,7 @@ def train_linear_regressor(
     history: list[dict[str, float]] = []
     best_state = None
     best_mae = float("inf")
+    epochs_without_improvement = 0
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
@@ -603,9 +682,15 @@ def train_linear_regressor(
         val_pred = predict_linear_regressor(model, X_val_2d, device)
         metrics = regression_metrics_from_preds(y_val, val_pred)
         history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_mse": metrics["mse"], "val_mae": metrics["mae"]})
-        if metrics["mae"] < best_mae:
+        if is_improved(metrics["mae"], best_mae, mode="min"):
             best_mae = float(metrics["mae"])
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+        if early_stopping_patience > 0 and epochs_without_improvement >= early_stopping_patience:
+            print(f"early_stopping epoch={epoch:03d} val_mae={metrics['mae']:.5f} best_mae={best_mae:.5f}")
+            break
     if best_state is not None:
         model.load_state_dict(best_state)
     model.norm_mean = torch.from_numpy(mu.astype(np.float32))
@@ -643,6 +728,7 @@ def train_classifier(
     lr: float,
     weight_decay: float,
     device: torch.device,
+    early_stopping_patience: int = 0,
 ) -> tuple[nn.Module, list[dict[str, float]]]:
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -650,17 +736,13 @@ def train_classifier(
     history: list[dict[str, float]] = []
     best_state = None
     best_auc = -float("inf")
+    epochs_without_improvement = 0
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
         count = 0
-        for batch in train_loader:
-            if len(batch) == 2:
-                xb, yb = batch
-                logits = model(xb.to(device))
-            else:
-                xb, xs, yb = batch
-                logits = model(xb.to(device), xs.to(device))
+        for xb, yb in train_loader:
+            logits = model(xb.to(device))
             yb = yb.to(device)
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(logits, yb)
@@ -671,10 +753,16 @@ def train_classifier(
         y_val, prob = predict_classifier(model, val_loader, device)
         metrics = binary_metrics_from_probs(y_val, prob)
         history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_auc": metrics["auc"], "val_f1": metrics["f1"]})
-        if metrics["auc"] > best_auc:
+        if is_improved(metrics["auc"], best_auc, mode="max"):
             best_auc = float(metrics["auc"])
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
         print(f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} val_auc={history[-1]['val_auc']:.4f}")
+        if early_stopping_patience > 0 and epochs_without_improvement >= early_stopping_patience:
+            print(f"early_stopping epoch={epoch:03d} val_auc={metrics['auc']:.4f} best_auc={best_auc:.4f}")
+            break
     if best_state is not None:
         model.load_state_dict(best_state)
     return model, history
@@ -688,6 +776,7 @@ def train_sequence_regressor(
     lr: float,
     weight_decay: float,
     device: torch.device,
+    early_stopping_patience: int = 0,
 ) -> tuple[nn.Module, list[dict[str, float]]]:
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -695,6 +784,7 @@ def train_sequence_regressor(
     history: list[dict[str, float]] = []
     best_state = None
     best_mae = float("inf")
+    epochs_without_improvement = 0
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
@@ -713,10 +803,16 @@ def train_sequence_regressor(
         y_val, pred = predict_sequence_regressor(model, val_loader, device)
         metrics = regression_metrics_from_preds(y_val, pred)
         history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_mse": metrics["mse"], "val_mae": metrics["mae"]})
-        if metrics["mae"] < best_mae:
+        if is_improved(metrics["mae"], best_mae, mode="min"):
             best_mae = float(metrics["mae"])
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
         print(f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} val_mae={history[-1]['val_mae']:.5f}")
+        if early_stopping_patience > 0 and epochs_without_improvement >= early_stopping_patience:
+            print(f"early_stopping epoch={epoch:03d} val_mae={metrics['mae']:.5f} best_mae={best_mae:.5f}")
+            break
     if best_state is not None:
         model.load_state_dict(best_state)
     return model, history
@@ -727,13 +823,8 @@ def predict_classifier(model: nn.Module, loader: DataLoader, device: torch.devic
     model.eval()
     y_all: list[np.ndarray] = []
     p_all: list[np.ndarray] = []
-    for batch in loader:
-        if len(batch) == 2:
-            xb, yb = batch
-            logits = model(xb.to(device))
-        else:
-            xb, xs, yb = batch
-            logits = model(xb.to(device), xs.to(device))
+    for xb, yb in loader:
+        logits = model(xb.to(device))
         y_all.append(yb.numpy().reshape(-1))
         p_all.append(torch.sigmoid(logits).cpu().numpy().reshape(-1))
     return np.concatenate(y_all), np.concatenate(p_all)
@@ -757,6 +848,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sampling-id", type=int, default=2)
     parser.add_argument("--output-dir", type=Path, default=Path("results/task_b"))
     parser.add_argument(
+        "--representation",
+        choices=["orbital15", "full"],
+        default="orbital15",
+        help="orbital15 keeps the 15-channel Panda-style orbital sequence; full restores the wider orbital+geometry/time stack.",
+    )
+    parser.add_argument(
         "--target-mode",
         choices=["trajectory_binary", "group_fraction"],
         default="trajectory_binary",
@@ -773,21 +870,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rows-per-shard", type=int, default=None)
     parser.add_argument("--prefix-len", type=int, default=100)
     parser.add_argument("--time-stride", type=int, default=1)
-    parser.add_argument("--time-horizon", type=float, default=None)
-    parser.add_argument("--models", type=str, default="svm,cnn,tcn,attention,ic_prefix")
+    parser.add_argument("--time-horizon", type=float, default=DEFAULT_TIME_HORIZON)
+    parser.add_argument("--models", type=str, default="svm,cnn,tcn,attention")
     parser.add_argument("--test-size", type=float, default=0.125)
     parser.add_argument("--val-size", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--early-stopping-patience", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--hidden-dim", type=int, default=96)
+    parser.add_argument("--hidden-dim", type=int, default=None)
+    parser.add_argument("--attention-heads", type=int, default=4)
+    parser.add_argument("--attention-layers", type=int, default=None)
+    parser.add_argument("--tcn-levels", type=int, default=None)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--no-geom", action="store_true")
-    parser.add_argument("--no-time", action="store_true")
+    parser.add_argument("--no-geom", action="store_true", help="Only applies to --representation full.")
+    parser.add_argument("--no-time", action="store_true", help="Only applies to --representation full.")
     return parser
 
 
@@ -797,18 +898,27 @@ def main() -> None:
     set_random_seed(args.seed)
     device = select_device(args.device)
     models = set(parse_name_list(args.models))
+    if args.representation == "orbital15":
+        result_keys = ORBITAL15_RESULT_KEYS
+        include_geom = False
+        add_time = False
+    else:
+        result_keys = FULL_RESULT_KEYS
+        include_geom = not args.no_geom
+        add_time = not args.no_time
 
     result_paths = discover_result_paths(args.dataset_dir, args.sampling_id, args.max_shards)
     data, batch_ids, rows_loaded = load_result_prefixes(
         result_paths,
+        result_keys=result_keys,
         prefix_len=args.prefix_len,
         time_stride=args.time_stride,
         rows_per_shard=args.rows_per_shard,
-        include_geom=not args.no_geom,
-        add_time=not args.no_time,
+        include_geom=include_geom,
+        add_time=add_time,
     )
     labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
-    X, feature_names = build_prefix_features(data, add_time=not args.no_time, include_geom=not args.no_geom)
+    X, feature_names = build_prefix_features(data, result_keys=result_keys, add_time=add_time, include_geom=include_geom)
     X, y, labels, valid_mask = filter_valid_samples(X, labels, data, args.time_horizon)
     if args.target_mode == "group_fraction":
         X, y, labels = build_group_fraction_samples(
@@ -818,14 +928,15 @@ def main() -> None:
             group_size=args.group_size,
             aggregation=args.group_aggregation,
         )
-    X_static = None
-    static_names: list[str] = []
-    if "ic_prefix" in models and args.target_mode == "trajectory_binary":
-        global_indices = labels["index"].to_numpy(dtype=np.int64)
-        X_static, static_names = load_initial_features(args.dataset_dir / f"ICs_sampling_{args.sampling_id}.hdf5", global_indices)
-
     if args.target_mode == "trajectory_binary":
-        train_idx, val_idx, test_idx = stratified_split_indices(y, test_size=args.test_size, val_size=args.val_size, seed=args.seed)
+        sample_case_ids = (labels["index"].to_numpy(dtype=np.int64) // args.group_size).astype(np.int64)
+        train_idx, val_idx, test_idx = grouped_case_split_indices(
+            y,
+            sample_case_ids,
+            test_size=args.test_size,
+            val_size=args.val_size,
+            seed=args.seed,
+        )
     else:
         rng = np.random.default_rng(args.seed)
         indices = np.arange(len(y))
@@ -838,17 +949,18 @@ def main() -> None:
     X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
     y_train, y_val, y_test = y[train_idx], y[val_idx], y[test_idx]
     X_train, [X_val, X_test], seq_norm = standardize_sequence_train(X_train, X_val, X_test)
-    static_norm = None
-    Xs_train = Xs_val = Xs_test = None
-    if X_static is not None:
-        Xs_train, Xs_val, Xs_test = X_static[train_idx], X_static[val_idx], X_static[test_idx]
-        Xs_train, [Xs_val, Xs_test], static_norm = standardize_static_train(Xs_train, Xs_val, Xs_test)
+    temporal_scale = infer_temporal_model_scale(X_train.shape[1])
+    cnn_hidden = args.hidden_dim if args.hidden_dim is not None else temporal_scale["cnn"]["hidden"]
+    tcn_hidden = args.hidden_dim if args.hidden_dim is not None else temporal_scale["tcn"]["hidden"]
+    tcn_levels = args.tcn_levels if args.tcn_levels is not None else temporal_scale["tcn"]["levels"]
+    attention_hidden = args.hidden_dim if args.hidden_dim is not None else temporal_scale["attention"]["hidden"]
+    attention_layers = args.attention_layers if args.attention_layers is not None else temporal_scale["attention"]["layers"]
+    attention_heads = args.attention_heads
+    group_attention_hidden = args.hidden_dim if args.hidden_dim is not None else attention_hidden
 
     labels.to_csv(output_dir / "labels_filtered.csv", index=False)
     np.savez(output_dir / "split_indices.npz", train_idx=train_idx, val_idx=val_idx, test_idx=test_idx)
     np.savez(output_dir / "sequence_normalization.npz", mean=seq_norm["mean"], std=seq_norm["std"])
-    if static_norm is not None:
-        np.savez(output_dir / "static_normalization.npz", mean=static_norm["mean"], std=static_norm["std"])
     save_json(
         output_dir / "config.json",
         {
@@ -861,7 +973,12 @@ def main() -> None:
             "target_max": float(y.max()),
             "input_shape": tuple(X.shape[1:]),
             "feature_names": feature_names,
-            "static_feature_names": static_names,
+            "effective_model_scale": {
+                "cnn": {"hidden": cnn_hidden},
+                "tcn": {"hidden": tcn_hidden, "levels": tcn_levels},
+                "attention": {"hidden": attention_hidden, "layers": attention_layers, "heads": attention_heads},
+                "group_attention": {"hidden": group_attention_hidden, "heads": attention_heads},
+            },
         },
     )
 
@@ -876,8 +993,6 @@ def main() -> None:
     metrics: dict[str, Any] = {}
 
     if args.target_mode == "group_fraction":
-        if "ic_prefix" in models:
-            print("Skipping ic_prefix in group_fraction mode; grouped static IC fusion is not implemented.")
         if "svm" in models:
             reg, history = train_linear_regressor(
                 X_train,
@@ -889,19 +1004,33 @@ def main() -> None:
                 lr=args.lr,
                 weight_decay=args.weight_decay,
                 device=device,
+                early_stopping_patience=args.early_stopping_patience,
             )
             X_test_2d = X_test.reshape(X_test.shape[0], -1)
             X_test_2d = ((X_test_2d - reg.norm_mean.numpy()) / reg.norm_std.numpy()).astype(np.float32)
             pred = predict_linear_regressor(reg, X_test_2d, device)
             metrics["linear"] = {"test": regression_metrics_from_preds(y_test, pred)}
             save_csv(output_dir / "linear_train_log.csv", history)
-            torch.save({"model_state_dict": reg.state_dict()}, output_dir / "linear_model.pt")
+            torch.save(
+                {
+                    "model_state_dict": reg.state_dict(),
+                    "norm_mean": reg.norm_mean.clone(),
+                    "norm_std": reg.norm_std.clone(),
+                },
+                output_dir / "linear_model.pt",
+            )
 
         if args.group_aggregation == "concat":
             model_factories = {
-                "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
-                "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
-                "attention": lambda: AttentionClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
+                "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=cnn_hidden, dropout=args.dropout),
+                "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=tcn_hidden, levels=tcn_levels, dropout=args.dropout),
+                "attention": lambda: AttentionClassifier(
+                    X_train.shape[-1],
+                    hidden=attention_hidden,
+                    heads=attention_heads,
+                    layers=attention_layers,
+                    dropout=args.dropout,
+                ),
             }
         else:
             unsupported = sorted((models & {"cnn", "tcn", "attention"}) - {"group_attention"})
@@ -911,14 +1040,24 @@ def main() -> None:
                 "group_attention": lambda: GroupVariationAttentionRegressor(
                     X_train.shape[-1],
                     group_size=args.group_size,
-                    hidden=args.hidden_dim,
+                    hidden=group_attention_hidden,
+                    heads=attention_heads,
                     dropout=args.dropout,
                 ),
             }
         for name, factory in model_factories.items():
             if name not in models:
                 continue
-            model, history = train_sequence_regressor(factory(), train_loader, val_loader, args.epochs, args.lr, args.weight_decay, device)
+            model, history = train_sequence_regressor(
+                factory(),
+                train_loader,
+                val_loader,
+                args.epochs,
+                args.lr,
+                args.weight_decay,
+                device,
+                early_stopping_patience=args.early_stopping_patience,
+            )
             y_eval, pred = predict_sequence_regressor(model, test_loader, device)
             metrics[name] = {"test": regression_metrics_from_preds(y_eval, pred)}
             save_csv(output_dir / f"{name}_train_log.csv", history)
@@ -941,58 +1080,52 @@ def main() -> None:
             lr=args.lr,
             weight_decay=args.weight_decay,
             device=device,
+            early_stopping_patience=args.early_stopping_patience,
         )
         X_test_2d = X_test.reshape(X_test.shape[0], -1)
         X_test_2d = ((X_test_2d - svm.norm_mean.numpy()) / svm.norm_std.numpy()).astype(np.float32)
         prob = predict_svm(svm, X_test_2d, device)
         metrics["svm"] = {"test": binary_metrics_from_probs(y_test, prob)}
         save_csv(output_dir / "svm_train_log.csv", history)
-        torch.save({"model_state_dict": svm.state_dict()}, output_dir / "svm_model.pt")
+        torch.save(
+            {
+                "model_state_dict": svm.state_dict(),
+                "norm_mean": svm.norm_mean.clone(),
+                "norm_std": svm.norm_std.clone(),
+            },
+            output_dir / "svm_model.pt",
+        )
         save_binary_curves(output_dir / "svm_test_curves.png", y_test, prob, "Task B SVM")
 
     model_factories = {
-        "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
-        "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
-        "attention": lambda: AttentionClassifier(X_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout),
+        "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=cnn_hidden, dropout=args.dropout),
+        "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=tcn_hidden, levels=tcn_levels, dropout=args.dropout),
+        "attention": lambda: AttentionClassifier(
+            X_train.shape[-1],
+            hidden=attention_hidden,
+            heads=attention_heads,
+            layers=attention_layers,
+            dropout=args.dropout,
+        ),
     }
     for name, factory in model_factories.items():
         if name not in models:
             continue
-        model, history = train_classifier(factory(), train_loader, val_loader, args.epochs, args.lr, args.weight_decay, device)
+        model, history = train_classifier(
+            factory(),
+            train_loader,
+            val_loader,
+            args.epochs,
+            args.lr,
+            args.weight_decay,
+            device,
+            early_stopping_patience=args.early_stopping_patience,
+        )
         y_eval, prob = predict_classifier(model, test_loader, device)
         metrics[name] = {"test": binary_metrics_from_probs(y_eval, prob)}
         save_csv(output_dir / f"{name}_train_log.csv", history)
         torch.save({"model_state_dict": model.state_dict()}, output_dir / f"{name}_model.pt")
         save_binary_curves(output_dir / f"{name}_test_curves.png", y_eval, prob, f"Task B {name}")
-
-    if "ic_prefix" in models:
-        if Xs_train is None or Xs_val is None or Xs_test is None:
-            raise RuntimeError("Static IC features were not prepared.")
-        ic_train_loader = DataLoader(
-            SequenceDataset(X_train, y_train, Xs_train),
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=args.num_workers,
-        )
-        ic_val_loader = DataLoader(
-            SequenceDataset(X_val, y_val, Xs_val),
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-        )
-        ic_test_loader = DataLoader(
-            SequenceDataset(X_test, y_test, Xs_test),
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-        )
-        model = ICPrefixClassifier(X_train.shape[-1], Xs_train.shape[-1], hidden=args.hidden_dim, dropout=args.dropout)
-        model, history = train_classifier(model, ic_train_loader, ic_val_loader, args.epochs, args.lr, args.weight_decay, device)
-        y_eval, prob = predict_classifier(model, ic_test_loader, device)
-        metrics["ic_prefix"] = {"test": binary_metrics_from_probs(y_eval, prob)}
-        save_csv(output_dir / "ic_prefix_train_log.csv", history)
-        torch.save({"model_state_dict": model.state_dict()}, output_dir / "ic_prefix_model.pt")
-        save_binary_curves(output_dir / "ic_prefix_test_curves.png", y_eval, prob, "Task B IC+Prefix")
 
     save_json(output_dir / "metrics.json", metrics)
     print(f"Task B complete. Outputs: {output_dir}")

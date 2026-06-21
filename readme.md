@@ -95,13 +95,12 @@
 
 ### 1. IC token representation
 
-给 `Task A` 和 `Task B` 的 `ic_prefix` / grouped IC 分支用，但两者现在不再完全相同。
+给 `Task A` 用。
 
 - 原始字段：`aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
 - `Task A` 当前默认只取每组 `32` 条 variations 里的第一个初始条件
 - `Task A` 默认对 `APs` / `LANs` 做 `sin/cos`，保留原始 `incs`
 - 因而 `Task A` 当前默认输入与 `orbital15` 的静态初值版本一致，总计 `15` 维
-- `Task B` 的 grouped static IC 分支仍然保留整组 `32` 条 variations 的结构
 
 ### 2. Prefix trajectory representation
 
@@ -119,7 +118,7 @@
   - `APs_complete`
   - `LANs_complete`
   - `incs_complete`
-- 角变量做 `sin/cos`
+- 仅 `APs_complete` / `LANs_complete` 做 `sin/cos`，`incs_complete` 保留原值
 - 可追加：
   - pairwise geometry features
   - 归一化时间通道
@@ -199,12 +198,15 @@ Task B 有两个模式：
 
 - 数据源：`results_batch_*_sampling_2.hdf5`
 - 默认只截取前 `prefix_len=100` 个时间步
+- 默认标签 horizon 是 `time_horizon = 10000`
+- 默认表示是 `orbital15` prefix：`aratios_complete(1) + mratios_complete(2) + eccs_complete(2) + incs_complete(2) + sin/cos(APs_complete)(4) + sin/cos(LANs_complete)(4) = 15` 维
 - 常见输入张量：
   - trajectory 模式：`[N, T, C]`
   - group 模式：
     - `concat`: `[G, T, 32*C]`
     - `set_attention`: `[G, T, 32, C]`
-- 可选加入静态初值分支，形成 `IC + prefix` 融合模型
+- `trajectory_binary` 默认按 `raw_case_id` 做 group split，避免同一个 base system 的 32 条 perturbations 泄漏到不同数据集
+- 如需旧版宽特征栈，可切到 `--representation full`
 
 **模型族**
 
@@ -212,8 +214,26 @@ Task B 有两个模式：
 - `cnn`: 1D temporal CNN
 - `tcn`: dilated temporal convolution
 - `attention`: Transformer encoder over time
-- `ic_prefix`: prefix CNN + static IC MLP 融合
 - `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
+
+**默认参数规模（`orbital15` 表示）**
+
+- `SVM`
+  - 参数量自动由 `T * C` 决定；当前 `C = 15`
+- `T = 100`
+  - `cnn`: ~`92K`
+  - `tcn`: ~`355K`
+  - `attention`: ~`399K`
+- `T = 200`
+  - `cnn`: ~`141K`
+  - `tcn`: ~`454K`
+  - `attention`: ~`597K`
+- `T = 500`
+  - `cnn`: ~`200K`
+  - `tcn`: ~`706K`
+  - `attention`: ~`931K`
+- 这些规模由脚本按实际输入时间步数自动选择；若显式设置 `--hidden-dim`，则 `cnn/tcn/attention` 统一改用该 hidden width；`--tcn-levels`、`--attention-layers`、`--attention-heads` 也可单独覆盖
+- 默认最大训练轮数是 `50`，并启用 early stopping：`patience = 8`
 
 这项任务是仓库里最直接的 early-warning 分类线。
 
@@ -360,9 +380,20 @@ Task B 有两个模式：
 - **MLP-flatten-base**: `544 → 256 → 128 → 64 → K` — params ~180K
 
 ### Task B
-- **CNN-Base**: `64-128-128` — params ~100K
-- **TCN-Base**: `64-64-128-128` — params ~300K
-- **Transformer-Base**: `d=128, layers=4, heads=4` — params ~0.8M–1M
+- default representation: `orbital15` prefix (`15` channels per step)
+- **SVM**: params determined by `T * 15`
+- **CNN**
+  - `T=100`: ~`92K`
+  - `T=200`: ~`141K`
+  - `T=500`: ~`200K`
+- **TCN**
+  - `T=100`: ~`355K`
+  - `T=200`: ~`454K`
+  - `T=500`: ~`706K`
+- **Transformer**
+  - `T=100`: ~`399K`
+  - `T=200`: ~`597K`
+  - `T=500`: ~`931K`
 
 ### Task C
 - **Shared CNN-DeepSets-Base** — params ~300K

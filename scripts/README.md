@@ -15,7 +15,7 @@ for each system, matching the original Task A distribution-label objective.
 conda run -n stellar python scripts/task_a_stability_classifier.py \
   --output-dir results/task_a \
   --models mlp,xgboost \
-  --epochs 20
+  --epochs 80
 ```
 
 MLP presets:
@@ -26,6 +26,10 @@ MLP presets:
 MLP loss modes:
 - `--mlp-loss mse`: `Sigmoid + MSELoss`
 - `--mlp-loss bce`: `Linear + BCEWithLogitsLoss` with the same `stable_fraction` labels
+
+MLP early stopping:
+- default: `--early-stopping-patience 15 --early-stopping-min-delta 1e-4`
+- set `--early-stopping-patience 0` to disable and always run the full `--epochs`
 
 XGBoost presets:
 - `--xgb-size small`: `300` trees, depth `2`
@@ -42,9 +46,10 @@ Hard-label classification from early trajectory prefixes.
 ```bash
 conda run -n stellar python scripts/task_b_prefix_classifiers.py \
   --output-dir results/task_b \
+  --representation orbital15 \
   --prefix-len 100 \
-  --models svm,cnn,tcn,attention,ic_prefix \
-  --epochs 20
+  --models svm,cnn,tcn,attention \
+  --epochs 50
 ```
 
 To predict the stable fraction across each 32-trajectory perturbation group
@@ -53,15 +58,30 @@ from early prefixes:
 ```bash
 conda run -n stellar python scripts/task_b_prefix_classifiers.py \
   --output-dir results/task_b_group_fraction \
+  --representation orbital15 \
   --target-mode group_fraction \
   --group-aggregation set_attention \
   --prefix-len 100 \
   --models group_attention \
-  --epochs 20
+  --epochs 50
 ```
 
 Use `--group-aggregation concat --models svm,cnn,tcn,attention` for the simpler
 baseline that flattens the 32 variations into the feature channel dimension.
+
+`Task B` now defaults to the `orbital15` sequence representation:
+`aratios_complete(1) + mratios_complete(2) + eccs_complete(2) + incs_complete(2) + sin/cos(APs_complete)(4) + sin/cos(LANs_complete)(4) = 15` channels per time step.
+The default label horizon is `--time-horizon 10000`.
+Use `--representation full` to restore the older wider stack with extra orbital channels plus optional geometry/time features.
+
+The temporal models now auto-scale with the effective number of input steps `T`:
+- `SVM`: params follow `T * 15`
+- `T=100`: `cnn ~92K`, `tcn ~355K`, `attention ~399K`
+- `T=200`: `cnn ~141K`, `tcn ~454K`, `attention ~597K`
+- `T=500`: `cnn ~200K`, `tcn ~706K`, `attention ~931K`
+
+If you set `--hidden-dim`, that hidden width is used directly instead of the automatic per-`T` scale. You can also override `--tcn-levels`, `--attention-layers`, and `--attention-heads`.
+Early stopping defaults to `--early-stopping-patience 8`; set it to `0` to disable.
 
 For a quick AWS smoke test:
 

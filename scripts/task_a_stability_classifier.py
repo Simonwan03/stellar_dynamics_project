@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+import copy
 
 import h5py
 import matplotlib.pyplot as plt
@@ -332,7 +333,9 @@ def train_regressor(
     dropout: float,
     hidden: tuple[int, ...],
     loss_mode: str,
-) -> tuple[MLPRegressor, list[dict[str, float]]]:
+    early_stopping_patience: int | None,
+    early_stopping_min_delta: float,
+) -> tuple[MLPRegressor, list[dict[str, float]], dict[str, Any]]:
     model = MLPRegressor(in_dim=in_dim, hidden=hidden, dropout=dropout, output_mode=loss_mode).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     if loss_mode == "mse":
@@ -342,6 +345,10 @@ def train_regressor(
     else:
         raise ValueError(f"Unsupported loss_mode: {loss_mode}")
     history: list[dict[str, float]] = []
+    best_eval_mse = float("inf")
+    best_epoch = 0
+    best_state = copy.deepcopy(model.state_dict())
+    epochs_without_improvement = 0
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
@@ -367,11 +374,34 @@ def train_regressor(
                 "eval_r2": eval_metrics["r2"],
             }
         )
+        improved = eval_metrics["mse"] < (best_eval_mse - early_stopping_min_delta)
+        if improved:
+            best_eval_mse = float(eval_metrics["mse"])
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
         print(
             f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} "
             f"eval_mse={history[-1]['eval_mse']:.5f} eval_mae={history[-1]['eval_mae']:.5f}"
         )
-    return model, history
+        if early_stopping_patience is not None and epochs_without_improvement >= early_stopping_patience:
+            print(
+                f"Early stopping at epoch {epoch:03d}; "
+                f"best_epoch={best_epoch:03d} best_eval_mse={best_eval_mse:.5f}"
+            )
+            break
+    model.load_state_dict(best_state)
+    fit_info = {
+        "best_epoch": int(best_epoch),
+        "best_eval_mse": float(best_eval_mse),
+        "epochs_ran": int(len(history)),
+        "stopped_early": bool(len(history) < epochs),
+        "early_stopping_patience": None if early_stopping_patience is None else int(early_stopping_patience),
+        "early_stopping_min_delta": float(early_stopping_min_delta),
+    }
+    return model, history, fit_info
 
 
 def run_xgboost_regressor(
@@ -438,6 +468,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dropout", type=float, default=None)
     parser.add_argument("--hidden", type=str, default=None)
     parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=15,
+        help="Stop MLP training if validation MSE does not improve for this many epochs. Use 0 or a negative value to disable.",
+    )
+    parser.add_argument(
+        "--early-stopping-min-delta",
+        type=float,
+        default=1e-4,
+        help="Minimum validation-MSE improvement required to reset the early-stopping patience counter.",
+    )
+    parser.add_argument(
         "--mlp-loss",
         choices=["mse", "bce"],
         default="mse",
@@ -461,6 +503,7 @@ def main() -> None:
     xgb_preset = XGB_PRESETS[args.xgb_size]
     hidden = tuple(parse_int_list(args.hidden) or mlp_preset["hidden"])
     dropout = float(args.dropout if args.dropout is not None else mlp_preset["dropout"])
+    early_stopping_patience = args.early_stopping_patience if args.early_stopping_patience > 0 else None
     models = set(parse_name_list(args.models))
 
     if args.regroup or not tokenized_path.exists():
@@ -543,7 +586,7 @@ def main() -> None:
     if "mlp" in models:
         train_loader, test_loader = make_loaders(X_train, y_train, args.batch_size, (X_test, y_test))
         val_loader = make_loaders(X_train, y_train, args.batch_size, (X_val, y_val))[1]
-        mlp, history = train_regressor(
+        mlp, history, fit_info = train_regressor(
             train_loader,
             val_loader,
             in_dim=X_train.shape[1],
@@ -554,6 +597,8 @@ def main() -> None:
             dropout=dropout,
             hidden=hidden,
             loss_mode=args.mlp_loss,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_min_delta=args.early_stopping_min_delta,
         )
         y_train_eval, train_pred = predict_regressor(mlp, train_loader, device)
         y_val_eval, val_pred = predict_regressor(mlp, val_loader, device)
@@ -565,6 +610,7 @@ def main() -> None:
         save_csv(output_dir / "mlp_fraction_train_log.csv", history)
         save_regression_scatter(output_dir / "mlp_fraction_test_scatter.png", y_test_eval, test_pred, "Task A MLP")
         all_metrics["mlp"] = {
+            "fit": fit_info,
             "train": regression_metrics_from_preds(y_train_eval, train_pred),
             "val": regression_metrics_from_preds(y_val_eval, val_pred),
             "test": regression_metrics_from_preds(y_test_eval, test_pred),
