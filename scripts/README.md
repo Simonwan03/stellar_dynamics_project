@@ -104,22 +104,64 @@ Trajectory-level multi-horizon survival prediction for 32-variation ensembles.
 conda run -n stellar python scripts/task_c_survival.py \
   --output-dir results/task_c \
   --prefix-len 200 \
-  --time-stride 2 \
-  --models baseline,direct,traj,dual \
+  --time-stride 1 \
+  --models baseline,direct,direct_mean_std,traj,dual \
   --epochs 40
 ```
 
+`direct` is an aggregation-before-encoding weak baseline that averages the 32
+variation trajectories before predicting the system survival curve.
+`direct_mean_std` is a stronger system-level baseline that concatenates the
+per-time-step mean, standard deviation, minimum, and maximum over the 32
+variations before applying the same direct curve model and loss.
+
+All Task C neural models use a discrete-time hazard head. The network predicts
+conditional failure hazards for the future intervals, and the survival curve is
+the cumulative product of one minus those hazards. `traj` and `dual` optimize a
+variation-level masked hazard negative log-likelihood. `direct` and
+`direct_mean_std` optimize the corresponding interval-count binomial hazard
+negative log-likelihood from the aggregated 32-variation survival fractions.
+
+The run saves five result figures:
+
+- `figure_1_mean_survival_curve.png`: true and predicted mean survival curves
+- `figure_2_representative_cases.png`: stable, middle, and unstable examples
+- `figure_3_per_horizon_mae.png`: model comparison at each horizon
+- `figure_4_q_pred_vs_true.png`: predicted versus true `q` at `t=10000`
+- `figure_5_survival_heatmaps.png`: true, predicted, and absolute-error heatmaps
+
 ## Task D
 
-System-level semimajor-axis divergence regression. This wraps the existing
-`src/task_d_lyapunov.py` pipeline.
+System-level phase-space divergence regression has two leakage-aware settings.
+The default initial-condition experiment predicts `log1p(tau_system)` from
+`t=0` features with a constant baseline, random forest, and MLP:
 
 ```bash
 conda run -n stellar python scripts/task_d_lyapunov_regression.py \
-  --output-dir outputs/task_d_lyapunov \
-  --mlp-epochs 80 \
+  --task-setting initial \
+  --output-dir results/task_d_initial \
+  --growth-lower 1 \
+  --growth-upper 100 \
+  --mlp-epochs 80
+```
+
+The prefix setting computes the actual observation end time from
+`times_complete`, removes systems with `tau_system <= t_obs`, and predicts
+`log1p(tau_system - t_obs)`:
+
+```bash
+conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+  --task-setting prefix \
+  --prefix-len 200 \
+  --prefix-time-stride 1 \
+  --output-dir results/task_d_prefix_tobs_200 \
   --cnn-epochs 80
 ```
+
+Prefix models are `cnn_orbital`, `cnn_phase_space`, and `set_cnn`. Neural
+regressors use Huber loss by default; select `--loss mse` for the previous MSE
+objective. The target is an empirical Lyapunov-like divergence timescale, not a
+strict infinitesimal Lyapunov time.
 
 ## Task E
 

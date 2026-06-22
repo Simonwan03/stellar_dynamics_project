@@ -132,6 +132,20 @@ def standardize_case_train(
     )
 
 
+def aggregate_case_trajectories(X: np.ndarray, mode: str) -> np.ndarray:
+    if mode == "mean":
+        return X.mean(axis=1).astype(np.float32)
+    if mode == "mean_std":
+        stats = [
+            X.mean(axis=1),
+            X.std(axis=1),
+            X.min(axis=1),
+            X.max(axis=1),
+        ]
+        return np.concatenate(stats, axis=-1).astype(np.float32)
+    raise ValueError(f"Unknown case aggregation mode: {mode}")
+
+
 class ConvTrajectoryEncoder(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, dropout: float):
         super().__init__()
@@ -184,11 +198,9 @@ class TemporalAttentionEncoder(nn.Module):
         return self.encoder(h)[:, 0]
 
 
-class MonotoneHead(nn.Module):
-    def __init__(self, input_dim: int, horizon: int, hidden_dim: int, dropout: float, monotone: bool):
+class HazardHead(nn.Module):
+    def __init__(self, input_dim: int, horizon: int, hidden_dim: int, dropout: float):
         super().__init__()
-        self.horizon = horizon
-        self.monotone = monotone
         self.net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden_dim),
@@ -198,12 +210,12 @@ class MonotoneHead(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raw = self.net(x)
-        if not self.monotone or self.horizon == 1:
-            return raw
-        z0 = raw[..., :1]
-        drops = torch.nn.functional.softplus(raw[..., 1:])
-        return torch.cat([z0, z0 - torch.cumsum(drops, dim=-1)], dim=-1)
+        return self.net(x)
+
+
+def hazard_logits_to_survival(logits: torch.Tensor) -> torch.Tensor:
+    hazard = torch.sigmoid(logits)
+    return torch.cumprod(1.0 - hazard, dim=-1)
 
 
 class TrajectoryContextSurvivalModel(nn.Module):
@@ -214,7 +226,6 @@ class TrajectoryContextSurvivalModel(nn.Module):
         horizon: int,
         encoder_type: str,
         dropout: float,
-        monotone: bool,
     ):
         super().__init__()
         if encoder_type == "gru":
@@ -223,7 +234,7 @@ class TrajectoryContextSurvivalModel(nn.Module):
             self.encoder = TemporalAttentionEncoder(input_dim, hidden_dim, heads=4, layers=1, dropout=dropout)
         else:
             self.encoder = ConvTrajectoryEncoder(input_dim, hidden_dim, dropout)
-        self.head = MonotoneHead(hidden_dim * 2, horizon, hidden_dim, dropout, monotone=monotone)
+        self.head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         bsz, group, time, dim = x.shape
@@ -236,20 +247,14 @@ class DirectCurveModel(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, horizon: int, dropout: float):
         super().__init__()
         self.encoder = ConvTrajectoryEncoder(input_dim, hidden_dim, dropout)
-        self.head = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, horizon),
-        )
+        self.head = HazardHead(hidden_dim, horizon, hidden_dim, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.encoder(x))
 
 
 class DualAttentionSurvivalModel(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, horizon: int, dropout: float, monotone: bool):
+    def __init__(self, input_dim: int, hidden_dim: int, horizon: int, dropout: float):
         super().__init__()
         self.temporal = TemporalAttentionEncoder(input_dim, hidden_dim, heads=4, layers=1, dropout=dropout)
         layer = nn.TransformerEncoderLayer(
@@ -261,7 +266,7 @@ class DualAttentionSurvivalModel(nn.Module):
             batch_first=True,
         )
         self.ensemble = nn.TransformerEncoder(layer, num_layers=1)
-        self.head = MonotoneHead(hidden_dim * 2, horizon, hidden_dim, dropout, monotone=monotone)
+        self.head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         bsz, group, time, dim = x.shape
@@ -271,38 +276,21 @@ class DualAttentionSurvivalModel(nn.Module):
         return self.head(torch.cat([contextual, context], dim=-1))
 
 
-class TrajectorySurvivalLoss(nn.Module):
-    def __init__(self, lambda_mono: float = 0.05, pos_weight: torch.Tensor | None = None):
-        super().__init__()
-        self.lambda_mono = float(lambda_mono)
-        self.register_buffer("pos_weight", pos_weight if pos_weight is not None else None)
-
+class VariationHazardNLL(nn.Module):
     def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        pos_weight = None if self.pos_weight is None else self.pos_weight.to(logits.device)
-        bce = torch.nn.functional.binary_cross_entropy_with_logits(logits, y, pos_weight=pos_weight)
-        probs = torch.sigmoid(logits)
-        mono = torch.relu(probs[..., 1:] - probs[..., :-1]).mean() if probs.size(-1) > 1 else torch.tensor(0.0, device=logits.device)
-        return bce + self.lambda_mono * mono
+        previous_survival = torch.cat([torch.ones_like(y[..., :1]), y[..., :-1]], dim=-1)
+        failures = (previous_survival - y).clamp(0.0, 1.0)
+        interval_nll = torch.nn.functional.binary_cross_entropy_with_logits(logits, failures, reduction="none")
+        return (interval_nll * previous_survival).sum() / previous_survival.sum().clamp_min(1.0)
 
 
-class DirectCurveLoss(nn.Module):
-    def __init__(self, lambda_mono: float = 0.05):
-        super().__init__()
-        self.lambda_mono = float(lambda_mono)
-
+class BinomialHazardNLL(nn.Module):
     def forward(self, logits: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
-        probs = torch.sigmoid(logits)
-        mse = torch.mean((probs - q) ** 2)
-        mono = torch.relu(probs[:, 1:] - probs[:, :-1]).mean() if probs.size(-1) > 1 else torch.tensor(0.0, device=logits.device)
-        return mse + self.lambda_mono * mono
-
-
-def compute_pos_weight(y: np.ndarray, min_value: float = 0.25, max_value: float = 4.0) -> torch.Tensor:
-    positives = y.sum(axis=(0, 1)).astype(np.float32)
-    total = float(y.shape[0] * y.shape[1])
-    negatives = total - positives
-    weight = negatives / np.maximum(positives, 1.0)
-    return torch.tensor(np.clip(weight, min_value, max_value).reshape(1, 1, -1), dtype=torch.float32)
+        previous_survival = torch.cat([torch.ones_like(q[:, :1]), q[:, :-1]], dim=-1)
+        failures = (previous_survival - q).clamp_min(0.0)
+        hazard_target = failures / previous_survival.clamp_min(1e-8)
+        interval_nll = torch.nn.functional.binary_cross_entropy_with_logits(logits, hazard_target, reduction="none")
+        return (interval_nll * previous_survival).sum() / previous_survival.sum().clamp_min(1e-8)
 
 
 @torch.no_grad()
@@ -317,7 +305,7 @@ def evaluate_trajectory_model(model: nn.Module, loader: DataLoader, criterion: n
         logits = model(xb)
         loss = criterion(logits, yb)
         losses.append(float(loss.item()) * xb.size(0))
-        preds.append(torch.sigmoid(logits).mean(dim=1).cpu().numpy())
+        preds.append(hazard_logits_to_survival(logits).mean(dim=1).cpu().numpy())
         targets.append(yb.mean(dim=1).cpu().numpy())
     pred = np.concatenate(preds, axis=0)
     target = np.concatenate(targets, axis=0)
@@ -344,7 +332,7 @@ def evaluate_direct_model(model: nn.Module, loader: DataLoader, criterion: nn.Mo
         logits = model(xb)
         loss = criterion(logits, qb)
         losses.append(float(loss.item()) * xb.size(0))
-        preds.append(torch.sigmoid(logits).cpu().numpy())
+        preds.append(hazard_logits_to_survival(logits).cpu().numpy())
         targets.append(qb.cpu().numpy())
     pred = np.concatenate(preds, axis=0)
     target = np.concatenate(targets, axis=0)
@@ -450,34 +438,144 @@ def mean_baseline_metrics(q_train: np.ndarray, q_eval: np.ndarray) -> dict[str, 
 
 
 def save_survival_plots(output_dir: Path, future_times: np.ndarray, metrics: dict[str, dict[str, Any]]) -> None:
+    preferred_models = ["direct", "direct_mean_std", "traj", "dual"]
+    model_names = [name for name in preferred_models if name in metrics and "preds" in metrics[name]]
+    if not model_names:
+        raise ValueError("No neural-model predictions available for plotting.")
+
+    display_names = {
+        "direct": "direct",
+        "direct_mean_std": "direct_stats",
+        "traj": "traj",
+        "dual": "dual",
+    }
+    colors = {
+        "direct": "#D1495B",
+        "direct_mean_std": "#EDAE49",
+        "traj": "#00798C",
+        "dual": "#30638E",
+    }
+    targets = metrics[model_names[0]]["targets"]
+
+    # Figure 1: mean survival curve over all test cases.
     fig, ax = plt.subplots(figsize=(8, 5))
-    for name, payload in metrics.items():
-        if "horizon_mae" in payload:
-            ax.plot(future_times, payload["horizon_mae"], marker="o", label=name)
+    ax.plot(future_times, targets.mean(axis=0), color="black", linewidth=2.8, marker="o", label="true")
+    for name in model_names:
+        ax.plot(
+            future_times,
+            metrics[name]["preds"].mean(axis=0),
+            color=colors[name],
+            linewidth=2,
+            marker="o",
+            label=display_names[name],
+        )
     ax.set_xlabel("Future time")
-    ax.set_ylabel("Mean absolute error")
-    ax.set_title("Survival-fraction MAE by horizon")
-    ax.grid(alpha=0.3)
-    ax.legend()
+    ax.set_ylabel("Mean survival fraction")
+    ax.set_title("Mean survival curve")
+    ax.set_ylim(-0.02, 1.02)
+    ax.grid(alpha=0.25)
+    ax.legend(ncol=2)
     fig.tight_layout()
-    fig.savefig(output_dir / "horizon_mae.png", dpi=160)
+    fig.savefig(output_dir / "figure_1_mean_survival_curve.png", dpi=180)
     plt.close(fig)
 
-    best_name = min((k for k, v in metrics.items() if "preds" in v), key=lambda k: metrics[k]["overall_mae"])
-    best = metrics[best_name]
-    count = min(6, best["preds"].shape[0])
-    fig, axes = plt.subplots(count, 1, figsize=(8, 2.2 * count), sharex=True)
-    if count == 1:
-        axes = [axes]
-    for i, ax in enumerate(axes):
-        ax.plot(future_times, best["targets"][i], marker="o", label="target")
-        ax.plot(future_times, best["preds"][i], marker="x", label=best_name)
+    # Figure 2: representative stable, middle, and unstable systems.
+    final_target = targets[:, -1]
+    case_specs = [("stable", 1.0), ("middle", 0.5), ("unstable", 0.0)]
+    selected: list[tuple[str, int]] = []
+    used: set[int] = set()
+    for label, target_value in case_specs:
+        order = np.argsort(np.abs(final_target - target_value))
+        index = next((int(i) for i in order if int(i) not in used), int(order[0]))
+        selected.append((label, index))
+        used.add(index)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.3), sharex=True, sharey=True)
+    for ax, (label, index) in zip(axes, selected):
+        ax.plot(future_times, targets[index], color="black", linewidth=2.8, marker="o", label="true")
+        for name in model_names:
+            ax.plot(
+                future_times,
+                metrics[name]["preds"][index],
+                color=colors[name],
+                linewidth=1.7,
+                marker="o",
+                label=display_names[name],
+            )
+        ax.set_title(f"{label}: case {index}, q(10000)={final_target[index]:.2f}")
         ax.set_ylim(-0.05, 1.05)
-        ax.grid(alpha=0.3)
-    axes[0].legend()
-    axes[-1].set_xlabel("Future time")
+        ax.grid(alpha=0.25)
+        ax.set_xlabel("Future time")
+    axes[0].set_ylabel("Survival fraction")
+    axes[-1].legend(loc="best", fontsize=8)
     fig.tight_layout()
-    fig.savefig(output_dir / "example_survival_curves.png", dpi=160)
+    fig.savefig(output_dir / "figure_2_representative_cases.png", dpi=180)
+    plt.close(fig)
+
+    # Figure 3: horizon-wise MAE comparison.
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for name in model_names:
+        ax.plot(
+            future_times,
+            metrics[name]["horizon_mae"],
+            color=colors[name],
+            linewidth=2,
+            marker="o",
+            label=display_names[name],
+        )
+    ax.set_xlabel("Future time")
+    ax.set_ylabel("Mean absolute error")
+    ax.set_title("Per-horizon survival-fraction MAE")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_dir / "figure_3_per_horizon_mae.png", dpi=180)
+    plt.close(fig)
+
+    # Figure 4: predicted versus true survival fraction at the final horizon.
+    scatter_horizon = int(np.argmin(np.abs(future_times - 10000.0)))
+    columns = 2
+    rows = int(np.ceil(len(model_names) / columns))
+    fig, axes = plt.subplots(rows, columns, figsize=(10, 4.5 * rows), sharex=True, sharey=True)
+    axes_arr = np.asarray(axes).reshape(-1)
+    for ax, name in zip(axes_arr, model_names):
+        pred = metrics[name]["preds"][:, scatter_horizon]
+        ax.scatter(targets[:, scatter_horizon], pred, s=18, alpha=0.45, color=colors[name], edgecolors="none")
+        ax.plot([0, 1], [0, 1], color="black", linestyle="--", linewidth=1.2)
+        ax.set_title(f"{display_names[name]} | MAE={np.mean(np.abs(pred - targets[:, scatter_horizon])):.3f}")
+        ax.set_xlabel("True q")
+        ax.set_ylabel("Predicted q")
+        ax.set_xlim(-0.03, 1.03)
+        ax.set_ylim(-0.03, 1.03)
+        ax.grid(alpha=0.2)
+    for ax in axes_arr[len(model_names) :]:
+        ax.axis("off")
+    fig.suptitle(f"Predicted vs true survival fraction at t={future_times[scatter_horizon]:g}", y=1.01)
+    fig.tight_layout()
+    fig.savefig(output_dir / "figure_4_q_pred_vs_true.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    # Figure 5: heatmaps for the best neural model, sorted by final true survival.
+    best_name = min(model_names, key=lambda name: metrics[name]["overall_mae"])
+    order = np.argsort(targets[:, -1])[::-1]
+    true_sorted = targets[order]
+    pred_sorted = metrics[best_name]["preds"][order]
+    error_sorted = np.abs(pred_sorted - true_sorted)
+    fig, axes = plt.subplots(1, 3, figsize=(14, 7), sharey=True)
+    panels = [
+        ("True q", true_sorted, "viridis", 0.0, 1.0),
+        (f"Predicted q: {display_names[best_name]}", pred_sorted, "viridis", 0.0, 1.0),
+        ("Absolute error", error_sorted, "magma", 0.0, max(0.1, float(error_sorted.max()))),
+    ]
+    for ax, (title, values, cmap, vmin, vmax) in zip(axes, panels):
+        image = ax.imshow(values, aspect="auto", interpolation="nearest", cmap=cmap, vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+        ax.set_xlabel("Future horizon")
+        ax.set_xticks(np.arange(len(future_times)), labels=[f"{time:g}" for time in future_times], rotation=45)
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+    axes[0].set_ylabel("Test cases sorted by true q(10000)")
+    fig.tight_layout()
+    fig.savefig(output_dir / "figure_5_survival_heatmaps.png", dpi=180)
     plt.close(fig)
 
 
@@ -495,9 +593,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-cases", type=int, default=None)
     parser.add_argument("--group-size", type=int, default=32)
     parser.add_argument("--prefix-len", type=int, default=200)
-    parser.add_argument("--time-stride", type=int, default=2)
-    parser.add_argument("--future-times", type=str, default="500,1000,2000,4000,6000,8000,10000")
-    parser.add_argument("--models", type=str, default="baseline,direct,traj,dual")
+    parser.add_argument("--time-stride", type=int, default=1)
+    parser.add_argument("--future-times", type=str, default="500,800,1500,2500,4000,6500,10000")
+    parser.add_argument("--models", type=str, default="baseline,direct,direct_mean_std,traj,dual")
     parser.add_argument("--encoder-type", choices=["cnn", "gru", "attention"], default="cnn")
     parser.add_argument("--test-ratio", type=float, default=0.2)
     parser.add_argument("--val-ratio", type=float, default=0.1)
@@ -508,9 +606,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--lambda-mono", type=float, default=0.05)
-    parser.add_argument("--no-monotone-head", action="store_true")
-    parser.add_argument("--no-pos-weight", action="store_true")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--no-geom", action="store_true")
@@ -580,21 +675,34 @@ def main() -> None:
         metrics["baseline"] = mean_baseline_metrics(q_train, q_test)
 
     if "direct" in requested_models:
-        X_case_train = X_train.mean(axis=1)
-        X_case_val = X_val.mean(axis=1)
-        X_case_test = X_test.mean(axis=1)
+        X_case_train = aggregate_case_trajectories(X_train, mode="mean")
+        X_case_val = aggregate_case_trajectories(X_val, mode="mean")
+        X_case_test = aggregate_case_trajectories(X_test, mode="mean")
         direct_train_loader = DataLoader(DirectCurveDataset(X_case_train, q_train), batch_size=args.batch_size, shuffle=True)
         direct_val_loader = DataLoader(DirectCurveDataset(X_case_val, q_val), batch_size=args.batch_size, shuffle=False)
         direct_test_loader = DataLoader(DirectCurveDataset(X_case_test, q_test), batch_size=args.batch_size, shuffle=False)
-        model = DirectCurveModel(X_train.shape[-1], args.hidden_dim, len(future_times), args.dropout)
-        criterion = DirectCurveLoss(lambda_mono=args.lambda_mono)
+        model = DirectCurveModel(X_case_train.shape[-1], args.hidden_dim, len(future_times), args.dropout)
+        criterion = BinomialHazardNLL()
         model, history = train_direct_model(model, direct_train_loader, direct_val_loader, criterion, args.epochs, args.lr, args.weight_decay, device)
         metrics["direct"] = evaluate_direct_model(model, direct_test_loader, criterion, device)
         save_csv(output_dir / "direct_train_log.csv", history)
         torch.save({"model_state_dict": model.state_dict()}, output_dir / "direct_model.pt")
 
-    pos_weight = None if args.no_pos_weight else compute_pos_weight(y_train)
-    criterion = TrajectorySurvivalLoss(lambda_mono=args.lambda_mono, pos_weight=pos_weight)
+    if "direct_mean_std" in requested_models:
+        X_case_train = aggregate_case_trajectories(X_train, mode="mean_std")
+        X_case_val = aggregate_case_trajectories(X_val, mode="mean_std")
+        X_case_test = aggregate_case_trajectories(X_test, mode="mean_std")
+        direct_train_loader = DataLoader(DirectCurveDataset(X_case_train, q_train), batch_size=args.batch_size, shuffle=True)
+        direct_val_loader = DataLoader(DirectCurveDataset(X_case_val, q_val), batch_size=args.batch_size, shuffle=False)
+        direct_test_loader = DataLoader(DirectCurveDataset(X_case_test, q_test), batch_size=args.batch_size, shuffle=False)
+        model = DirectCurveModel(X_case_train.shape[-1], args.hidden_dim, len(future_times), args.dropout)
+        criterion = BinomialHazardNLL()
+        model, history = train_direct_model(model, direct_train_loader, direct_val_loader, criterion, args.epochs, args.lr, args.weight_decay, device)
+        metrics["direct_mean_std"] = evaluate_direct_model(model, direct_test_loader, criterion, device)
+        save_csv(output_dir / "direct_mean_std_train_log.csv", history)
+        torch.save({"model_state_dict": model.state_dict()}, output_dir / "direct_mean_std_model.pt")
+
+    criterion = VariationHazardNLL()
 
     if "traj" in requested_models:
         model = TrajectoryContextSurvivalModel(
@@ -603,7 +711,6 @@ def main() -> None:
             len(future_times),
             encoder_type=args.encoder_type,
             dropout=args.dropout,
-            monotone=not args.no_monotone_head,
         )
         model, history = train_trajectory_model(model, train_loader, val_loader, criterion, args.epochs, args.lr, args.weight_decay, device)
         metrics["traj"] = evaluate_trajectory_model(model, test_loader, criterion, device)
@@ -616,7 +723,6 @@ def main() -> None:
             args.hidden_dim,
             len(future_times),
             dropout=args.dropout,
-            monotone=not args.no_monotone_head,
         )
         model, history = train_trajectory_model(model, train_loader, val_loader, criterion, args.epochs, args.lr, args.weight_decay, device)
         metrics["dual"] = evaluate_trajectory_model(model, test_loader, criterion, device)

@@ -255,14 +255,24 @@ Task B 有两个模式：
 - 默认先做 prefix truncation，再按 `case_id` 组回 `32` 条 variations
 - 输入张量是 `[num_cases, 32, time, channels]`
 - 默认 future horizons 是：
-  - `500,1000,2000,4000,6000,8000,10000`
+  - `500,800,1500,2500,4000,6500,10000`
 
 **模型族**
 
 - `baseline`: 直接用训练集平均 survival curve
-- `direct`: 先把 32 条 variation 做均值，再直接回归整条 survival curve
+- `direct`: aggregation-before-encoding weak baseline；先把 32 条 variation 做均值，再直接回归整条 survival curve
+- `direct_mean_std`: 对 32 条 variation 分别计算逐时间点的 `mean / std / min / max`，拼接后直接回归 survival curve
 - `traj`: 每条 variation 先做 temporal encoding，再与 group context 融合
 - `dual`: 同时建模时间维和 variation 集合结构的 dual-attention 模型
+
+所有 Task C 神经网络统一使用 discrete-time hazard head：
+
+- 输出每个未来区间的条件失稳 hazard
+- survival curve 通过 `cumprod(1 - sigmoid(hazard_logits))` 构造，因此严格单调不增
+- `traj` / `dual` 使用逐 variation、仅在 at-risk 区间计算的 hazard NLL
+- `direct` / `direct_mean_std` 使用由 32 条 variation 的区间存活数和失稳数得到的 binomial hazard NLL
+
+运行后会生成平均 survival curve、代表性 case、per-horizon MAE、`q_pred` vs `q_true` scatter，以及 true/pred/error heatmap 五张结果图。
 
 这是最强调 perturbation-set 结构的任务。
 
@@ -274,29 +284,44 @@ Task B 有两个模式：
 
 **任务定义**
 
-`Task D` 不直接预测 stable / unstable，而是定义一个 system-level 发散时间：
+`Task D` 不直接预测 stable / unstable，而是在质心系中用 position + velocity 定义无量纲 phase-space separation：
 
-- 对有效 pair 计算
-  - `delta_a(t) = |a_i(t) - a_j(t)|`
-  - `R_a(t) = delta_a(t) / delta_a(0)`
-- 当 `R_a(t) > threshold` 时认为 pair 已发散
-- 把多个 pair 的发散时间聚合成 system-level `tau_system`
-- 实际训练目标是 `log_tau_system = log1p(tau_system)`
+- 每条 trajectory 逐时刻减去自身的质量加权质心位置和质心速度
+- position 和 velocity 分别用 pair 在 `t=0` 的 characteristic scale 归一化
+- 合并得到 `delta_x(t)`，并计算 `R_x(t) = delta_x(t) / delta_x(0)`
+- 当 `R_x(t) > threshold` 时记录首次越阈时间 `tau_system`
+- 在默认 `1 < R_x(t) < 100` 区间拟合 `log R_x(t)` 的斜率，得到 `lambda_phase_space`
+- 多个 pair 默认用 median 聚合为 system-level `tau_system` 和 `lambda_phase_space`
+- 当前主训练目标仍是 `log_tau_system = log1p(tau_system)`；`lambda_phase_space` 同时写入标签用于验证和后续回归
 
-**输入形式**
+脚本还会检查近似关系 `lambda_phase_space * tau_system / log(threshold)`，理想指数增长情况下该比值接近 `1`。
 
-- 静态 summary features
-- 可选 prefix sequence summaries
-- 可选位置/速度派生特征
-- 默认配对方式是 `DEFAULT_VALID_PAIRS = ((0,16), (1,17), ... , (15,31))`
+Task D 分成两个 setting。
 
-**模型族**
+**Task D-IC：initial-condition prediction**
 
-- `random forest`
-- `mlp`
-- `cnn`
+- 默认主实验：`--task-setting initial`
+- 输入只使用 `t=0` 的 masses、质量比、轨道尺度、偏心率、倾角、能量、角动量和周期等初始条件
+- 目标：`log1p(phase_space_divergence_time)`
+- 模型：`constant_median`、`random_forest`、`mlp`
+- 回答：仅根据初始轨道配置，能否推断未来的 Lyapunov-like divergence timescale
 
-这项任务更接近“从早期结构推断发散时间尺度”的物理 proxy 回归。
+**Task D-Prefix：early-window conditional prediction**
+
+- 显式使用：`--task-setting prefix`
+- 从实际 `times_complete` 计算 prefix 结束时间 `t_obs`
+- 只保留 `tau_system > t_obs` 的系统，避免输入窗口已经包含 divergence event
+- 目标改为 `log1p(tau_system - t_obs)`，即 remaining divergence time
+- 模型：
+  - `cnn_orbital`：32 条 variations 的逐时刻 orbital mean/std
+  - `cnn_phase_space`：在 orbital 基础上加入质心相对 position/velocity
+  - `set_cnn`：保留完整 `[B,32,T,C]` orbital ensemble，shared temporal CNN 后做 set mean pooling
+
+神经网络默认使用 `SmoothL1Loss(beta=0.5)`，可通过 `--loss mse` 切回 MSE。评价统一报告 log-time MAE/RMSE、Spearman、Pearson、factor-2/factor-3 accuracy 和 median absolute log error。
+
+输出按 setting 分到 `results/task_d_initial/` 或 `results/task_d_prefix_tobs_<prefix_len>/`，包含 `metrics.json`、`diagnostics.json`、`predictions.csv`、标签、feature importance 和 `plots/`。
+
+这个 target 是由有限扰动在 phase space 中增长得到的 empirical Lyapunov-like divergence timescale，不应解释成严格的 infinitesimal Lyapunov time。
 
 ### Task E: Forecasting Baselines
 
