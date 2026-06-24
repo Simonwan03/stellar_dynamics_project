@@ -20,7 +20,6 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRAJECTORY_KEYS = ("positions_complete", "velocities_complete")
 DEFAULT_ORBITAL_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
-ANGLE_FEATURES = {"incs", "APs", "LANs"}
 LOG1P_FEATURES = {"aratios", "mratios"}
 ORBITAL15_ANGLE_FEATURES = {"APs", "LANs"}
 
@@ -50,7 +49,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "dataset_v3")
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--representation", choices=["trajectory", "orbital", "orbital15"], default="trajectory")
+    parser.add_argument("--representation", choices=["trajectory", "orbital15"], default="trajectory")
     parser.add_argument("--trajectory-keys", type=str, default=",".join(DEFAULT_TRAJECTORY_KEYS))
     parser.add_argument("--orbital-features", type=str, default=",".join(DEFAULT_ORBITAL_FEATURES))
     parser.add_argument("--context-len", type=int, default=512)
@@ -104,7 +103,7 @@ def main() -> None:
     orbital_features = [item.strip() for item in args.orbital_features.split(",") if item.strip()]
     if args.representation == "trajectory" and not trajectory_keys:
         raise ValueError("No trajectory keys were selected.")
-    if args.representation == "orbital" and not orbital_features:
+    if args.representation == "orbital15" and not orbital_features:
         raise ValueError("No orbital features were selected.")
 
     data = load_eval_data(
@@ -320,10 +319,9 @@ def build_channel_names(source: Source, selected_keys: list[str], representation
         feature_name = key.removesuffix("_complete")
         prefix = "pos" if key == "positions_complete" else "vel" if key == "velocities_complete" else key
         shape = source.shapes[key]
-        if representation in {"orbital", "orbital15"}:
+        if representation == "orbital15":
             raw_dim = int(np.prod(shape))
-            angle_features = ANGLE_FEATURES if representation == "orbital" else ORBITAL15_ANGLE_FEATURES
-            if feature_name in angle_features:
+            if feature_name in ORBITAL15_ANGLE_FEATURES:
                 names.extend([f"{feature_name}_sin_{idx}" for idx in range(raw_dim)])
                 names.extend([f"{feature_name}_cos_{idx}" for idx in range(raw_dim)])
             else:
@@ -351,9 +349,6 @@ def transform_feature_array(key: str, raw: np.ndarray, representation: str) -> n
     if feature_name in LOG1P_FEATURES:
         with np.errstate(invalid="ignore"):
             return np.log1p(raw).astype(np.float32)
-    if feature_name in ANGLE_FEATURES:
-        flat = raw.reshape(raw.shape[0], -1)
-        return np.concatenate([np.sin(flat), np.cos(flat)], axis=-1).astype(np.float32)
     return raw
 
 
@@ -495,10 +490,14 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
         local_files_only=args.hf_local_files_only,
         **pipeline_kwargs,
     )
+    predict_parameters = inspect.signature(pipeline.predict).parameters
 
     def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
         context = torch.as_tensor(batch, dtype=torch.float32)
-        forecast = pipeline.predict(context, pred_len, num_samples=args.chronos_num_samples)
+        predict_kwargs: dict[str, Any] = {}
+        if "num_samples" in predict_parameters:
+            predict_kwargs["num_samples"] = args.chronos_num_samples
+        forecast = pipeline.predict(context, pred_len, **predict_kwargs)
         if isinstance(forecast, torch.Tensor):
             arr = forecast.detach().cpu().float().numpy()
         else:

@@ -1,0 +1,76 @@
+{
+  "representation": "trajectory",
+  "num_features": 18,
+  "channel_names": [
+    "pos_body0_x",
+    "pos_body0_y",
+    "pos_body0_z",
+    "pos_body1_x",
+    "pos_body1_y",
+    "pos_body1_z",
+    "pos_body2_x",
+    "pos_body2_y",
+    "pos_body2_z",
+    "vel_body0_x",
+    "vel_body0_y",
+    "vel_body0_z",
+    "vel_body1_x",
+    "vel_body1_y",
+    "vel_body1_z",
+    "vel_body2_x",
+    "vel_body2_y",
+    "vel_body2_z"
+  ],
+  "groups": [
+    {
+      "name": "positions",
+      "source_key": "positions_complete",
+      "source_shape": [
+        3,
+        3
+      ],
+      "transform": "flatten",
+      "channel_start": 0,
+      "channel_end": 9,
+      "channel_names": [
+        "pos_body0_x",
+        "pos_body0_y",
+        "pos_body0_z",
+        "pos_body1_x",
+        "pos_body1_y",
+        "pos_body1_z",
+        "pos_body2_x",
+        "pos_body2_y",
+        "pos_body2_z"
+      ]
+    },
+    {
+      "name": "velocities",
+      "source_key": "velocities_complete",
+      "source_shape": [
+        3,
+        3
+      ],
+      "transform": "flatten",
+      "channel_start": 9,
+      "channel_end": 18,
+      "channel_names": [
+        "vel_body0_x",
+        "vel_body0_y",
+        "vel_body0_z",
+        "vel_body1_x",
+        "vel_body1_y",
+        "vel_body1_z",
+        "vel_body2_x",
+        "vel_body2_y",
+        "vel_body2_z"
+      ]
+    }
+  ],
+  "actual_source_keys": {
+    "dataset_v3/results_batch_00_sampling_2.hdf5": {
+      "positions": "positions_complete",
+      "velocities": "velocities_complete"
+    }
+  }
+}

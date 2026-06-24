@@ -267,3 +267,6 @@ panda: raw_mse=5.8596e+07 raw_mae=407.626 z_mse=0.213708 runtime=8.8s
 256->64
 panda with mlp 4k raw_mse=7026.94 raw_mae=5.81212 z_mse=0.229276
               20k raw_mse=1992.26 raw_mae=2.50967 z_mse=0.173401
+
+
+PDEBENCH: An Extensive Benchmark for Scientific Machine Learning，NeurIPS 2022 Datasets and Benchmarks Track

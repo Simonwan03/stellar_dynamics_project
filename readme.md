@@ -327,48 +327,48 @@ Task D 分成两个 setting。
 
 相关入口：
 
-- [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py)
-- [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py)
+- [scripts/task_e_forecasting.py](/home/wan/stellar_dynamics/scripts/task_e_forecasting.py)
 - [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
 
-`Task E` 分成 3 条线。
+推荐优先使用统一入口 `scripts/task_e_forecasting.py`。它在 trajectory
+级别完成 train/val/test split，使用 train-only scaler，并统一输出 raw/z
+scale 的 overall、horizon-wise、channel-wise metrics。支持
+`persistence`, `ridge`, `tcn`, `patchtst`, `transformer`, 简化版
+`itransformer`, `timesfm`, `chronos`, `panda_zero_shot` 和
+`panda_adapter`。
 
-#### E.1 Orbital Transformer
+#### E.0 Baseline Results
 
-- 目标：从早期 orbital window 预测未来 orbital window
-- 实际训练入口：[train_transformer_orbital.py](/home/wan/stellar_dynamics/train_transformer_orbital.py)
-- 默认特征是通用 orbital stack：
-  - `aratios`, `mratios`, `eccs`, `incs`, `APs`, `LANs`
-  - 其中 `aratios`, `mratios` 做 `log1p`
-  - `incs`, `APs`, `LANs` 做 `sin/cos`
-  - 总计 `17` channels
-- 默认 full run：
-  - `context_len=256`
-  - `pred_len=64`
-  - `stride=32`
-  - `d_model=256`
-  - `4` 层 Transformer
+正式基线使用全部 `20` 个 sampling-2 shards（`160000` 条 trajectories），
+输入表示为 `orbital15`，预测设置为
+`context_len=200`, `pred_len=50`, `stride=20`。Scaler 仅使用训练 split
+中的 `8192` 条 trajectories；验证集和测试集分别随机评估 `50000` 个
+windows。
 
-#### E.2 Trajectory Transformer
+| Model | Val MSE-Z | Test MSE-Z | Test MAE-Z | Test MSE-Raw |
+|---|---:|---:|---:|---:|
+| Persistence | 0.808118 | 0.881501 | 0.395696 | 8.62724e8 |
+| Ridge (`alpha=1.0`) | 3.162180 | 1.958371 | 0.704020 | 1.18044e8 |
 
-- 目标：从早期 `positions_complete + velocities_complete` 预测未来状态窗口
-- 实际训练入口：[train_transformer_trajectory.py](/home/wan/stellar_dynamics/train_transformer_trajectory.py)
-- 默认表示是 `trajectory/raw_state18`
-- 默认 full run：
-  - `context_len=64`
-  - `pred_len=8`
-  - `stride=128`
-  - `d_model=128`
-  - `2` 层 Transformer
+Persistence 直接将 context 最后一个时刻复制到全部未来步，不进行训练。
+该结果作为 Task E 的最低比较基线：其他模型应主要在相同 split 和
+evaluation windows 下比较 `test_mse_z`。Raw-scale MSE 容易被高方差
+channel 主导，不适合脱离 channel-wise metrics 单独比较。
 
-这个分支刻意做得更轻，方便快速扫实验。
+Ridge 使用同样的 `orbital15`, `context_len=200`, `pred_len=50`,
+`stride=20` 和 `split_seed=42`，但由于需要在内存中展开窗口，仅使用
+`5000` 个训练 windows、`2000` 个验证 windows 和 `2000` 个测试
+windows。其 `test_mse_z=1.958371`，没有超过 Persistence。Ridge 的
+raw MSE 虽然更低，但不能据此判定整体效果更好。
 
-#### E.3 Foundation Forecasting
+注意：Persistence 和 Ridge 当前使用的 evaluation window 数量及 scaler
+统计范围不同，因此表格只记录已有结果，不属于严格的同条件模型排名。
+
+#### E.1 Foundation Forecasting
 
 - 目标：在同样的 forecasting 任务上评估 pretrained baselines
 - 支持表示：
   - `trajectory`
-  - `orbital`
   - `orbital15`
 - 支持模型：
   - `naive`
@@ -392,7 +392,7 @@ Task D 分成两个 setting。
 - `Task B`: [scripts/task_b_prefix_classifiers.py](/home/wan/stellar_dynamics/scripts/task_b_prefix_classifiers.py)
 - `Task C`: [scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
 - `Task D`: [scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
-- `Task E`: [scripts/task_e_transformer_orbital.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_orbital.py), [scripts/task_e_transformer_trajectory.py](/home/wan/stellar_dynamics/scripts/task_e_transformer_trajectory.py), [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
+- `Task E`: [scripts/task_e_forecasting.py](/home/wan/stellar_dynamics/scripts/task_e_forecasting.py), [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
 
 ## Environment
 

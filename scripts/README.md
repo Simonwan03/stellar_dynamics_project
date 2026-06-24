@@ -165,6 +165,54 @@ strict infinitesimal Lyapunov time.
 
 ## Task E
 
+Unified past-window -> future-window benchmark:
+
+```bash
+conda run -n stellar python scripts/task_e_forecasting.py \
+  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model persistence \
+  --context_len 200 \
+  --pred_len 50 \
+  --stride 20 \
+  --output_dir runs/task_e_persistence_orbital15_ctx200_pred50
+```
+
+The unified entry supports `orbital15` and `raw_state18`/`trajectory`, with
+trajectory-level train/validation/test splits
+and train-only standardization. Available models are:
+
+- `persistence`, `ridge`
+- `tcn`, `patchtst`, `transformer`, `itransformer`
+- `timesfm`, `chronos`, `panda_zero_shot`, `panda_adapter`
+
+Every run writes `config.json`, `feature_metadata.json`, `scaler.npz`,
+`val_metrics.json`, `test_metrics.json`, `horizon_metrics.csv`,
+`channel_metrics.csv`, and `predictions_sample.npz`. Trained models also write
+`train_log.csv` and `best_model.pt`; ridge writes `best_model.pkl`.
+
+Small end-to-end smoke test:
+
+```bash
+conda run -n stellar python scripts/task_e_forecasting.py \
+  --data_glob "dataset_v3/results_batch_00_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model tcn \
+  --context_len 32 \
+  --pred_len 8 \
+  --max_trajectories 100 \
+  --max_scaler_trajectories 70 \
+  --max_windows_per_trajectory 5 \
+  --epochs 2 \
+  --output_dir runs/task_e_tcn_smoke
+```
+
+Foundation dependencies are optional. Missing TimesFM, Chronos, or Panda
+packages/checkpoints produce a model-specific installation/checkpoint error;
+they do not affect persistence, ridge, or supervised models. `panda_zero_shot`
+and the current `panda_adapter` require `orbital15`. The `itransformer` option
+is the documented simple variable-token implementation.
+
 Dataset trajectory visualization:
 
 ```bash
@@ -176,44 +224,6 @@ conda run -n stellar python scripts/visualize_dataset_v3_trajectories.py \
 
 Add `--animation --time-stride 20` to save a GIF animation without making the
 file too large.
-
-Transformer orbital forecasting baseline. Debug first, then full.
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_orbital.py \
-  --mode debug \
-  --conda-env stellar \
-  --debug-epochs 3
-
-conda run -n stellar python scripts/task_e_transformer_orbital.py \
-  --mode full \
-  --conda-env stellar \
-  --full-epochs 50 \
-  --amp
-```
-
-Direct trajectory forecasting baseline for comparison. By default this predicts
-`positions_complete,velocities_complete` from the same past channels.
-
-```bash
-conda run -n stellar python scripts/task_e_transformer_trajectory.py \
-  --mode debug \
-  --conda-env stellar \
-  --debug-epochs 3
-
-conda run -n stellar python scripts/task_e_transformer_trajectory.py \
-  --mode full \
-  --conda-env stellar \
-  --full-epochs 10 \
-  --amp
-```
-
-The trajectory wrapper defaults to a faster short-horizon full run:
-`context_len=64`, `pred_len=8`, `stride=128`, a 2-layer `d_model=128` Transformer, and capped
-train/validation/test windows. It also estimates normalization from a capped
-training-trajectory subset. Increase `--max-train-windows`, lower
-`--full-stride`, raise `--max-normalization-trajectories`, or raise the model
-size when you want a slower exhaustive run.
 
 Pretrained foundation-model zero-shot trajectory baselines. Univariate models
 (`timesfm`, `chronos`, `patchtst`) treat each position/velocity channel as an
@@ -255,7 +265,7 @@ conda run -n stellar python scripts/task_e_foundation_forecasters.py \
 
 The default `GilpinLab/panda-72M` checkpoint expects `orbital15` style input
 with 15 channels. The script will raise a clear error if you try to use it with
-the 17-channel `orbital` representation or the 18-channel raw trajectory stack.
+the 18-channel raw trajectory stack.
 
 Panda temporal-window adapter fine-tuning. This freezes Panda by default and
 trains two temporal MLPs around it:

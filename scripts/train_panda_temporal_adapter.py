@@ -132,7 +132,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fine-tune temporal MLP window adapters around a Panda forecaster.")
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "dataset_v3")
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--representation", choices=["trajectory", "orbital", "orbital15"], default="orbital15")
+    parser.add_argument("--representation", choices=["trajectory", "orbital15"], default="orbital15")
     parser.add_argument("--trajectory-keys", type=str, default=",".join(DEFAULT_TRAJECTORY_KEYS))
     parser.add_argument("--orbital-features", type=str, default=",".join(DEFAULT_ORBITAL_FEATURES))
     parser.add_argument("--input-len", type=int, default=256)
