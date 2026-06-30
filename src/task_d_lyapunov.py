@@ -103,6 +103,7 @@ class PipelineConfig:
     loss: str = "huber"
     huber_beta: float = 0.5
     device: str | None = None
+    force_recompute_labels: bool = False
 
 
 def ensure_dir(path: str | Path) -> Path:
@@ -2135,22 +2136,32 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         group_size=config.group_size,
         valid_pairs=config.valid_pairs,
     )
-    labels_df, label_meta = build_labels_from_result_shards(
-        result_paths=result_paths,
-        group_size=config.group_size,
-        valid_pairs=config.valid_pairs,
-        threshold=config.threshold,
-        growth_lower=config.growth_lower,
-        growth_upper=config.growth_upper,
-        min_growth_points=config.min_growth_points,
-        aggregation=config.aggregation,
-        censoring_rule=config.censoring_rule,
-        completion_df=completion_df,
-        require_complete_valid_group=config.require_complete_valid_group,
-        max_systems=config.max_systems,
-    )
     labels_path = output_dir / "task_d_labels.csv"
-    labels_df.to_csv(labels_path, index=False)
+    labels_meta_path = output_dir / "task_d_labels_meta.json"
+    if labels_path.exists() and labels_meta_path.exists() and not config.force_recompute_labels:
+        print(f"Loading cached labels from {labels_path}")
+        labels_df = pd.read_csv(labels_path)
+        with open(labels_meta_path, "r", encoding="utf-8") as fh:
+            label_meta = json.load(fh)
+    else:
+        if config.force_recompute_labels and labels_path.exists():
+            print("--force-recompute set, rebuilding labels ...")
+        labels_df, label_meta = build_labels_from_result_shards(
+            result_paths=result_paths,
+            group_size=config.group_size,
+            valid_pairs=config.valid_pairs,
+            threshold=config.threshold,
+            growth_lower=config.growth_lower,
+            growth_upper=config.growth_upper,
+            min_growth_points=config.min_growth_points,
+            aggregation=config.aggregation,
+            censoring_rule=config.censoring_rule,
+            completion_df=completion_df,
+            require_complete_valid_group=config.require_complete_valid_group,
+            max_systems=config.max_systems,
+        )
+        labels_df.to_csv(labels_path, index=False)
+        write_json(labels_meta_path, label_meta)
     plots_dir = ensure_dir(output_dir / "plots")
     save_label_plots(labels_df=labels_df, output_dir=plots_dir, valid_pairs=config.valid_pairs)
 

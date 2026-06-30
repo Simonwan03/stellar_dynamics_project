@@ -1,14 +1,15 @@
 # Stellar Dynamics Research Repo
 
-这个仓库围绕 hierarchical three-body stability 数据集做 5 类任务：
+这个仓库围绕 hierarchical three-body stability 数据集做 6 类任务：
 
 - `Task A`: 只用初始条件做 system-level 稳定性预测
 - `Task B`: 用早期轨道前缀做 instability 分类或 group stable fraction 预测
 - `Task C`: 对完整 32-variation 系统做 multi-horizon survival 预测
 - `Task D`: 用半长轴发散时间定义 Lyapunov-like 回归目标
 - `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
+- `Task F`: 用成对扰动初值预测 stability-boundary sensitivity
 
-当前主线代码在 [scripts](</home/wan/stellar_dynamics/scripts>) 和 [src](</home/wan/stellar_dynamics/src>)；Panda 相关实验单独放在 [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>)。
+当前主线代码在 [scripts](</home/wan/stellar_dynamics/scripts>) 和 [src](</home/wan/stellar_dynamics/src>)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)。
 
 ## Repository Layout
 
@@ -16,7 +17,7 @@
 - [scripts](</home/wan/stellar_dynamics/scripts>): 任务级入口脚本
 - [src](</home/wan/stellar_dynamics/src>): 通用数据处理、模型、训练工具
 - [results](</home/wan/stellar_dynamics/results>) / [runs](</home/wan/stellar_dynamics/runs>) / [outputs](</home/wan/stellar_dynamics/outputs>): 各任务产物
-- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): Panda zero-shot / adapter / classifier 子项目
+- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): Panda submodule 与历史隔离实验区；新 Task E Panda 对比优先走主项目脚本
 
 ## `dataset_v3`
 
@@ -385,6 +386,36 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 - `panda`
   - 直接消费 multivariate window
   - 默认 checkpoint `GilpinLab/panda-72M` 期望 `orbital15`
+  - Panda 源码来自 `experiments/panda_threebody/vendor/panda` submodule
+  - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
+
+### Task F: Boundary Sensitivity
+
+入口脚本：[scripts/task_f_boundary_sensitivity.py](/home/wan/stellar_dynamics/scripts/task_f_boundary_sensitivity.py)
+
+**任务定义**
+
+- 输入：同一 base system 内成对 perturbation 的初始条件差异
+- 输出：多个 future horizons 上，pair 内两条 trajectory 的稳定性是否出现分歧
+- 默认 horizon 与 Task C 对齐：
+  - `500,800,1500,2500,4000,6500,10000`
+
+**输入形式**
+
+- 数据源：`dataset_v3/results_batch_*_sampling_2.hdf5` + `completed_systems_sampling_2.txt`
+- 默认表示：`pair_ic54`
+- 可选表示：`pair_ic72`
+- 默认每个 system 使用 `group_size=32`
+
+**模型族**
+
+- `constant`
+- `logistic`
+- `random_forest`
+- `xgboost`
+- `mlp`
+
+这项任务关注的是：非常接近的初始扰动对是否会跨过稳定性边界，因而与 Task A 的 system-level stable fraction 互补。
 
 ## Script Entry Points
 
@@ -393,6 +424,346 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 - `Task C`: [scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
 - `Task D`: [scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
 - `Task E`: [scripts/task_e_forecasting.py](/home/wan/stellar_dynamics/scripts/task_e_forecasting.py), [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
+- `Task F`: [scripts/task_f_boundary_sensitivity.py](/home/wan/stellar_dynamics/scripts/task_f_boundary_sensitivity.py)
+
+## Reproducible Commands
+
+下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；如在别的机器上运行，需要先安装 [environment.yml](/home/wan/stellar_dynamics/environment.yml)、[requirement.txt](/home/wan/stellar_dynamics/requirement.txt) 和可选的 [requirements-foundation.txt](/home/wan/stellar_dynamics/requirements-foundation.txt)。
+
+### Task A
+
+当前 `results/task_a/config.json` 对应的主实验：
+
+```bash
+conda run -n stellar python scripts/task_a_stability_classifier.py \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --time-horizon 10000 \
+  --output-dir results/task_a \
+  --features aratios,mratios,eccs,incs,APs,LANs \
+  --models mlp,xgboost \
+  --mlp-size large \
+  --xgb-size strong \
+  --test-size 0.2 \
+  --val-size 0.1 \
+  --seed 42 \
+  --batch-size 128 \
+  --epochs 50 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --early-stopping-patience 15 \
+  --early-stopping-min-delta 1e-4 \
+  --mlp-loss mse \
+  --device cuda
+```
+
+常用参数：
+
+- `--regroup --overwrite-tokenized`: 重新生成 `dataset_v3/ICs_sampling_2_groupof32_taska_orbital15.hdf5`
+- `--max-cases N`: smoke test 只跑前 `N` 个 systems
+- `--mlp-size small|base|large`: MLP hidden preset
+- `--xgb-size small|base|strong`: XGBoost preset
+- `--hidden 256,256,128` / `--dropout 0.2`: 手动覆盖 MLP 结构
+
+### Task B
+
+当前 `results/task_b/config.json` 对应的 trajectory binary 主实验：
+
+```bash
+conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --output-dir results/task_b \
+  --representation orbital15 \
+  --target-mode trajectory_binary \
+  --group-size 32 \
+  --group-aggregation concat \
+  --prefix-len 200 \
+  --time-stride 1 \
+  --time-horizon 10000 \
+  --models svm,cnn,tcn,attention \
+  --test-size 0.125 \
+  --val-size 0.1 \
+  --seed 42 \
+  --batch-size 256 \
+  --epochs 50 \
+  --early-stopping-patience 8 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --attention-heads 4 \
+  --dropout 0.2 \
+  --num-workers 0 \
+  --device cuda
+```
+
+Group fraction / set-attention 版本：
+
+```bash
+conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --output-dir results/task_b_group_attention \
+  --target-mode group_fraction \
+  --group-size 32 \
+  --group-aggregation set_attention \
+  --prefix-len 100 \
+  --time-stride 1 \
+  --models group_attention \
+  --test-size 0.125 \
+  --val-size 0.1 \
+  --seed 42 \
+  --batch-size 256 \
+  --epochs 20 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --hidden-dim 96 \
+  --dropout 0.2 \
+  --num-workers 0 \
+  --device cuda
+```
+
+常用参数：
+
+- `--representation orbital15|full`: `orbital15` 是 15 通道；`full` 会使用更宽的 orbital + geometry/time stack
+- `--target-mode trajectory_binary|group_fraction`: 单 trajectory 分类或 system stable fraction 回归
+- `--group-aggregation concat|set_attention`: 只影响 `group_fraction`
+- `--max-shards N --rows-per-shard M`: smoke test / 限制数据量
+- `--hidden-dim`, `--tcn-levels`, `--attention-layers`, `--attention-heads`: 覆盖自动模型规模
+- `--no-geom --no-time`: 仅对 `--representation full` 生效
+
+### Task C
+
+当前 `results/task_c/config.json` 对应的主实验：
+
+```bash
+conda run -n stellar python scripts/task_c_survival.py \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --output-dir results/task_c \
+  --group-size 32 \
+  --prefix-len 100 \
+  --time-stride 1 \
+  --future-times 500,800,1500,2500,4000,6500,10000 \
+  --models baseline,direct,direct_mean_std,traj,dual \
+  --encoder-type cnn \
+  --test-ratio 0.2 \
+  --val-ratio 0.1 \
+  --seed 42 \
+  --batch-size 32 \
+  --epochs 40 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --hidden-dim 128 \
+  --dropout 0.2 \
+  --num-workers 0 \
+  --device cuda
+```
+
+常用参数：
+
+- `--max-shards`, `--rows-per-shard`, `--max-cases`: 限制数据量
+- `--future-times`: 修改 survival curve 的评估 horizons
+- `--models baseline,direct,direct_mean_std,traj,dual`: 选择要跑的模型
+- `--encoder-type cnn|gru|attention`: 神经网络 encoder
+- `--no-geom --no-time`: 移除 geometry / normalized time features
+
+### Task D
+
+当前 `results/task_d_initial/metrics.json` 对应的 initial-condition 主实验：
+
+```bash
+conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+  --task-setting initial \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --threshold 1000 \
+  --growth-lower 1 \
+  --growth-upper 100 \
+  --min-growth-points 5 \
+  --aggregation median \
+  --censoring-rule median_pair \
+  --feature-aggregation first \
+  --test-size 0.2 \
+  --seed 42 \
+  --output-dir results/task_d_initial \
+  --completion-table-name completed_systems_sampling_2.txt \
+  --prefix-len 200 \
+  --prefix-time-stride 1 \
+  --sequence-aggregation mean_std \
+  --mlp-epochs 80 \
+  --cnn-epochs 80 \
+  --batch-size 128 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --dropout 0.1 \
+  --val-fraction 0.1 \
+  --patience 12 \
+  --loss huber \
+  --huber-beta 0.5
+```
+
+Prefix setting：
+
+```bash
+conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+  --task-setting prefix \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --threshold 1000 \
+  --growth-lower 1 \
+  --growth-upper 100 \
+  --prefix-len 200 \
+  --prefix-time-stride 1 \
+  --sequence-aggregation mean_std \
+  --output-dir results/task_d_prefix_tobs_200 \
+  --mlp-epochs 80 \
+  --cnn-epochs 80 \
+  --batch-size 128 \
+  --loss huber \
+  --huber-beta 0.5
+```
+
+常用参数：
+
+- `--force-recompute`: 忽略缓存标签，重新计算 `tau_system`
+- `--exclude-censored`: 去掉 censored systems
+- `--feature-aggregation first|mean_std`: initial setting 的 feature 聚合方式
+- `--no-mlp`, `--no-cnn-orbital`, `--no-cnn-phase-space`, `--no-set-cnn`: 关闭对应神经模型
+- `--loss mse|huber`: 神经网络回归损失
+- `--allow-incomplete-valid-group`: 放宽完整 `32` 条有效 variation 的要求
+
+### Task E
+
+统一 forecasting 入口。当前 `results/task_e_local_timesfm/config.json` 对应的 local TimesFM zero-shot 实验：
+
+```bash
+conda run -n stellar python scripts/task_e_forecasting.py \
+  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model timesfm \
+  --context_len 200 \
+  --pred_len 50 \
+  --stride 20 \
+  --split_seed 42 \
+  --seed 42 \
+  --train_frac 0.7 \
+  --val_frac 0.15 \
+  --batch_size 128 \
+  --num_workers 0 \
+  --epochs 50 \
+  --lr 0.001 \
+  --weight_decay 0.0001 \
+  --patience 10 \
+  --grad_clip 1.0 \
+  --hidden_dim 128 \
+  --num_layers 4 \
+  --kernel_size 3 \
+  --dropout 0.1 \
+  --patch_len 16 \
+  --patch_stride 8 \
+  --d_model 128 \
+  --n_heads 4 \
+  --ridge_alpha 1.0 \
+  --num_eval_windows 128 \
+  --foundation_batch_size 32 \
+  --timesfm_model_id google/timesfm-2.5-200m-pytorch \
+  --timesfm_backend auto \
+  --chronos_model_id amazon/chronos-bolt-small \
+  --chronos_variant bolt \
+  --chronos_num_samples 20 \
+  --panda_model_id GilpinLab/panda-72M \
+  --freeze_panda \
+  --adapter_lr 0.0001 \
+  --adapter_chunk_size 4096 \
+  --chronos_adapter_context_len 512 \
+  --timesfm_adapter_context_len 512 \
+  --timesfm_adapter_pred_len 64 \
+  --num_train_windows_for_adapter 4096 \
+  --hf_local_files_only \
+  --torch_dtype auto \
+  --output_dir results/task_e_local_timesfm \
+  --prediction_samples 16 \
+  --log_every_batches 100
+```
+
+更轻量的 supervised smoke test：
+
+```bash
+conda run -n stellar python scripts/task_e_forecasting.py \
+  --data_glob "dataset_v3/results_batch_00_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model tcn \
+  --context_len 32 \
+  --pred_len 8 \
+  --stride 20 \
+  --max_trajectories 100 \
+  --max_scaler_trajectories 70 \
+  --max_windows_per_trajectory 5 \
+  --epochs 2 \
+  --output_dir runs/task_e_tcn_smoke
+```
+
+常用参数：
+
+- `--model persistence|ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
+- `--representation orbital15|raw_state18|trajectory`
+- `--max_trajectories`, `--max_windows_per_trajectory`, `--max_train_windows`, `--max_val_windows`, `--max_test_windows`: 控制窗口数量
+- `--drop_nan_windows` / `--no-drop_nan_windows`: 是否丢弃非有限窗口
+- `--amp`: 启用 mixed precision
+- `--hf_local_files_only` / `--no-hf_local_files_only`: foundation checkpoint 是否只从本地 cache 读取
+- Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
+
+旧 foundation baseline 入口仍可使用：
+
+```bash
+conda run -n stellar python scripts/task_e_foundation_forecasters.py \
+  --models naive,timesfm,chronos,patchtst,panda \
+  --representation orbital15 \
+  --output-dir runs/foundation_orbital_baselines \
+  --num-windows 256 \
+  --context-len 512 \
+  --pred-len 128 \
+  --batch-size 128 \
+  --device cuda
+```
+
+### Task F
+
+当前 `results/task_f_boundary_sensitivity/config.json` 对应的主实验：
+
+```bash
+conda run -n stellar python scripts/task_f_boundary_sensitivity.py \
+  --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --completed-systems dataset_v3/completed_systems_sampling_2.txt \
+  --output-dir results/task_f_boundary_sensitivity \
+  --representation pair_ic54 \
+  --models constant logistic random_forest xgboost mlp \
+  --horizons 500 800 1500 2500 4000 6500 10000 \
+  --group-size 32 \
+  --seed 42 \
+  --rf-estimators 500 \
+  --rf-min-samples-leaf 2 \
+  --xgb-estimators 500 \
+  --xgb-learning-rate 0.05 \
+  --xgb-max-depth 4 \
+  --batch-size 512 \
+  --epochs 30 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --dropout 0.2 \
+  --patience 8
+```
+
+常用参数：
+
+- `--representation pair_ic54|pair_ic72`: 选择 pair 初值特征维度
+- `--models constant logistic random_forest xgboost mlp`: 空格分隔的模型列表
+- `--horizons`: 空格分隔的评估时间点
+- `--max-systems N`: 限制 systems 数量做 smoke test
+- `--device cuda`: 显式指定 MLP 训练设备
 
 ## Environment
 

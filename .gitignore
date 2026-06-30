@@ -4,6 +4,19 @@ dataset/
 datasets/
 dataset_v2/
 dataset_v3/
+
+# local pretrained checkpoints and model caches
+checkpoints/
+external_checkpoints/
+hf_cache/
+.cache/
+experiments/panda_threebody/data/panda_arrow/
+experiments/panda_threebody/outputs/
+
+# Python cache
+__pycache__/
+*.pyc
+
 # large files
 *.zip
 *.tar

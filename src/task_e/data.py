@@ -199,6 +199,7 @@ def prepare_forecasting_data(
     window_sampling: str = "sequential",
     drop_nan_windows: bool = False,
     max_scaler_trajectories: int = 0,
+    verbose: bool = True,
 ) -> PreparedForecastData:
     representation = normalize_representation(representation)
     if context_len <= 0 or pred_len <= 0 or stride <= 0:
@@ -211,8 +212,22 @@ def prepare_forecasting_data(
     paths = [Path(path) for path in sorted(glob.glob(data_glob))]
     if not paths:
         raise FileNotFoundError(f"No HDF5 files matched --data_glob={data_glob!r}")
+    if verbose:
+        print(f"[data] matched {len(paths)} HDF5 shards for {data_glob!r}", flush=True)
     sources = inspect_sources(paths, representation)
+    if verbose:
+        total_rows = sum(source.row_count for source in sources)
+        print(
+            f"[data] inspected {len(sources)} usable shards: trajectories={total_rows}, "
+            f"T={sources[0].time_steps}, representation={representation}",
+            flush=True,
+        )
     feature_metadata = build_feature_metadata(sources[0], representation)
+    if verbose:
+        print(
+            f"[data] built feature metadata: channels={feature_metadata['num_features']}",
+            flush=True,
+        )
     source_ids, local_ids = build_source_lookup(sources)
     trajectory_count = int(source_ids.size)
 
@@ -222,12 +237,25 @@ def prepare_forecasting_data(
     else:
         selected = np.arange(trajectory_count, dtype=np.int64)
     split_indices = split_trajectory_indices(selected, split_seed, train_frac, val_frac)
+    if verbose:
+        print(
+            "[data] split trajectories: "
+            f"train={split_indices['train'].size}, val={split_indices['val'].size}, "
+            f"test={split_indices['test'].size}",
+            flush=True,
+        )
 
     scaler_indices = split_indices["train"]
     if 0 < max_scaler_trajectories < scaler_indices.size:
         rng = np.random.default_rng(split_seed + 23)
         scaler_indices = np.sort(
             rng.choice(scaler_indices, size=max_scaler_trajectories, replace=False)
+        )
+    if verbose:
+        print(
+            f"[data] fitting scaler on {scaler_indices.size} train trajectories "
+            f"(max_scaler_trajectories={max_scaler_trajectories})",
+            flush=True,
         )
     scaler = fit_scaler(
         sources,
@@ -236,7 +264,10 @@ def prepare_forecasting_data(
         scaler_indices,
         feature_metadata,
         representation,
+        verbose=verbose,
     )
+    if verbose:
+        print("[data] scaler fit complete; constructing window datasets", flush=True)
 
     common = dict(
         sources=sources,
@@ -261,6 +292,12 @@ def prepare_forecasting_data(
     test_dataset = ForecastWindowDataset(
         trajectory_indices=split_indices["test"], seed=split_seed + 103, **common
     )
+    if verbose:
+        print(
+            f"[data] dataset windows: train={len(train_dataset)}, val={len(val_dataset)}, "
+            f"test={len(test_dataset)}",
+            flush=True,
+        )
     feature_metadata["representation"] = representation
     feature_metadata["actual_source_keys"] = {
         str(source.path): source.resolved_keys for source in sources
@@ -427,15 +464,29 @@ def fit_scaler(
     feature_metadata: dict[str, Any],
     representation: str,
     chunk_size: int = 64,
+    verbose: bool = True,
 ) -> StandardScaler:
     channels = int(feature_metadata["num_features"])
     sums = np.zeros(channels, dtype=np.float64)
     sumsq = np.zeros(channels, dtype=np.float64)
     counts = np.zeros(channels, dtype=np.int64)
+    source_rows = [
+        np.sort(local_ids[train_indices[source_ids[train_indices] == source_id]])
+        for source_id in range(len(sources))
+    ]
+    total_rows = int(sum(rows.size for rows in source_rows))
+    processed_rows = 0
+    last_reported_percent = -1
     for source_id, source in enumerate(sources):
-        rows = np.sort(local_ids[train_indices[source_ids[train_indices] == source_id]])
+        rows = source_rows[source_id]
         if rows.size == 0:
             continue
+        if verbose:
+            print(
+                f"[data] scaler shard {source_id + 1}/{len(sources)}: "
+                f"{source.path.name}, rows={rows.size}",
+                flush=True,
+            )
         with h5py.File(source.path, "r") as handle:
             for offset in range(0, rows.size, chunk_size):
                 batch_rows = rows[offset : offset + chunk_size]
@@ -451,6 +502,16 @@ def fit_scaler(
                 sums += safe.sum(axis=0, dtype=np.float64)
                 sumsq += np.square(safe, dtype=np.float64).sum(axis=0, dtype=np.float64)
                 counts += finite.sum(axis=0)
+                processed_rows += int(batch_rows.size)
+                if verbose and total_rows > 0:
+                    percent = int(processed_rows * 100 / total_rows)
+                    if percent >= last_reported_percent + 10 or processed_rows == total_rows:
+                        last_reported_percent = percent
+                        print(
+                            f"[data] scaler progress: {processed_rows}/{total_rows} "
+                            f"trajectories ({percent}%)",
+                            flush=True,
+                        )
     if np.any(counts == 0):
         raise ValueError("At least one feature channel has no finite training values.")
     if np.any(counts < counts.max()):

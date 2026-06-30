@@ -18,6 +18,11 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.task_e.panda_dependency import load_panda_pretrained  # noqa: E402
+
 DEFAULT_TRAJECTORY_KEYS = ("positions_complete", "velocities_complete")
 DEFAULT_ORBITAL_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
 LOG1P_FEATURES = {"aratios", "mratios"}
@@ -540,28 +545,11 @@ def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np
 
 
 def load_panda_model(args: argparse.Namespace, device: str) -> torch.nn.Module:
-    vendor_root = ROOT / "experiments" / "panda_threebody" / "vendor" / "panda"
-    if str(vendor_root) not in sys.path:
-        sys.path.insert(0, str(vendor_root))
-
-    try:
-        from panda.patchtst.patchtst import PatchTSTForPrediction  # type: ignore
-    except ImportError as exc:
-        raise ImportError(
-            "Panda is not importable. Ensure experiments/panda_threebody/vendor/panda is present "
-            "and the required dependencies are installed."
-        ) from exc
-
-    try:
-        model = PatchTSTForPrediction.from_pretrained(
-            args.panda_model_id,
-            local_files_only=args.hf_local_files_only,
-        ).to(device)
-    except Exception as exc:
-        raise RuntimeError(format_checkpoint_load_error("Panda", args.panda_model_id, args.hf_local_files_only, exc)) from exc
-
-    model.eval()
-    return model
+    return load_panda_pretrained(
+        args.panda_model_id,
+        device,
+        local_files_only=args.hf_local_files_only,
+    )
 
 
 def build_patchtst_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:

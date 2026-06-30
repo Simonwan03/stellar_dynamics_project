@@ -51,6 +51,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loss", choices=["mse", "huber"], default="huber")
     parser.add_argument("--huber-beta", type=float, default=0.5)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--force-recompute", action="store_true", help="Recompute labels even if cached CSV exists.")
     return parser
 
 
@@ -99,6 +100,7 @@ def main() -> None:
         loss=args.loss,
         huber_beta=args.huber_beta,
         device=args.device,
+        force_recompute_labels=args.force_recompute,
     )
     run_pipeline(config)
     print(f"Task D complete. Outputs: {output_dir}")
