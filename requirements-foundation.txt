@@ -1,2 +1,34 @@
+# Optional dependencies for Task E foundation-model baselines.
+#
+# Install this after the base environment/requirements:
+#   pip install -r requirement.txt
+#   pip install -r requirements-foundation.txt
+#
+# Panda source code is not installed from pip here. It is a git submodule at:
+#   experiments/panda_threebody/vendor/panda
+# Initialize it with:
+#   git submodule update --init --recursive
+
+# Shared Hugging Face / transformer stack.
+# Panda's vendored pyproject pins transformers 4.40.2; keep this version here
+# so `panda.patchtst.patchtst.PatchTSTForPrediction` stays compatible.
+transformers==4.40.2
+tokenizers==0.19.1
+huggingface-hub>=0.19,<1
+accelerate>=0.34
+safetensors>=0.4
+sentencepiece>=0.2
+
+# Panda / GluonTS utilities used by the vendored Panda code and legacy
+# experiments/panda_threebody entrypoints.
+gluonts[arrow]==0.16.2
+hydra-core>=1.3
+orjson>=3.9
+statsmodels>=0.14
+wandb>=0.16
+
+# TimesFM zero-shot and adapter baselines.
 git+https://github.com/google-research/timesfm.git
+
+# Chronos zero-shot and adapter baselines.
 git+https://github.com/amazon-science/chronos-forecasting.git
