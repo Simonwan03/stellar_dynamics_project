@@ -54,7 +54,7 @@ conda run -n stellar python -m tasks.task_e \
   --pred_len 50 \
   --num_eval_windows 256 \
   --panda_model_id GilpinLab/panda-72M \
-  --hf_local_files_only \
+  --hf-local-files-only \
   --output_dir runs/task_e_panda_zero_shot
 ```
 
@@ -65,7 +65,7 @@ conda run -n stellar python -m tasks.task_e \
   --representation orbital15 \
   --model panda_zero_shot \
   --panda_model_id GilpinLab/panda-72M \
-  --no-hf_local_files_only \
+  --no-hf-local-files-only \
   --output_dir runs/task_e_panda_zero_shot
 ```
 
@@ -76,7 +76,7 @@ conda run -n stellar python -m tasks.task_e \
   --representation orbital15 \
   --model panda_zero_shot \
   --panda_model_id checkpoints/panda/GilpinLab--panda-72M \
-  --hf_local_files_only \
+  --hf-local-files-only \
   --output_dir runs/task_e_panda_zero_shot_local
 ```
 
@@ -91,7 +91,7 @@ conda run -n stellar python -m tasks.task_e \
   --num_train_windows_for_adapter 4096 \
   --freeze_panda \
   --panda_model_id GilpinLab/panda-72M \
-  --hf_local_files_only \
+  --hf-local-files-only \
   --output_dir runs/task_e_panda_adapter
 ```
 

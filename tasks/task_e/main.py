@@ -124,7 +124,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timesfm_adapter_context_len", type=int, default=512)
     parser.add_argument("--timesfm_adapter_pred_len", type=int, default=64)
     parser.add_argument("--num_train_windows_for_adapter", type=int, default=4096)
-    parser.add_argument("--hf_local_files_only", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--hf-local-files-only",
+        "--hf_local_files_only",
+        dest="hf_local_files_only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--torch_dtype", choices=["auto", "float32", "bfloat16", "float16"], default="auto")
     parser.add_argument(
         "--distribution_bins",
@@ -139,6 +145,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Additive smoothing used for KL divergence and Hellinger distance histograms.",
     )
     parser.add_argument("--output_dir", type=Path, required=True)
+    parser.add_argument(
+        "--resume_from",
+        type=Path,
+        default=None,
+        help="Checkpoint to restore before training. --epochs is the number of additional epochs.",
+    )
+    parser.add_argument(
+        "--eval_only",
+        action="store_true",
+        help="Restore --resume_from and run validation/test evaluation without updating model weights.",
+    )
     parser.add_argument("--prediction_samples", type=int, default=16)
     parser.add_argument("--log_every_batches", type=int, default=100)
     return parser
@@ -269,7 +286,17 @@ def main() -> None:
         print("[task_e] loading Panda adapter model", flush=True)
         model = build_panda_adapter(args, num_features, device)
         save_model_config(args.output_dir, config, model)
-        train_model(model, loaders, args, config, prepared, device, amp_enabled, lr=args.adapter_lr)
+        if args.eval_only:
+            if args.resume_from is None:
+                raise ValueError("--eval_only requires --resume_from.")
+            checkpoint_path = args.resume_from.expanduser().resolve()
+            if not checkpoint_path.is_file():
+                raise FileNotFoundError(f"Evaluation checkpoint does not exist: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+            load_checkpoint_state(model, checkpoint)
+            print(f"[task_e] evaluating checkpoint {checkpoint_path}", flush=True)
+        else:
+            train_model(model, loaders, args, config, prepared, device, amp_enabled, lr=args.adapter_lr)
         val_pred, val_target, _ = predict_model(
             model, loaders["val"], device, amp_enabled, args.log_every_batches, "val"
         )
@@ -480,8 +507,27 @@ def train_model(
     best_val = float("inf")
     best_epoch = -1
     stale_epochs = 0
+    start_epoch = 1
 
-    for epoch in range(1, args.epochs + 1):
+    if args.resume_from is not None:
+        checkpoint_path = args.resume_from.expanduser().resolve()
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Resume checkpoint does not exist: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        load_checkpoint_state(model, checkpoint)
+        if "optimizer_state_dict" not in checkpoint:
+            raise ValueError(f"Resume checkpoint has no optimizer state: {checkpoint_path}")
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        best_val = float(checkpoint.get("val_mse_z", float("inf")))
+        best_epoch = int(checkpoint.get("epoch", 0))
+        start_epoch = best_epoch + 1
+        print(
+            f"Resumed from {checkpoint_path} at epoch {best_epoch}; "
+            f"best val_mse_z={best_val:.6g}. Training {args.epochs} additional epoch(s).",
+            flush=True,
+        )
+
+    for epoch in range(start_epoch, start_epoch + args.epochs):
         model.train()
         train_sum = 0.0
         train_count = 0

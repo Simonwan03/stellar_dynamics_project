@@ -680,7 +680,7 @@ conda run -n stellar python -m tasks.task_e \
   --timesfm_adapter_context_len 512 \
   --timesfm_adapter_pred_len 64 \
   --num_train_windows_for_adapter 4096 \
-  --hf_local_files_only \
+  --hf-local-files-only \
   --torch_dtype auto \
   --output_dir results/task_e_local_timesfm \
   --prediction_samples 16 \
@@ -713,7 +713,7 @@ conda run -n stellar python -m tasks.task_e \
 - `--completion_table`: completion metadata 路径，用于过滤无效 trajectory 和事件后窗口
 - `--require_complete_systems` / `--no-require_complete_systems`: 是否只保留完整有效的 32-variation system
 - `--amp`: 启用 mixed precision
-- `--hf_local_files_only` / `--no-hf_local_files_only`: foundation checkpoint 是否只从本地 cache 读取
+- `--hf-local-files-only` / `--no-hf-local-files-only`: foundation checkpoint 是否只从本地 cache 读取
 - Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
 
 ### Task F

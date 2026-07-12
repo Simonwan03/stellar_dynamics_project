@@ -121,6 +121,19 @@ class ForecastWindowDataset(Dataset):
             raise ValueError("No valid forecasting windows remain after completion-time filtering.")
         self.record_trajectories = np.concatenate(record_trajectories)
         self.record_starts = np.concatenate(record_starts)
+        if self.drop_nan_windows:
+            finite_mask = np.fromiter(
+                (
+                    np.isfinite(self._load_window(int(global_idx), int(start))).all()
+                    for global_idx, start in zip(self.record_trajectories, self.record_starts)
+                ),
+                dtype=bool,
+                count=self.record_starts.size,
+            )
+            self.record_trajectories = self.record_trajectories[finite_mask]
+            self.record_starts = self.record_starts[finite_mask]
+            if not self.record_starts.size:
+                raise ValueError("No finite forecasting windows remain after completion-time filtering.")
 
     def __len__(self) -> int:
         return int(self.record_starts.size)

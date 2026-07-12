@@ -490,11 +490,26 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
     dtype = resolve_torch_dtype(args.torch_dtype, device)
     if dtype is not None:
         pipeline_kwargs["dtype"] = dtype
-    pipeline = ChronosPipeline.from_pretrained(
-        args.chronos_model_id,
-        local_files_only=args.hf_local_files_only,
-        **pipeline_kwargs,
-    )
+    try:
+        pipeline = ChronosPipeline.from_pretrained(
+            args.chronos_model_id,
+            local_files_only=args.hf_local_files_only,
+            **pipeline_kwargs,
+        )
+    except TypeError as exc:
+        # Chronos 1.x forwards loader kwargs to Transformers, which expects
+        # ``torch_dtype`` rather than the newer Chronos ``dtype`` spelling.
+        if "unexpected keyword argument 'dtype'" not in str(exc):
+            raise
+        legacy_kwargs = dict(pipeline_kwargs)
+        dtype = legacy_kwargs.pop("dtype", None)
+        if dtype is not None:
+            legacy_kwargs["torch_dtype"] = dtype
+        pipeline = ChronosPipeline.from_pretrained(
+            args.chronos_model_id,
+            local_files_only=args.hf_local_files_only,
+            **legacy_kwargs,
+        )
     predict_parameters = inspect.signature(pipeline.predict).parameters
 
     def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
