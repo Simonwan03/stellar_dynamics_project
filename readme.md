@@ -150,7 +150,7 @@
 
 ### Task A: Group Stability from Initial Conditions
 
-入口脚本：[scripts/task_a_stability_classifier.py](/home/wan/stellar_dynamics/scripts/task_a_stability_classifier.py)
+入口脚本：[tasks/task_a/main.py](/home/wan/stellar_dynamics/tasks/task_a/main.py)
 
 **任务定义**
 
@@ -182,7 +182,7 @@
 
 ### Task B: Prefix-Based Instability Prediction
 
-入口脚本：[scripts/task_b_prefix_classifiers.py](/home/wan/stellar_dynamics/scripts/task_b_prefix_classifiers.py)
+入口脚本：[tasks/task_b/main.py](/home/wan/stellar_dynamics/tasks/task_b/main.py)
 
 **任务定义**
 
@@ -240,7 +240,7 @@ Task B 有两个模式：
 
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
-入口脚本：[scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
+入口脚本：[tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
 
 **任务定义**
 
@@ -279,9 +279,9 @@ Task B 有两个模式：
 
 ### Task D: Lyapunov-Like Divergence Time Regression
 
-入口脚本：[scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
+入口脚本：[tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 
-底层实现：[src/task_d_lyapunov.py](/home/wan/stellar_dynamics/src/task_d_lyapunov.py)
+底层实现：[tasks/task_d/pipeline.py](/home/wan/stellar_dynamics/tasks/task_d/pipeline.py)
 
 **任务定义**
 
@@ -328,11 +328,9 @@ Task D 分成两个 setting。
 
 相关入口：
 
-- [scripts/task_e_forecasting.py](/home/wan/stellar_dynamics/scripts/task_e_forecasting.py)
-- [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
-
-推荐优先使用统一入口 `scripts/task_e_forecasting.py`。它在 trajectory
-级别完成 train/val/test split，使用 train-only scaler，并统一输出 raw/z
+- [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
+推荐优先使用统一入口 `tasks/task_e/main.py`。它按 32-variation base system
+完成 train/val/test group split，使用 completion-aware train-window scaler，并统一输出 transformed/z
 scale 的 overall、horizon-wise、channel-wise metrics。支持
 `persistence`, `ridge`, `tcn`, `patchtst`, `transformer`, 简化版
 `itransformer`, `timesfm`, `chronos`, `panda_zero_shot` 和
@@ -391,7 +389,7 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 
 ### Task F: Boundary Sensitivity
 
-入口脚本：[scripts/task_f_boundary_sensitivity.py](/home/wan/stellar_dynamics/scripts/task_f_boundary_sensitivity.py)
+入口脚本：[tasks/task_f/main.py](/home/wan/stellar_dynamics/tasks/task_f/main.py)
 
 **任务定义**
 
@@ -419,12 +417,12 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 
 ## Script Entry Points
 
-- `Task A`: [scripts/task_a_stability_classifier.py](/home/wan/stellar_dynamics/scripts/task_a_stability_classifier.py)
-- `Task B`: [scripts/task_b_prefix_classifiers.py](/home/wan/stellar_dynamics/scripts/task_b_prefix_classifiers.py)
-- `Task C`: [scripts/task_c_survival.py](/home/wan/stellar_dynamics/scripts/task_c_survival.py)
-- `Task D`: [scripts/task_d_lyapunov_regression.py](/home/wan/stellar_dynamics/scripts/task_d_lyapunov_regression.py)
-- `Task E`: [scripts/task_e_forecasting.py](/home/wan/stellar_dynamics/scripts/task_e_forecasting.py), [scripts/task_e_foundation_forecasters.py](/home/wan/stellar_dynamics/scripts/task_e_foundation_forecasters.py)
-- `Task F`: [scripts/task_f_boundary_sensitivity.py](/home/wan/stellar_dynamics/scripts/task_f_boundary_sensitivity.py)
+- `Task A`: [tasks/task_a/main.py](/home/wan/stellar_dynamics/tasks/task_a/main.py)
+- `Task B`: [tasks/task_b/main.py](/home/wan/stellar_dynamics/tasks/task_b/main.py)
+- `Task C`: [tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
+- `Task D`: [tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
+- `Task E`: [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
+- `Task F`: [tasks/task_f/main.py](/home/wan/stellar_dynamics/tasks/task_f/main.py)
 
 ## Reproducible Commands
 
@@ -435,7 +433,7 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 当前 `results/task_a/config.json` 对应的主实验：
 
 ```bash
-conda run -n stellar python scripts/task_a_stability_classifier.py \
+conda run -n stellar python -m tasks.task_a \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --group-size 32 \
@@ -471,7 +469,7 @@ conda run -n stellar python scripts/task_a_stability_classifier.py \
 当前 `results/task_b/config.json` 对应的 trajectory binary 主实验：
 
 ```bash
-conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+conda run -n stellar python -m tasks.task_b \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --output-dir results/task_b \
@@ -500,7 +498,7 @@ conda run -n stellar python scripts/task_b_prefix_classifiers.py \
 Group fraction / set-attention 版本：
 
 ```bash
-conda run -n stellar python scripts/task_b_prefix_classifiers.py \
+conda run -n stellar python -m tasks.task_b \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --output-dir results/task_b_group_attention \
@@ -537,7 +535,7 @@ conda run -n stellar python scripts/task_b_prefix_classifiers.py \
 当前 `results/task_c/config.json` 对应的主实验：
 
 ```bash
-conda run -n stellar python scripts/task_c_survival.py \
+conda run -n stellar python -m tasks.task_c \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --output-dir results/task_c \
@@ -573,7 +571,7 @@ conda run -n stellar python scripts/task_c_survival.py \
 当前 `results/task_d_initial/metrics.json` 对应的 initial-condition 主实验：
 
 ```bash
-conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
@@ -607,7 +605,7 @@ conda run -n stellar python scripts/task_d_lyapunov_regression.py \
 Prefix setting：
 
 ```bash
-conda run -n stellar python scripts/task_d_lyapunov_regression.py \
+conda run -n stellar python -m tasks.task_d \
   --task-setting prefix \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
@@ -640,7 +638,7 @@ conda run -n stellar python scripts/task_d_lyapunov_regression.py \
 统一 forecasting 入口。当前 `results/task_e_local_timesfm/config.json` 对应的 local TimesFM zero-shot 实验：
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
   --model timesfm \
@@ -692,7 +690,7 @@ conda run -n stellar python scripts/task_e_forecasting.py \
 更轻量的 supervised smoke test：
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_00_sampling_2.hdf5" \
   --representation orbital15 \
   --model tcn \
@@ -711,31 +709,19 @@ conda run -n stellar python scripts/task_e_forecasting.py \
 - `--model persistence|ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
 - `--representation orbital15|raw_state18|trajectory`
 - `--max_trajectories`, `--max_windows_per_trajectory`, `--max_train_windows`, `--max_val_windows`, `--max_test_windows`: 控制窗口数量
-- `--drop_nan_windows` / `--no-drop_nan_windows`: 是否丢弃非有限窗口
+- `--drop_nan_windows` / `--no-drop_nan_windows`: 默认拒绝 completion-filtered 后仍含非有限值的窗口
+- `--completion_table`: completion metadata 路径，用于过滤无效 trajectory 和事件后窗口
+- `--require_complete_systems` / `--no-require_complete_systems`: 是否只保留完整有效的 32-variation system
 - `--amp`: 启用 mixed precision
 - `--hf_local_files_only` / `--no-hf_local_files_only`: foundation checkpoint 是否只从本地 cache 读取
 - Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
-
-旧 foundation baseline 入口仍可使用：
-
-```bash
-conda run -n stellar python scripts/task_e_foundation_forecasters.py \
-  --models naive,timesfm,chronos,patchtst,panda \
-  --representation orbital15 \
-  --output-dir runs/foundation_orbital_baselines \
-  --num-windows 256 \
-  --context-len 512 \
-  --pred-len 128 \
-  --batch-size 128 \
-  --device cuda
-```
 
 ### Task F
 
 当前 `results/task_f_boundary_sensitivity/config.json` 对应的主实验：
 
 ```bash
-conda run -n stellar python scripts/task_f_boundary_sensitivity.py \
+conda run -n stellar python -m tasks.task_f \
   --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --completed-systems dataset_v3/completed_systems_sampling_2.txt \
   --output-dir results/task_f_boundary_sensitivity \

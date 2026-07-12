@@ -1,0 +1,1 @@
+"""Task A: stability classification."""

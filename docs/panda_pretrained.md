@@ -7,9 +7,9 @@ the three-body data preparation, adapters, evaluation scripts, and results.
 ## Dependency Layout
 
 - Panda source: `experiments/panda_threebody/vendor/panda`
-- Main forecasting entry: `scripts/task_e_forecasting.py`
+- Main forecasting entry: `tasks/task_e/main.py`
 - Legacy isolated Panda experiments: `experiments/panda_threebody/scripts`
-- Shared Panda loader: `src/task_e/panda_dependency.py`
+- Shared Panda loader: `tasks/task_e/panda_dependency.py`
 
 Initialize the Panda source after cloning:
 
@@ -46,7 +46,7 @@ The `.gitignore` excludes these directories and common model artifact formats.
 Zero-shot Panda evaluation on the project benchmark:
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
   --model panda_zero_shot \
@@ -61,7 +61,7 @@ conda run -n stellar python scripts/task_e_forecasting.py \
 Allow a first-time Hugging Face download:
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --representation orbital15 \
   --model panda_zero_shot \
   --panda_model_id GilpinLab/panda-72M \
@@ -72,7 +72,7 @@ conda run -n stellar python scripts/task_e_forecasting.py \
 Use a local checkpoint directory:
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --representation orbital15 \
   --model panda_zero_shot \
   --panda_model_id checkpoints/panda/GilpinLab--panda-72M \
@@ -83,7 +83,7 @@ conda run -n stellar python scripts/task_e_forecasting.py \
 Train a small adapter while keeping Panda frozen:
 
 ```bash
-conda run -n stellar python scripts/task_e_forecasting.py \
+conda run -n stellar python -m tasks.task_e \
   --representation orbital15 \
   --model panda_adapter \
   --context_len 256 \
@@ -94,6 +94,12 @@ conda run -n stellar python scripts/task_e_forecasting.py \
   --hf_local_files_only \
   --output_dir runs/task_e_panda_adapter
 ```
+
+When Panda is frozen, `best_model.pt` stores only the temporal adapter state;
+the 72M frozen backbone is not duplicated. Restoring the run first loads
+`panda_model_id` from the Hugging Face cache (or a local checkpoint path) and
+then applies the adapter-only state. If `--no-freeze_panda` is used, the full
+fine-tuned model state is saved instead.
 
 ## Role of `experiments/panda_threebody`
 
