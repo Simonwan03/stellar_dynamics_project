@@ -205,7 +205,23 @@ def extract_ic18_by_system(
     feature_keys: Sequence[str] = INITIAL_FEATURE_KEYS,
 ) -> tuple[np.ndarray, list[str]]:
     rows_per_batch: dict[int, int] = {}
-    path_by_batch = {parse_batch_id(path): path for path in result_paths}
+    path_by_batch: dict[int, Path] = {}
+    for path in result_paths:
+        batch_id = parse_batch_id(path)
+        if batch_id in path_by_batch:
+            raise ValueError(
+                f"Multiple HDF5 shards resolve to batch {batch_id}: "
+                f"{path_by_batch[batch_id]} and {path}."
+            )
+        path_by_batch[batch_id] = path
+
+    expected_batches = set(complete["num_batch"].unique().astype(int).tolist())
+    missing_batches = sorted(expected_batches - set(path_by_batch))
+    if missing_batches:
+        raise ValueError(
+            "Completion table references batches with no matching HDF5 shard: "
+            f"{missing_batches}."
+        )
     for batch_id, path in path_by_batch.items():
         with h5py.File(path, "r") as handle:
             rows_per_batch[batch_id] = int(handle[feature_keys[0]].shape[0])
@@ -217,12 +233,9 @@ def extract_ic18_by_system(
 
     base_names: list[str] | None = None
     system_pos = {int(system_id): pos for pos, system_id in enumerate(system_ids)}
-    by_batch = {
-        int(batch_id): batch_df
-        for batch_id, batch_df in complete.groupby("num_batch", sort=True)
-        if int(batch_id) in path_by_batch
-    }
+    by_batch = {int(batch_id): batch_df for batch_id, batch_df in complete.groupby("num_batch", sort=True)}
     out: np.ndarray | None = None
+    written = np.zeros(len(system_ids), dtype=bool)
     for batch_id, batch_df in by_batch.items():
         path = path_by_batch[batch_id]
         rows_in_batch = rows_per_batch[batch_id]
@@ -243,9 +256,14 @@ def extract_ic18_by_system(
             if out is None:
                 out = np.empty((len(system_ids), group_size, matrix.shape[1]), dtype=np.float64)
                 base_names = names
-            out[system_pos[int(system_id)]] = matrix
+            system_idx = system_pos[int(system_id)]
+            out[system_idx] = matrix
+            written[system_idx] = True
     if out is None or base_names is None:
         raise ValueError("No IC features were extracted.")
+    if not np.all(written):
+        missing_systems = system_ids[~written].tolist()
+        raise ValueError(f"IC features were not extracted for systems: {missing_systems}.")
     if out.shape[2] != 18:
         raise ValueError(f"Expected 18-dimensional IC features, got {out.shape[2]}.")
     return out, base_names

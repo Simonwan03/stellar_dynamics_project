@@ -58,6 +58,25 @@ conda run -n stellar python -m tasks.task_e \
   --output_dir runs/task_e_panda_zero_shot
 ```
 
+The same entrypoint also accepts the 18-channel Cartesian state representation:
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --representation raw_state18 \
+  --model panda_zero_shot \
+  --context_len 200 \
+  --pred_len 50 \
+  --panda_model_id GilpinLab/panda-72M \
+  --hf-local-files-only \
+  --output_dir runs/task_e_panda_zero_shot_raw18
+```
+
+Panda shares its channel embedding and forecast head, so the checkpoint's
+nominal `num_input_channels=1` does not restrict inference to one channel.
+Both the 15-channel `orbital15` and 18-channel `raw_state18` representations
+are passed as multivariate windows.
+
 Allow a first-time Hugging Face download:
 
 ```bash

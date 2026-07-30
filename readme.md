@@ -180,6 +180,31 @@
 
 这项任务强调的是：不看时间演化，只凭初值能预测多少 system-level 稳定性信息。
 
+**实验结果**
+
+观测稳定比例来自每个 system 的 `32` 次扰动试验，因此即使模型准确预测了
+潜在稳定概率 \(p\)，标签本身仍有二项采样噪声：
+
+\[
+\operatorname{MSE}_{\mathrm{binomial}}=\frac{p(1-p)}{32}.
+\]
+
+在噪声最大的 \(p=0.5\) 附近，
+\(\operatorname{MSE}=0.0078\)、\(\operatorname{RMSE}\approx0.088\)，
+正态近似下 \(\operatorname{MAE}\approx0.07\)。这是中等稳定概率 system
+附近的近似不可约误差尺度。
+
+| Model | MSE | RMSE | MAE | \(R^2\) |
+| --- | ---: | ---: | ---: | ---: |
+| MLP-base | 0.0916 | 0.3026 | 0.2149 | 0.3876 |
+| XGBoost-base | 0.0862 | 0.2937 | 0.2239 | 0.4233 |
+| MLP-large | 0.0938 | 0.3062 | **0.2033** | 0.3728 |
+| XGBoost-strong | **0.0834** | **0.2887** | 0.2176 | **0.4425** |
+
+`XGBoost-strong` 取得最低 MSE/RMSE 和最高 \(R^2\)，整体表现最佳；
+`MLP-large` 的 MAE 最低。所有模型仍明显高于上述二项采样噪声尺度，
+说明仅凭初始条件预测长期稳定比例仍有较大难度。
+
 ### Task B: Prefix-Based Instability Prediction
 
 入口脚本：[tasks/task_b/main.py](/home/wan/stellar_dynamics/tasks/task_b/main.py)
@@ -238,6 +263,27 @@ Task B 有两个模式：
 
 这项任务是仓库里最直接的 early-warning 分类线。
 
+**实验结果**
+
+以下 `trajectory_binary` 测试集中的不稳定类别占比为 `31.6%`：
+
+| Prefix | Model | Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | SVM | 0.7687 | 0.6659 | 0.5385 | 0.5955 | 0.8361 | 0.6387 |
+| 100 | CNN | **0.8135** | 0.6912 | **0.7414** | **0.7154** | 0.8891 | 0.7509 |
+| 100 | TCN | 0.8042 | 0.7267 | 0.6101 | 0.6633 | 0.8922 | **0.7642** |
+| 100 | Attention | 0.8053 | **0.7270** | 0.6150 | 0.6663 | **0.8930** | 0.7467 |
+| 200 | SVM | 0.7723 | 0.6611 | 0.5743 | 0.6147 | 0.8418 | 0.6476 |
+| 200 | CNN | 0.8391 | 0.7275 | 0.7851 | 0.7552 | 0.9132 | 0.7943 |
+| 200 | TCN | **0.8622** | **0.7575** | **0.8297** | **0.7920** | **0.9321** | **0.8293** |
+| 200 | Attention | 0.8456 | 0.7277 | 0.8179 | 0.7701 | 0.9167 | 0.7709 |
+
+在 `100` 步前缀上，所有时序神经网络都优于展平 SVM；CNN 的 F1 最高，
+而 TCN/Attention 在排序指标上更强。前缀增加到 `200` 步后，TCN 的
+F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
+召回率也由 `0.6101` 提升到 `0.8297`。SVM 的提升较小，说明更长观测
+需要合适的时序归纳偏置才能转化为有效的早期预警信号。
+
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
 入口脚本：[tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
@@ -276,6 +322,32 @@ Task B 有两个模式：
 运行后会生成平均 survival curve、代表性 case、per-horizon MAE、`q_pred` vs `q_true` scatter，以及 true/pred/error heatmap 五张结果图。
 
 这是最强调 perturbation-set 结构的任务。
+
+**实验结果**
+
+总体 MAE 对所有预测时间点取平均；Final MAE 对应 \(t=10000\)。
+Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
+
+| Model | Loss | Overall MAE | Final MAE | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline (average) | — | 0.3720 | 0.3478 | — |
+| Direct | 0.2742 | 0.0830 | 0.1101 | 77.7% |
+| Direct mean/std | 0.2640 | 0.0710 | 0.0912 | 80.9% |
+| Trajectory-context | 0.2067 | 0.0657 | 0.1046 | 82.3% |
+| Dual-attention | **0.1929** | **0.0529** | **0.0817** | **85.8%** |
+
+| Model | \(t=500\) | \(t=800\) | \(t=1500\) | \(t=2500\) | \(t=4000\) | \(t=6500\) | \(t=10000\) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline (average) | 0.3776 | 0.3813 | 0.3843 | 0.3788 | 0.3726 | 0.3617 | 0.3478 |
+| Direct | 0.0464 | 0.0584 | 0.0752 | 0.0875 | 0.0984 | 0.1048 | 0.1101 |
+| Direct mean/std | 0.0428 | 0.0522 | 0.0652 | 0.0750 | 0.0832 | 0.0877 | 0.0912 |
+| Trajectory-context | 0.0140 | 0.0347 | 0.0544 | 0.0712 | 0.0850 | 0.0962 | 0.1046 |
+| Dual-attention | **0.0113** | **0.0302** | **0.0472** | **0.0578** | **0.0672** | **0.0748** | **0.0817** |
+
+所有学习模型都显著优于平均值基线。Dual-attention 在全部 horizon 上取得
+最低 MAE，总体误差相对 baseline 降低 `85.8%`，说明联合建模时间维与
+32 条扰动 variation 的集合结构最有效。各模型误差总体随预测 horizon
+增长，符合混沌系统长期可预测性逐渐下降的预期。
 
 ### Task D: Finite-Time Lyapunov-Time Proxy Regression
 
@@ -329,6 +401,9 @@ slope sensitivity，并保留 `R > 1000` 的首次 crossing time `tau_cross` 作
 因此该 target 应称为 `finite-time Lyapunov-time proxy`，不应写成严格的
 asymptotic Lyapunov time。
 
+当前这套高质量筛选口径下尚无可用于正式横向比较的完整模型指标表；Task D
+结果应在提高早期时间采样分辨率或改用 variational equations 后重新评估。
+
 ### Task E: Forecasting Baselines
 
 相关入口：
@@ -341,34 +416,38 @@ scale 的 overall、horizon-wise、channel-wise metrics。支持
 `itransformer`, `timesfm`, `chronos`, `panda_zero_shot` 和
 `panda_adapter`。
 
-#### E.0 Baseline Results
+#### E.0 统一 preliminary benchmark
 
-正式基线使用全部 `20` 个 sampling-2 shards（`160000` 条 trajectories），
-输入表示为 `orbital15`，预测设置为
-`context_len=200`, `pred_len=50`, `stride=20`。Scaler 仅使用训练 split
-中的 `8192` 条 trajectories；验证集和测试集分别随机评估 `50000` 个
-windows。
+这组完全可比的 `orbital15` 实验使用 `512` 条轨迹、全部 `20` 个数据文件、
+`context_len=200`、`pred_len=50`、`split_seed=42`、顺序采样和相同的
+`1398/292/305` 个 train/validation/test windows。下表报告保存结果中的
+transformed-feature scale 指标（历史字段名为 `*_raw`）；Panda Adapter
+虽然在相同 validation/test windows 上评估，但只使用 `256` 个训练窗口。
 
-| Model | Val MSE-Z | Test MSE-Z | Test MAE-Z | Test MSE-Raw |
-|---|---:|---:|---:|---:|
-| Persistence | 0.808118 | 0.881501 | 0.395696 | 8.62724e8 |
-| Ridge (`alpha=1.0`) | 3.162180 | 1.958371 | 0.704020 | 1.18044e8 |
+| Model | Training method | Epochs | Validation MSE | Test MSE | Test MAE | Test Spearman |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Panda Adapter† | Frozen-backbone adapter | 10 | **0.098100** | **0.094817** | **0.161361** | **0.897936** |
+| TimesFM zero-shot | Zero-shot | — | 0.122229 | 0.115029 | 0.177769 | 0.876202 |
+| Panda zero-shot | Zero-shot | — | 0.136210 | 0.124031 | 0.198511 | 0.860429 |
+| Chronos T5-small | Zero-shot | — | 0.153873 | 0.138688 | 0.165562 | 0.865887 |
+| PatchTST | Fully supervised | 4 | 0.189831 | 0.172052 | 0.252842 | 0.797724 |
+| iTransformer | Fully supervised | 4 | 0.193811 | 0.177432 | 0.266774 | 0.781257 |
+| TCN | Fully supervised | 4 | 0.218606 | 0.199553 | 0.298014 | 0.755576 |
+| Persistence | Last-value baseline | — | 0.355868 | 0.325589 | 0.309381 | 0.689615 |
+| Ridge | Linear baseline | — | 0.998017 | 0.949673 | 0.583040 | 0.537908 |
 
-Persistence 直接将 context 最后一个时刻复制到全部未来步，不进行训练。
-该结果作为 Task E 的最低比较基线：其他模型应主要在相同 split 和
-evaluation windows 下比较 `test_mse_z`。Raw-scale MSE 容易被高方差
-channel 主导，不适合脱离 channel-wise metrics 单独比较。
+† Panda Adapter 的评估窗口与表中其他模型一致，但训练数据预算更小。
+表中的 TCN 是附件所汇总的 `4`-epoch 运行；仓库还保存了后续
+`10`-epoch TCN，其 test MSE/MAE/Spearman 为
+`0.195304/0.292288/0.761872`，详见下方链接的完整实验汇总。
 
-Ridge 使用同样的 `orbital15`, `context_len=200`, `pred_len=50`,
-`stride=20` 和 `split_seed=42`，但由于需要在内存中展开窗口，仅使用
-`5000` 个训练 windows、`2000` 个验证 windows 和 `2000` 个测试
-windows。其 `test_mse_z=1.958371`，没有超过 Persistence。Ridge 的
-raw MSE 虽然更低，但不能据此判定整体效果更好。
+Panda Adapter 在所有测试指标上最好。TimesFM 是最强 zero-shot MSE
+baseline，并优于全部从零训练的监督模型；在监督模型中 PatchTST 最好。
+Persistence 明显优于 Ridge，说明局部时间连续性比单个全局线性映射更适合
+这组短期轨道预测。详细运行目录和指标口径见
+[Task E 实验汇总](docs/task_e_experiment_summary.md)。
 
-注意：Persistence 和 Ridge 当前使用的 evaluation window 数量及 scaler
-统计范围不同，因此表格只记录已有结果，不属于严格的同条件模型排名。
-
-#### E.0.1 `orbital15` 与 `raw_state18` 表示对比
+#### E.1 `orbital15` 与 `raw_state18` 表示对比
 
 当前保存的 matched preliminary benchmark 使用相同的 `context_len=200`、
 `pred_len=50`、`split_seed=42`、32-variation group split、顺序采样和
@@ -395,14 +474,14 @@ MSE。
 `raw_state18` 上略低（`0.4312` vs. `0.4628`），iTransformer 两者几乎
 相同（均约 `0.4191`）。
 
-`orbital15` 独有的 Panda Adapter 当前进一步达到
+当前仅在 `orbital15` 上已有运行结果的 Panda Adapter 进一步达到
 `MSE-Z=0.2115`、`MAE-Z=0.2547`、`Spearman-Z=0.8810`。这些结果表明，
 在当前三体 forecasting 设置与训练预算下，预测经过物理结构化处理的
 `orbital15`，整体上明显比直接预测位置和速度组成的 `raw_state18`
 更容易。完整运行口径和原始结果见
 [`docs/task_e_experiment_summary.md`](docs/task_e_experiment_summary.md)。
 
-#### E.1 Foundation Forecasting
+#### E.2 Foundation Forecasting
 
 - 目标：在同样的 forecasting 任务上评估 pretrained baselines
 - 支持表示：
@@ -422,7 +501,8 @@ MSE。
   - 一个 `C` 通道窗口会拆成 `C` 条独立序列
 - `panda`
   - 直接消费 multivariate window
-  - 默认 checkpoint `GilpinLab/panda-72M` 期望 `orbital15`
+  - 默认 checkpoint `GilpinLab/panda-72M` 使用共享的通道 embedding 和
+    forecast head，可接收 `orbital15`（15 通道）或 `raw_state18`（18 通道）
   - Panda 源码来自 `experiments/panda_threebody/vendor/panda` submodule
   - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
 
@@ -453,6 +533,40 @@ MSE。
 - `mlp`
 
 这项任务关注的是：非常接近的初始扰动对是否会跨过稳定性边界，因而与 Task A 的 system-level stable fraction 互补。
+
+**实验结果**
+
+已保存的 `pair_ic54` 主实验包含 `4998` 个 system、`79968` 个 perturbation
+pair 和 `54` 个初始条件特征。下表为 7 个 horizon 上测试指标的平均值；
+F1 使用 validation set 调优的逐 horizon threshold：
+
+| Model | Mean AUPRC | Mean AUROC | Mean F1 |
+| --- | ---: | ---: | ---: |
+| Constant | 0.1184 | 0.5000 | 0.2114 |
+| Logistic | 0.1635 | 0.6303 | 0.2555 |
+| Random Forest | 0.1935 | 0.6656 | 0.2671 |
+| MLP | **0.2103** | **0.7005** | **0.2982** |
+
+MLP 在 AUPRC、AUROC 和 F1 上均为当前最佳模型，但绝对数值表明，仅凭
+pair 初值判断两条扰动轨道未来是否落到稳定边界两侧仍然较难。配置中请求了
+XGBoost，但该次运行没有保存 XGBoost 预测或指标，因此不列入结果表。
+
+边界分歧本身也随 horizon 改变：
+
+| Horizon | Pair disagreement rate | Systems with any disagreement |
+| ---: | ---: | ---: |
+| 500 | 0.1276 | 0.5298 |
+| 800 | **0.1317** | 0.5488 |
+| 1500 | 0.1303 | **0.5540** |
+| 2500 | 0.1249 | 0.5432 |
+| 4000 | 0.1170 | 0.5300 |
+| 6500 | 0.1078 | 0.5084 |
+| 10000 | 0.0987 | 0.4850 |
+
+pair disagreement rate 在 \(t=800\) 附近最高，之后逐渐下降；至少包含一对
+分歧轨道的 system 比例在 \(t=1500\) 达到峰值。原始汇总见
+[Task F summary](results/task_f_boundary_sensitivity/summary.md) 和
+[dataset summary](results/task_f_boundary_sensitivity/dataset_summary.json)。
 
 ## Script Entry Points
 

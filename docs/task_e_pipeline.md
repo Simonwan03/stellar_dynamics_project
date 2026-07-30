@@ -287,7 +287,9 @@ Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 
 
 - `timesfm`：默认 `google/timesfm-2.5-200m-pytorch`；逐 channel 单变量预测；
 - `chronos`：默认 `amazon/chronos-bolt-small`；逐 channel 单变量预测；
-- `panda_zero_shot`：默认 `GilpinLab/panda-72M`；直接处理 multivariate `orbital15`。
+- `panda_zero_shot`：默认 `GilpinLab/panda-72M`；直接处理 multivariate
+  `orbital15` 或 `raw_state18`。Panda 的共享通道 embedding/forecast head
+  支持运行时通道数，因此 15 通道和 18 通道都可传入。
 
 Panda 源码默认位于：
 

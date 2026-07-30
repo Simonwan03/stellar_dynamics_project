@@ -768,8 +768,6 @@ def build_foundation_predictor(
     if args.model == "chronos":
         return build_chronos_predictor(foundation_args, str(device)), False
     if args.model == "panda_zero_shot":
-        if args.representation != "orbital15":
-            raise ValueError("panda_zero_shot requires --representation orbital15 for channel compatibility.")
         return build_panda_predictor(foundation_args, str(device)), True
     raise ValueError(args.model)
 
@@ -1171,8 +1169,6 @@ def build_panda_adapter(args: argparse.Namespace, num_features: int, device: tor
     from tasks.task_e.foundation import load_panda_model
     from tasks.task_e.panda_adapter import PandaTemporalAdapter
 
-    if args.representation != "orbital15":
-        raise ValueError("The current panda_adapter implementation requires --representation orbital15.")
     panda_args = SimpleNamespace(
         panda_model_id=args.panda_model_id,
         hf_local_files_only=args.hf_local_files_only,
@@ -1180,11 +1176,15 @@ def build_panda_adapter(args: argparse.Namespace, num_features: int, device: tor
     panda = load_panda_model(panda_args, str(device))
     panda_channels = int(getattr(panda.config, "num_input_channels", num_features))
     if panda_channels not in {1, num_features}:
-        raise ValueError(f"Panda config reports {panda_channels} channels, but orbital15 produced {num_features}.")
+        raise ValueError(
+            f"Panda config reports {panda_channels} fixed channels, but "
+            f"{args.representation} produced {num_features}."
+        )
     if panda_channels == 1 and num_features != 1:
         print(
-            "Panda config reports num_input_channels=1; continuing with orbital15 multivariate "
-            f"input ({num_features} channels) because Panda PatchTST is channel-independent.",
+            "Panda config reports num_input_channels=1; continuing with "
+            f"{args.representation} multivariate input ({num_features} channels) because "
+            "Panda shares its embedding and prediction head across channels.",
             flush=True,
         )
     panda_context_len = int(getattr(panda.config, "context_length", args.context_len))
