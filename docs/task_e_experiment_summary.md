@@ -1,6 +1,6 @@
 # Task E 实验结果汇总
 
-生成日期：2026-07-12。本文根据 `runs/**/config.json`、`val_metrics.json`、`test_metrics.json` 与 `train_log.csv` 汇总当前工作区中保存的所有 Task E 相关运行；数值直接来自对应运行目录，并非重新评估。
+生成日期：2026-07-13。本文根据 `runs/**/config.json`、`val_metrics.json`、`test_metrics.json` 与 `train_log.csv` 汇总当前工作区中保存的所有 Task E 相关运行；数值直接来自对应运行目录，并非重新评估。
 
 ## 口径与可比性
 
@@ -21,14 +21,30 @@
 | Chronos T5-small (`.../v2/chronos_t5_small`) | 零样本 | — | 0.153873 | 0.138688 | **0.165562** | 0.865887 |
 | PatchTST (`.../v2/patchtst`) | 全监督 | 4 | 0.189831 | 0.172052 | 0.252842 | 0.797724 |
 | iTransformer (`.../v2/itransformer`) | 全监督 | 4 | 0.193811 | 0.177432 | 0.266774 | 0.781257 |
-| TCN (`.../v2/tcn`) | 全监督 | 4 | 0.218606 | 0.199553 | 0.298014 | 0.755576 |
 | TCN (`.../compact_20260712/tcn`) | 全监督 | 10 | 0.216249 | 0.195304 | 0.292288 | 0.761872 |
 | Persistence (`.../compact_20260712/persistence`) | 最后值基线 | — | 0.355868 | 0.325589 | 0.309381 | 0.689615 |
 | Ridge (`.../v2/ridge`) | 线性基线 | — | 0.998017 | 0.949673 | 0.583040 | 0.537908 |
 
 † Panda Adapter 的**评估**与本表一致（292/305 窗口），但其适配器训练只使用 256 个窗口；其他监督模型使用 1398 个训练窗口。因此表中的测试指标可直接比较，训练数据预算则不同。
 
-结论：在当前完整统一评估集上，Panda Adapter 的测试 MSE（0.094817）、MAE（0.161361）和 Spearman（0.897936）均为已保存运行中的最佳值。TimesFM 是最强零样本基线（MSE 0.115029），Chronos T5-small 的 MAE 为 0.165562。TCN 从 4 增至 10 epoch 后测试 MSE 由 0.199553 改善至 0.195304，但仍落后于基础模型与 Panda Adapter。
+结论：在当前完整统一评估集上，Panda Adapter 的测试 MSE（0.094817）、MAE（0.161361）和 Spearman（0.897936）均为已保存运行中的最佳值。TimesFM 是最强零样本基线（MSE 0.115029），Chronos T5-small 的 MAE 为 0.165562。保留的 10-epoch TCN 结果为测试 MSE 0.195304、MAE 0.292288、Spearman 0.761872，仍落后于基础模型与 Panda Adapter。
+
+## raw18 / raw_state18：位置与速度特征结果
+
+该批次使用 18 通道原始状态（3 个天体的 xyz 位置和 xyz 速度），其余设置与主基准一致：512 条轨迹、20 个数据文件、200→50、`split_seed=42`、32 变体分组切分、顺序采样与完成系统过滤。得到 1400 / 292 / 306 个训练/验证/测试窗口。由于 raw18 和 orbital15 的物理量及变换尺度不同，本表仅报告并用于 **raw18 内部比较** 的标准化测试指标（`*_z`）；不可与上方 orbital15 的 `*_raw` 指标直接横向比较。
+
+| 模型（运行目录） | 训练方式 | 训练 epoch | 测试 MSE_z | 测试 MAE_z | 测试 Spearman_z |
+| --- | --- | ---: | ---: | ---: | ---: |
+| TimesFM zero-shot (`.../raw18.../timesfm`) | 零样本 | — | **0.525152** | **0.349141** | 0.424185 |
+| Chronos T5-small (`.../raw18.../chronos`) | 零样本 | — | 0.580466 | 0.355880 | **0.428264** |
+| TCN (`.../raw18.../tcn`) | 全监督 | 10 | 0.623281 | 0.431166 | 0.220818 |
+| iTransformer (`.../raw18.../itransformer`) | 全监督 | 4 | 0.623715 | 0.419106 | 0.193764 |
+| PatchTST (`.../raw18.../patchtst`) | 全监督 | 4 | 0.626541 | 0.419600 | 0.197222 |
+| Transformer (`.../raw18.../transformer`) | 全监督 | 4 | 0.906040 | 0.481039 | 0.155406 |
+| Persistence (`.../raw18.../persistence`) | 最后值基线 | — | 1.054121 | 0.525768 | 0.204258 |
+| Ridge (`.../raw18.../ridge`) | 线性基线 | — | 2.595065 | 0.965088 | 0.099415 |
+
+Panda zero-shot 与 Panda Adapter 固定要求 15 通道 `orbital15`，因此不适用于 raw18。Chronos 因 18 通道展开推理导致原批次大小 32 显存不足，改用 `foundation_batch_size=4` 完成；这只改变推理分批方式，不改变预测样本或指标。
 
 ## Panda Adapter：训练与早期小窗口评估
 
@@ -69,4 +85,5 @@
 - 统一基准配置和指标：`runs/task_e_prelim_compact_20260712*/**/{config,val_metrics,test_metrics}.json`
 - Panda Adapter 续训：`runs/task_e_prelim_compact_20260712_v2/panda_adapter_resume_20260712/`
 - Panda Adapter 完整评估：`runs/task_e_prelim_compact_20260712_v2/panda_adapter_full_eval_20260712/`
+- raw18 批次：`runs/task_e_raw18_matched_20260713/`
 - 历史 Panda 管线：`runs/panda_temporal_adapter_full*`
