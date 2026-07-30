@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover
 
 
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
+LABEL_VERSION = 2
 DEFAULT_GROUP_SIZE = 32
 DEFAULT_VALID_PAIRS = tuple((i, i + 16) for i in range(16))
 LEGACY_VALID_PAIRS_8 = ((0, 4), (1, 5), (2, 6), (3, 7))
@@ -73,7 +74,11 @@ class PipelineConfig:
     threshold: float = 1e3
     growth_lower: float = 1.0
     growth_upper: float = 100.0
+    growth_sensitivity_uppers: tuple[float, ...] = (10.0, 30.0, 100.0)
     min_growth_points: int = 5
+    lambda_r2_min: float = 0.8
+    min_valid_lambda_pairs: int = 8
+    max_pair_log_mad: float = 0.75
     aggregation: str = "median"
     censoring_rule: str = "median_pair"
     feature_aggregation: str = "first"
@@ -259,6 +264,41 @@ def _fit_log_growth_rate(
     total = float(np.sum((y - y.mean()) ** 2))
     r2 = 1.0 - residual / total if total > 0.0 else math.nan
     return float(slope), float(r2), int(indices.size)
+
+
+def _lambda_quality_mask(
+    lambdas: Sequence[float],
+    r2_values: Sequence[float],
+    point_counts: Sequence[int],
+    r2_min: float,
+    min_points: int,
+) -> np.ndarray:
+    lambdas_arr = np.asarray(lambdas, dtype=np.float64)
+    r2_arr = np.asarray(r2_values, dtype=np.float64)
+    points_arr = np.asarray(point_counts, dtype=np.int64)
+    return (
+        np.isfinite(lambdas_arr)
+        & (lambdas_arr > 0.0)
+        & np.isfinite(r2_arr)
+        & (r2_arr >= r2_min)
+        & (points_arr >= min_points)
+    )
+
+
+def _pair_log_mad(lambdas: Sequence[float]) -> float:
+    arr = np.asarray(lambdas, dtype=np.float64)
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size < 2:
+        return math.nan
+    logs = np.log(arr)
+    center = np.median(logs)
+    return float(np.median(np.abs(logs - center)))
+
+
+def _growth_range_name(lower: float, upper: float) -> str:
+    def clean(value: float) -> str:
+        return f"{value:g}".replace("-", "m").replace(".", "p")
+    return f"{clean(lower)}_{clean(upper)}"
 
 
 def compute_pair_phase_space_divergence(
@@ -463,6 +503,10 @@ def _compute_group_divergence_label(
     min_growth_points: int,
     aggregation: str,
     censoring_rule: str,
+    growth_sensitivity_uppers: Sequence[float] = (10.0, 30.0, 100.0),
+    lambda_r2_min: float = 0.8,
+    min_valid_lambda_pairs: int = 8,
+    max_pair_log_mad: float = 0.75,
     eps: float = 1e-12,
 ) -> dict[str, Any]:
     pair_taus: list[float] = []
@@ -471,6 +515,10 @@ def _compute_group_divergence_label(
     pair_lambdas: list[float] = []
     pair_lambda_r2s: list[float] = []
     pair_lambda_points: list[int] = []
+    sensitivity_uppers = tuple(sorted(set(float(value) for value in growth_sensitivity_uppers)))
+    sensitivity_fits: dict[float, list[tuple[float, float, int]]] = {
+        upper: [] for upper in sensitivity_uppers if upper > growth_lower
+    }
     for idx_i, idx_j in valid_pairs:
         pair_result = compute_pair_phase_space_divergence(
             positions=positions_group,
@@ -491,9 +539,74 @@ def _compute_group_divergence_label(
         pair_lambdas.append(float(pair_result["lambda_phase_space"]))
         pair_lambda_r2s.append(float(pair_result["lambda_fit_r2"]))
         pair_lambda_points.append(int(pair_result["lambda_fit_points"]))
+        for upper in sensitivity_fits:
+            sensitivity_fits[upper].append(
+                _fit_log_growth_rate(
+                    ratio=pair_result["ratio"],
+                    times=np.asarray(times_group[idx_i], dtype=np.float64),
+                    lower=growth_lower,
+                    upper=upper,
+                    min_points=min_growth_points,
+                )
+            )
 
     tau_system = _aggregate_tau(pair_taus, aggregation=aggregation)
-    lambda_system = _aggregate_tau(pair_lambdas, aggregation=aggregation)
+    lambda_system_unfiltered = _aggregate_tau(pair_lambdas, aggregation=aggregation)
+    pair_lambda_quality = _lambda_quality_mask(
+        pair_lambdas,
+        pair_lambda_r2s,
+        pair_lambda_points,
+        r2_min=lambda_r2_min,
+        min_points=min_growth_points,
+    )
+    valid_pair_lambdas = np.asarray(pair_lambdas, dtype=np.float64)[pair_lambda_quality]
+    lambda_system = _aggregate_tau(valid_pair_lambdas, aggregation=aggregation)
+    pair_log_mad = _pair_log_mad(valid_pair_lambdas)
+    valid_lambda_pair_count = int(pair_lambda_quality.sum())
+    enough_valid_pairs = valid_lambda_pair_count >= min_valid_lambda_pairs
+    pair_consistency_pass = bool(
+        np.isfinite(pair_log_mad) and pair_log_mad <= max_pair_log_mad
+    )
+    lyapunov_label_valid = bool(
+        enough_valid_pairs
+        and pair_consistency_pass
+        and np.isfinite(lambda_system)
+        and lambda_system > 0.0
+    )
+    lyapunov_time_proxy = (
+        float(1.0 / lambda_system) if lyapunov_label_valid else math.nan
+    )
+    log_lyapunov_time_proxy = (
+        float(np.log(lyapunov_time_proxy))
+        if np.isfinite(lyapunov_time_proxy) and lyapunov_time_proxy > 0.0
+        else math.nan
+    )
+
+    sensitivity_summary: dict[str, dict[str, float | int | bool]] = {}
+    for upper, fits in sensitivity_fits.items():
+        range_lambdas = [fit[0] for fit in fits]
+        range_r2s = [fit[1] for fit in fits]
+        range_points = [fit[2] for fit in fits]
+        range_quality = _lambda_quality_mask(
+            range_lambdas, range_r2s, range_points, lambda_r2_min, min_growth_points
+        )
+        filtered = np.asarray(range_lambdas, dtype=np.float64)[range_quality]
+        system_value = _aggregate_tau(filtered, aggregation=aggregation)
+        range_log_mad = _pair_log_mad(filtered)
+        range_valid = bool(
+            int(range_quality.sum()) >= min_valid_lambda_pairs
+            and np.isfinite(range_log_mad)
+            and range_log_mad <= max_pair_log_mad
+            and np.isfinite(system_value)
+            and system_value > 0.0
+        )
+        sensitivity_summary[_growth_range_name(growth_lower, upper)] = {
+            "lambda": float(system_value),
+            "lyapunov_time": float(1.0 / system_value) if range_valid else math.nan,
+            "valid_pair_count": int(range_quality.sum()),
+            "pair_log_mad": float(range_log_mad),
+            "valid": range_valid,
+        }
     system_censored = _aggregate_censoring_flag(
         pair_taus=pair_taus,
         pair_censored=pair_censored,
@@ -512,15 +625,25 @@ def _compute_group_divergence_label(
         "lyapunov_like_divergence_time": tau_system,
         "tau_div": tau_system,
         "log_tau_system": float(np.log1p(tau_system)) if np.isfinite(tau_system) else math.nan,
+        "lambda_phase_space_unfiltered": lambda_system_unfiltered,
         "lambda_phase_space": lambda_system,
+        "lyapunov_time_proxy": lyapunov_time_proxy,
+        "log_lyapunov_time_proxy": log_lyapunov_time_proxy,
+        "lyapunov_label_valid": lyapunov_label_valid,
+        "valid_lambda_pair_count": valid_lambda_pair_count,
+        "valid_lambda_pair_fraction": float(valid_lambda_pair_count / max(len(valid_pairs), 1)),
+        "pair_lambda_log_mad": pair_log_mad,
+        "pair_consistency_pass": pair_consistency_pass,
         "lambda_tau_ratio": lambda_tau_ratio,
         "system_censored": bool(system_censored),
+        "lambda_sensitivity": sensitivity_summary,
         "pair_taus": pair_taus,
         "pair_censored": pair_censored,
         "pair_distance0s": pair_distance0s,
         "pair_lambdas": pair_lambdas,
         "pair_lambda_r2s": pair_lambda_r2s,
         "pair_lambda_points": pair_lambda_points,
+        "pair_lambda_quality": pair_lambda_quality.tolist(),
     }
 
 
@@ -725,7 +848,11 @@ def build_labels_from_result_shards(
     threshold: float,
     growth_lower: float = 1.0,
     growth_upper: float = 100.0,
+    growth_sensitivity_uppers: Sequence[float] = (10.0, 30.0, 100.0),
     min_growth_points: int = 5,
+    lambda_r2_min: float = 0.8,
+    min_valid_lambda_pairs: int = 8,
+    max_pair_log_mad: float = 0.75,
     aggregation: str = "median",
     censoring_rule: str = "median_pair",
     completion_df: pd.DataFrame | None = None,
@@ -788,6 +915,10 @@ def build_labels_from_result_shards(
                     min_growth_points=min_growth_points,
                     aggregation=aggregation,
                     censoring_rule=censoring_rule,
+                    growth_sensitivity_uppers=growth_sensitivity_uppers,
+                    lambda_r2_min=lambda_r2_min,
+                    min_valid_lambda_pairs=min_valid_lambda_pairs,
+                    max_pair_log_mad=max_pair_log_mad,
                 )
                 if not np.isfinite(label["tau_system"]):
                     dropped_nan_labels += 1
@@ -802,11 +933,25 @@ def build_labels_from_result_shards(
                     "time_steps": time_steps,
                     "tau_system": label["tau_system"],
                     "log_tau_system": label["log_tau_system"],
+                    "lambda_phase_space_unfiltered": label["lambda_phase_space_unfiltered"],
                     "lambda_phase_space": label["lambda_phase_space"],
+                    "lyapunov_time_proxy": label["lyapunov_time_proxy"],
+                    "log_lyapunov_time_proxy": label["log_lyapunov_time_proxy"],
+                    "lyapunov_label_valid": label["lyapunov_label_valid"],
+                    "valid_lambda_pair_count": label["valid_lambda_pair_count"],
+                    "valid_lambda_pair_fraction": label["valid_lambda_pair_fraction"],
+                    "pair_lambda_log_mad": label["pair_lambda_log_mad"],
+                    "pair_consistency_pass": label["pair_consistency_pass"],
                     "lambda_tau_ratio": label["lambda_tau_ratio"],
                     "system_censored": label["system_censored"],
                 }
-                for (idx_i, idx_j), tau, flag, distance0, pair_lambda, pair_r2, pair_points in zip(
+                for range_name, range_payload in label["lambda_sensitivity"].items():
+                    row[f"lambda_range_{range_name}"] = range_payload["lambda"]
+                    row[f"lyapunov_time_range_{range_name}"] = range_payload["lyapunov_time"]
+                    row[f"valid_pairs_range_{range_name}"] = range_payload["valid_pair_count"]
+                    row[f"pair_log_mad_range_{range_name}"] = range_payload["pair_log_mad"]
+                    row[f"valid_range_{range_name}"] = range_payload["valid"]
+                for (idx_i, idx_j), tau, flag, distance0, pair_lambda, pair_r2, pair_points, pair_quality in zip(
                     valid_pairs,
                     label["pair_taus"],
                     label["pair_censored"],
@@ -814,6 +959,7 @@ def build_labels_from_result_shards(
                     label["pair_lambdas"],
                     label["pair_lambda_r2s"],
                     label["pair_lambda_points"],
+                    label["pair_lambda_quality"],
                     strict=True,
                 ):
                     row[_make_pair_column(idx_i, idx_j, prefix="tau")] = tau
@@ -822,6 +968,7 @@ def build_labels_from_result_shards(
                     row[_make_pair_column(idx_i, idx_j, prefix="lambda")] = pair_lambda
                     row[_make_pair_column(idx_i, idx_j, prefix="lambda_r2")] = pair_r2
                     row[_make_pair_column(idx_i, idx_j, prefix="lambda_points")] = pair_points
+                    row[_make_pair_column(idx_i, idx_j, prefix="lambda_quality")] = bool(pair_quality)
                     valid_pair_distance0s.append(distance0)
                     valid_pair_lambdas.append(pair_lambda)
                     valid_pair_lambda_r2s.append(pair_r2)
@@ -834,19 +981,50 @@ def build_labels_from_result_shards(
             break
 
     labels_df = pd.DataFrame(rows).sort_values("system_id").reset_index(drop=True)
+    valid_label_count = int(labels_df["lyapunov_label_valid"].sum()) if len(labels_df) else 0
+    sensitivity_metadata: dict[str, Any] = {}
+    for upper in sorted(set(float(value) for value in growth_sensitivity_uppers)):
+        range_name = _growth_range_name(growth_lower, upper)
+        lambda_col = f"lambda_range_{range_name}"
+        time_col = f"lyapunov_time_range_{range_name}"
+        valid_col = f"valid_range_{range_name}"
+        if lambda_col in labels_df:
+            sensitivity_metadata[range_name] = {
+                "valid_system_count": int(labels_df[valid_col].sum()),
+                "valid_system_fraction": float(labels_df[valid_col].mean()),
+                "lambda_summary": summarize_series(labels_df[lambda_col].to_numpy(dtype=np.float64)),
+                "lyapunov_time_summary": summarize_series(
+                    labels_df[time_col].to_numpy(dtype=np.float64)
+                ),
+            }
     metadata = {
+        "label_version": LABEL_VERSION,
+        "target": "log_finite_time_lyapunov_time_proxy",
         "num_systems": int(len(labels_df)),
+        "num_valid_lyapunov_labels": valid_label_count,
+        "num_rejected_lyapunov_labels": int(len(labels_df) - valid_label_count),
         "dropped_invalid_groups": int(dropped_invalid_groups),
         "dropped_nan_labels": int(dropped_nan_labels),
         "pair_phase_distance0_summary": summarize_series(valid_pair_distance0s),
         "pair_lambda_summary": summarize_series(valid_pair_lambdas),
         "pair_lambda_r2_summary": summarize_series(valid_pair_lambda_r2s),
+        "valid_lambda_pair_count_summary": summarize_series(
+            labels_df["valid_lambda_pair_count"].to_numpy(dtype=np.float64)
+        ),
+        "pair_lambda_log_mad_summary": summarize_series(
+            labels_df["pair_lambda_log_mad"].to_numpy(dtype=np.float64)
+        ),
+        "growth_range_sensitivity": sensitivity_metadata,
         "valid_pairs": [list(pair) for pair in valid_pairs],
         "group_size": int(group_size),
         "threshold": float(threshold),
         "growth_lower": float(growth_lower),
         "growth_upper": float(growth_upper),
+        "growth_sensitivity_uppers": [float(value) for value in growth_sensitivity_uppers],
         "min_growth_points": int(min_growth_points),
+        "lambda_r2_min": float(lambda_r2_min),
+        "min_valid_lambda_pairs": int(min_valid_lambda_pairs),
+        "max_pair_log_mad": float(max_pair_log_mad),
         "divergence_observable": "center-of-mass position+velocity phase-space distance",
         "aggregation": aggregation,
         "censoring_rule": censoring_rule,
@@ -1291,8 +1469,8 @@ def _subset_regression_metrics(y_true_log: np.ndarray, y_pred_log: np.ndarray) -
             "factor_3_accuracy": math.nan,
             "median_absolute_log_error": math.nan,
         }
-    y_true_tau = np.expm1(y_true_log)
-    y_pred_tau = np.expm1(y_pred_log)
+    y_true_tau = np.exp(y_true_log)
+    y_pred_tau = np.exp(y_pred_log)
     abs_log_error = np.abs(y_pred_log - y_true_log)
     return {
         "count": float(y_true_log.size),
@@ -1641,13 +1819,13 @@ def run_random_forest_baseline(
         {
             "system_id": system_ids[test_idx],
             "y_true_log_tau": y_test,
-            "y_true_tau": np.expm1(y_test),
+            "y_true_tau": np.exp(y_test),
             "system_censored": censored_test,
             "constant_pred_log_tau": y_pred_constant,
-            "constant_pred_tau": np.expm1(y_pred_constant),
+            "constant_pred_tau": np.exp(y_pred_constant),
             "constant_residual_log_tau": y_pred_constant - y_test,
             "rf_pred_log_tau": y_pred_rf,
-            "rf_pred_tau": np.expm1(y_pred_rf),
+            "rf_pred_tau": np.exp(y_pred_rf),
             "rf_residual_log_tau": y_pred_rf - y_test,
         }
     )
@@ -1731,10 +1909,10 @@ def run_mlp_baseline(
         {
             "system_id": system_ids[test_idx],
             "y_true_log_tau": y[test_idx],
-            "y_true_tau": np.expm1(y[test_idx]),
+            "y_true_tau": np.exp(y[test_idx]),
             "system_censored": censored[test_idx],
             "mlp_pred_log_tau": y_pred,
-            "mlp_pred_tau": np.expm1(y_pred),
+            "mlp_pred_tau": np.exp(y_pred),
             "mlp_residual_log_tau": y_pred - y[test_idx],
         }
     )
@@ -1800,10 +1978,10 @@ def run_cnn_baseline(
         {
             "system_id": system_ids[test_idx],
             "y_true_log_tau": y[test_idx],
-            "y_true_tau": np.expm1(y[test_idx]),
+            "y_true_tau": np.exp(y[test_idx]),
             "system_censored": censored[test_idx],
             f"{model_name}_pred_log_tau": y_pred,
-            f"{model_name}_pred_tau": np.expm1(y_pred),
+            f"{model_name}_pred_tau": np.exp(y_pred),
             f"{model_name}_residual_log_tau": y_pred - y[test_idx],
         }
     )
@@ -1872,10 +2050,10 @@ def run_set_cnn_baseline(
         {
             "system_id": system_ids[test_idx],
             "y_true_log_tau": y[test_idx],
-            "y_true_tau": np.expm1(y[test_idx]),
+            "y_true_tau": np.exp(y[test_idx]),
             "system_censored": censored[test_idx],
             "set_cnn_pred_log_tau": y_pred,
-            "set_cnn_pred_tau": np.expm1(y_pred),
+            "set_cnn_pred_tau": np.exp(y_pred),
             "set_cnn_residual_log_tau": y_pred - y[test_idx],
         }
     )
@@ -1957,7 +2135,7 @@ def save_label_plots(
         fig, ax = plt.subplots(figsize=(9, 4))
         order = list(dict.fromkeys(pair_df["pair"].tolist()))
         data = [pair_df.loc[pair_df["pair"] == pair, "tau"].to_numpy() for pair in order]
-        ax.boxplot(data, labels=order, showfliers=False)
+        ax.boxplot(data, tick_labels=order, showfliers=False)
         ax.set_title("Pair-Level Tau Distribution")
         ax.set_xlabel("pair")
         ax.set_ylabel("tau")
@@ -2125,6 +2303,23 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         raise ValueError(f"threshold must exceed 1 for normalized divergence, got {config.threshold}.")
     if config.min_growth_points < 2:
         raise ValueError(f"min_growth_points must be at least 2, got {config.min_growth_points}.")
+    if not 0.0 <= config.lambda_r2_min <= 1.0:
+        raise ValueError(f"lambda_r2_min must be in [0, 1], got {config.lambda_r2_min}.")
+    if not 1 <= config.min_valid_lambda_pairs <= len(config.valid_pairs):
+        raise ValueError(
+            "min_valid_lambda_pairs must be between 1 and the configured pair count "
+            f"({len(config.valid_pairs)}), got {config.min_valid_lambda_pairs}."
+        )
+    if config.max_pair_log_mad < 0.0:
+        raise ValueError(f"max_pair_log_mad must be non-negative, got {config.max_pair_log_mad}.")
+    invalid_sensitivity_uppers = [
+        value for value in config.growth_sensitivity_uppers if value <= config.growth_lower
+    ]
+    if invalid_sensitivity_uppers:
+        raise ValueError(
+            "All growth_sensitivity_uppers must exceed growth_lower; invalid values: "
+            f"{invalid_sensitivity_uppers}."
+        )
     output_dir = ensure_dir(config.output_dir)
     result_paths = discover_result_paths(config.dataset_dir, config.sampling_id)
     if config.max_shards is not None:
@@ -2138,11 +2333,30 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     )
     labels_path = output_dir / "task_d_labels.csv"
     labels_meta_path = output_dir / "task_d_labels_meta.json"
+    expected_label_config = {
+        "label_version": LABEL_VERSION,
+        "threshold": float(config.threshold),
+        "group_size": int(config.group_size),
+        "aggregation": config.aggregation,
+        "growth_lower": float(config.growth_lower),
+        "growth_upper": float(config.growth_upper),
+        "growth_sensitivity_uppers": [float(value) for value in config.growth_sensitivity_uppers],
+        "min_growth_points": int(config.min_growth_points),
+        "lambda_r2_min": float(config.lambda_r2_min),
+        "min_valid_lambda_pairs": int(config.min_valid_lambda_pairs),
+        "max_pair_log_mad": float(config.max_pair_log_mad),
+    }
+    use_cached_labels = False
     if labels_path.exists() and labels_meta_path.exists() and not config.force_recompute_labels:
+        with open(labels_meta_path, "r", encoding="utf-8") as fh:
+            cached_meta = json.load(fh)
+        use_cached_labels = all(cached_meta.get(key) == value for key, value in expected_label_config.items())
+        if not use_cached_labels:
+            print("Cached labels use an older or different Lyapunov-label configuration; rebuilding ...")
+    if use_cached_labels:
         print(f"Loading cached labels from {labels_path}")
         labels_df = pd.read_csv(labels_path)
-        with open(labels_meta_path, "r", encoding="utf-8") as fh:
-            label_meta = json.load(fh)
+        label_meta = cached_meta
     else:
         if config.force_recompute_labels and labels_path.exists():
             print("--force-recompute set, rebuilding labels ...")
@@ -2153,7 +2367,11 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
             threshold=config.threshold,
             growth_lower=config.growth_lower,
             growth_upper=config.growth_upper,
+            growth_sensitivity_uppers=config.growth_sensitivity_uppers,
             min_growth_points=config.min_growth_points,
+            lambda_r2_min=config.lambda_r2_min,
+            min_valid_lambda_pairs=config.min_valid_lambda_pairs,
+            max_pair_log_mad=config.max_pair_log_mad,
             aggregation=config.aggregation,
             censoring_rule=config.censoring_rule,
             completion_df=completion_df,
@@ -2175,10 +2393,32 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     combined_predictions: pd.DataFrame
     split_payload: dict[str, Any]
     target_name: str
-    working_labels = labels_df.copy()
+    label_quality_mask = (
+        labels_df["lyapunov_label_valid"].astype(bool).to_numpy()
+        & np.isfinite(labels_df["log_lyapunov_time_proxy"].to_numpy(dtype=np.float64))
+    )
+    working_labels = labels_df.loc[label_quality_mask].copy().reset_index(drop=True)
+    if working_labels.empty:
+        raise ValueError(
+            "No systems passed the Lyapunov-label quality filters; relax --lambda-r2-min, "
+            "--min-valid-lambda-pairs, or --max-pair-log-mad."
+        )
+    working_labels["tau_cross_system"] = working_labels["tau_system"]
+    working_labels["crossing_time_censored"] = working_labels["system_censored"]
+    working_labels["tau_system"] = working_labels["lyapunov_time_proxy"]
+    working_labels["log_tau_system"] = working_labels["log_lyapunov_time_proxy"]
+    working_labels["system_censored"] = False
+    setting_diagnostics.update(
+        {
+            "num_labels_before_quality_filter": int(len(labels_df)),
+            "num_labels_after_quality_filter": int(len(working_labels)),
+            "num_labels_rejected_by_quality_filter": int(len(labels_df) - len(working_labels)),
+            "lyapunov_target": "log(1 / lambda_phase_space)",
+        }
+    )
 
     if config.task_setting == "initial":
-        target_name = "log1p_phase_space_divergence_time"
+        target_name = "log_finite_time_lyapunov_time_proxy"
         X, _, feature_meta, feature_df = build_initial_condition_features(
             result_paths=result_paths,
             labels_df=working_labels,
@@ -2249,7 +2489,7 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     else:
         observation_times = compute_prefix_observation_times(
             result_paths=result_paths,
-            labels_df=labels_df,
+            labels_df=working_labels,
             prefix_len=config.prefix_len,
             time_stride=config.prefix_time_stride,
             group_size=config.group_size,
@@ -2258,42 +2498,20 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         if finite_obs.size == 0:
             raise ValueError("No finite prefix observation times were found.")
         representative_t_obs = float(np.median(finite_obs))
-        setting_diagnostics = compute_tau_diagnostics(labels_df, t_obs=representative_t_obs)
-        valid = np.isfinite(observation_times) & (
-            labels_df["tau_system"].to_numpy(dtype=np.float64) > observation_times
-        )
-        num_before = int(len(labels_df))
-        num_after = int(valid.sum())
+        working_labels["t_obs"] = observation_times
         setting_diagnostics.update(
             {
+                "t_obs": representative_t_obs,
                 "t_obs_min": float(finite_obs.min()),
                 "t_obs_max": float(finite_obs.max()),
-                "num_before_filter": num_before,
-                "num_after_filter": num_after,
-                "num_filtered_due_to_tau_le_t_obs": int(num_before - num_after),
-                "filter_ratio": float(1.0 - num_after / max(num_before, 1)),
-                "fraction_tau_le_t_obs": float(1.0 - num_after / max(num_before, 1)),
+                "prefix_target_overlap_note": (
+                    "The finite-time Lyapunov proxy is fitted from the stored trajectory, including "
+                    "the prefix interval; use a future-only fit for a strict forecasting study."
+                ),
             }
         )
-        print(f"Prefix observation time (median): {representative_t_obs:.6g}")
-        print(f"Fraction with tau_system <= t_obs: {setting_diagnostics['fraction_tau_le_t_obs']:.4f}")
-        print(f"Prefix systems before/after filtering: {num_before}/{num_after}")
-        if num_after < 100:
-            warnings.warn(
-                f"Only {num_after} systems remain after tau_system > t_obs filtering.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        working_labels = labels_df.loc[valid].copy().reset_index(drop=True)
-        retained_t_obs = observation_times[valid]
-        working_labels["t_obs"] = retained_t_obs
-        working_labels["phase_space_divergence_time"] = working_labels["tau_system"]
-        working_labels["remaining_divergence_time"] = (
-            working_labels["tau_system"].to_numpy(dtype=np.float64) - retained_t_obs
-        )
-        working_labels["log_tau_system"] = np.log1p(working_labels["remaining_divergence_time"])
         working_labels.to_csv(output_dir / "task_d_prefix_labels.csv", index=False)
-        target_name = "log1p_remaining_phase_space_divergence_time"
+        target_name = "log_finite_time_lyapunov_time_proxy"
 
         prefix_arrays, sequence_meta = build_prefix_model_inputs(
             result_paths=result_paths,
@@ -2382,15 +2600,15 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
             [
                 "system_id",
                 "t_obs",
-                "phase_space_divergence_time",
-                "remaining_divergence_time",
-                "log_tau_system",
-                "system_censored",
+                "tau_cross_system",
+                "crossing_time_censored",
+                "lyapunov_time_proxy",
+                "log_lyapunov_time_proxy",
             ]
         ].rename(
             columns={
-                "log_tau_system": "true_log_tau",
-                "remaining_divergence_time": "true_tau",
+                "log_lyapunov_time_proxy": "true_log_tau",
+                "lyapunov_time_proxy": "true_tau",
             }
         ).merge(
             combined_predictions,
@@ -2438,9 +2656,15 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         "model_metrics": all_metrics,
         "model_summaries": model_summaries,
         "split": split_payload,
-        "tau_system_summary": summarize_series(labels_df["tau_system"].to_numpy(dtype=np.float64)),
-        "log_tau_system_summary": summarize_series(labels_df["log_tau_system"].to_numpy(dtype=np.float64)),
+        "tau_cross_system_summary": summarize_series(labels_df["tau_system"].to_numpy(dtype=np.float64)),
+        "log_tau_cross_system_summary": summarize_series(labels_df["log_tau_system"].to_numpy(dtype=np.float64)),
         "lambda_phase_space_summary": summarize_series(labels_df["lambda_phase_space"].to_numpy(dtype=np.float64)),
+        "lyapunov_time_proxy_summary": summarize_series(
+            labels_df["lyapunov_time_proxy"].to_numpy(dtype=np.float64)
+        ),
+        "log_lyapunov_time_proxy_summary": summarize_series(
+            labels_df["log_lyapunov_time_proxy"].to_numpy(dtype=np.float64)
+        ),
         "lambda_tau_ratio_summary": summarize_series(labels_df["lambda_tau_ratio"].to_numpy(dtype=np.float64)),
         "system_censored_fraction": float(labels_df["system_censored"].mean()),
         "labels_csv": str(labels_path),

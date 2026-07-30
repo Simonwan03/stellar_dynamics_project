@@ -155,9 +155,12 @@ The run saves five result figures:
 
 ## Task D
 
-System-level phase-space divergence regression has two leakage-aware settings.
-The default initial-condition experiment predicts `log1p(tau_system)` from
-`t=0` features with a constant baseline, random forest, and MLP:
+Task D now predicts a finite-time Lyapunov-time proxy rather than threshold-crossing time.
+For each of the 16 `(i, i+16)` perturbation pairs, it fits the slope of `log R(t)`
+in the configured early-growth interval, rejects low-quality fits, aggregates the
+accepted positive slopes, and uses
+`log_lyapunov_time_proxy = log(1 / lambda_phase_space)` as the training target.
+The old `R(t) > 1000` crossing time remains an auxiliary diagnostic.
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
@@ -165,26 +168,24 @@ conda run -n stellar python -m tasks.task_d \
   --output-dir results/task_d_initial \
   --growth-lower 1 \
   --growth-upper 100 \
+  --growth-sensitivity-uppers 10 30 100 \
+  --lambda-r2-min 0.8 \
+  --min-valid-lambda-pairs 8 \
+  --max-pair-log-mad 0.75 \
   --mlp-epochs 80
 ```
 
-The prefix setting computes the actual observation end time from
-`times_complete`, removes systems with `tau_system <= t_obs`, and predicts
-`log1p(tau_system - t_obs)`:
+The prefix setting predicts the same Lyapunov-time proxy using `cnn_orbital`,
+`cnn_phase_space`, and `set_cnn`. Its current label fit uses the stored full
+trajectory, including the prefix interval, so a future-only non-overlapping fit
+is required before interpreting it as strict forecasting.
 
-```bash
-conda run -n stellar python -m tasks.task_d \
-  --task-setting prefix \
-  --prefix-len 200 \
-  --prefix-time-stride 1 \
-  --output-dir results/task_d_prefix_tobs_200 \
-  --cnn-epochs 80
-```
-
-Prefix models are `cnn_orbital`, `cnn_phase_space`, and `set_cnn`. Neural
-regressors use Huber loss by default; select `--loss mse` for the previous MSE
-objective. The target is an empirical Lyapunov-like divergence timescale, not a
-strict infinitesimal Lyapunov time.
+The saved dataset is generally too coarsely sampled to obtain five points in
+the `R=1–10`, `1–30`, or `1–100` growth ranges. The quality filter intentionally
+rejects such systems. Production Lyapunov labels therefore require higher-cadence
+early trajectory output or variational/tangent-equation integrations with periodic
+renormalization. The result should be described as a finite-time Lyapunov-time
+proxy, not a strict asymptotic Lyapunov time.
 
 ## Task E
 

@@ -20,7 +20,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--threshold", type=float, default=1e3)
     parser.add_argument("--growth-lower", type=float, default=1.0)
     parser.add_argument("--growth-upper", type=float, default=100.0)
+    parser.add_argument(
+        "--growth-sensitivity-uppers",
+        type=float,
+        nargs="+",
+        default=(10.0, 30.0, 100.0),
+        help="Upper R(t) bounds for slope-sensitivity fits; lower bound is --growth-lower.",
+    )
     parser.add_argument("--min-growth-points", type=int, default=5)
+    parser.add_argument("--lambda-r2-min", type=float, default=0.8)
+    parser.add_argument("--min-valid-lambda-pairs", type=int, default=8)
+    parser.add_argument("--max-pair-log-mad", type=float, default=0.75)
     parser.add_argument("--aggregation", choices=["median", "mean"], default="median")
     parser.add_argument("--censoring-rule", choices=["median_pair", "all_pairs"], default="median_pair")
     parser.add_argument("--feature-aggregation", choices=["first", "mean_std"], default="first")
@@ -69,7 +79,11 @@ def main() -> None:
         threshold=args.threshold,
         growth_lower=args.growth_lower,
         growth_upper=args.growth_upper,
+        growth_sensitivity_uppers=tuple(args.growth_sensitivity_uppers),
         min_growth_points=args.min_growth_points,
+        lambda_r2_min=args.lambda_r2_min,
+        min_valid_lambda_pairs=args.min_valid_lambda_pairs,
+        max_pair_log_mad=args.max_pair_log_mad,
         aggregation=args.aggregation,
         censoring_rule=args.censoring_rule,
         feature_aggregation=args.feature_aggregation,

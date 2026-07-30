@@ -277,7 +277,7 @@ Task B 有两个模式：
 
 这是最强调 perturbation-set 结构的任务。
 
-### Task D: Lyapunov-Like Divergence Time Regression
+### Task D: Finite-Time Lyapunov-Time Proxy Regression
 
 入口脚本：[tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 
@@ -285,44 +285,49 @@ Task B 有两个模式：
 
 **任务定义**
 
-`Task D` 不直接预测 stable / unstable，而是在质心系中用 position + velocity 定义无量纲 phase-space separation：
+`Task D` 在质心系中用 position + velocity 定义无量纲 phase-space separation：
 
 - 每条 trajectory 逐时刻减去自身的质量加权质心位置和质心速度
 - position 和 velocity 分别用 pair 在 `t=0` 的 characteristic scale 归一化
 - 合并得到 `delta_x(t)`，并计算 `R_x(t) = delta_x(t) / delta_x(0)`
-- 当 `R_x(t) > threshold` 时记录首次越阈时间 `tau_system`
-- 在默认 `1 < R_x(t) < 100` 区间拟合 `log R_x(t)` 的斜率，得到 `lambda_phase_space`
-- 多个 pair 默认用 median 聚合为 system-level `tau_system` 和 `lambda_phase_space`
-- 当前主训练目标仍是 `log_tau_system = log1p(tau_system)`；`lambda_phase_space` 同时写入标签用于验证和后续回归
+- 对 16 个 `(i, i+16)` perturbation pairs，在 `log R_x(t)` 的早期增长段拟合 slope `lambda_pair`
+- 只保留正 slope、`R² >= 0.8`、至少 `5` 个拟合点的 pair
+- 默认至少要求 `8/16` 个有效 pair，并要求 pair 间 `log(lambda)` MAD 不超过 `0.75`
+- 对合格 pair 的 slope 取 median，得到 `lambda_phase_space`
+- 定义 `lyapunov_time_proxy = 1 / lambda_phase_space`
+- 主训练目标为 `log_lyapunov_time_proxy = log(1 / lambda_phase_space)`
 
-脚本还会检查近似关系 `lambda_phase_space * tau_system / log(threshold)`，理想指数增长情况下该比值接近 `1`。
-
-Task D 分成两个 setting。
+脚本同时计算 `1 < R < 10`、`1 < R < 30`、`1 < R < 100` 三个区间的
+slope sensitivity，并保留 `R > 1000` 的首次 crossing time `tau_cross` 作为辅助诊断，
+不再将 `tau_cross` 作为训练 target。
 
 **Task D-IC：initial-condition prediction**
 
 - 默认主实验：`--task-setting initial`
 - 输入只使用 `t=0` 的 masses、质量比、轨道尺度、偏心率、倾角、能量、角动量和周期等初始条件
-- 目标：`log1p(phase_space_divergence_time)`
+- 目标：`log(finite_time_lyapunov_time_proxy)`
 - 模型：`constant_median`、`random_forest`、`mlp`
-- 回答：仅根据初始轨道配置，能否推断未来的 Lyapunov-like divergence timescale
 
-**Task D-Prefix：early-window conditional prediction**
+**Task D-Prefix：early-window prediction**
 
 - 显式使用：`--task-setting prefix`
-- 从实际 `times_complete` 计算 prefix 结束时间 `t_obs`
-- 只保留 `tau_system > t_obs` 的系统，避免输入窗口已经包含 divergence event
-- 目标改为 `log1p(tau_system - t_obs)`，即 remaining divergence time
-- 模型：
-  - `cnn_orbital`：32 条 variations 的逐时刻 orbital mean/std
-  - `cnn_phase_space`：在 orbital 基础上加入质心相对 position/velocity
-  - `set_cnn`：保留完整 `[B,32,T,C]` orbital ensemble，shared temporal CNN 后做 set mean pooling
+- 目标与 initial setting 相同，仍为 `log(finite_time_lyapunov_time_proxy)`
+- 模型：`cnn_orbital`、`cnn_phase_space`、`set_cnn`
+- 当前 proxy 使用整条保存轨迹拟合，包含 prefix 区间；若要把 prefix 版本解释为严格的未来预测，
+  应改为只在 `t > t_obs` 的非重叠未来窗口拟合 label
 
-神经网络默认使用 `SmoothL1Loss(beta=0.5)`，可通过 `--loss mse` 切回 MSE。评价统一报告 log-time MAE/RMSE、Spearman、Pearson、factor-2/factor-3 accuracy 和 median absolute log error。
+神经网络默认使用 `SmoothL1Loss(beta=0.5)`。评价报告 log-time MAE/RMSE、
+原始 Lyapunov-time proxy MAE、Spearman、Pearson、factor-2/factor-3 accuracy。
 
-输出按 setting 分到 `results/task_d_initial/` 或 `results/task_d_prefix_tobs_<prefix_len>/`，包含 `metrics.json`、`diagnostics.json`、`predictions.csv`、标签、feature importance 和 `plots/`。
+**数据分辨率限制**
 
-这个 target 是由有限扰动在 phase space 中增长得到的 empirical Lyapunov-like divergence timescale，不应解释成严格的 infinitesimal Lyapunov time。
+当前 `dataset_v3` 的时间采样间隔约为 `50000`。抽样检查中，不少 pair 从
+`R(0)=1` 在第一个非零采样点直接跳到 `R≈400–1500`，使 `1–10`、`1–30`
+甚至 `1–100` 区间没有足够的观测点。严格质量筛选会正确拒绝这些标签；
+要得到可用于正式训练的 Lyapunov-time proxy，需要重新输出更高时间分辨率的早期轨迹，
+或直接积分 variational/tangent equations 并周期 renormalize deviation vector。
+因此该 target 应称为 `finite-time Lyapunov-time proxy`，不应写成严格的
+asymptotic Lyapunov time。
 
 ### Task E: Forecasting Baselines
 
@@ -362,6 +367,40 @@ raw MSE 虽然更低，但不能据此判定整体效果更好。
 
 注意：Persistence 和 Ridge 当前使用的 evaluation window 数量及 scaler
 统计范围不同，因此表格只记录已有结果，不属于严格的同条件模型排名。
+
+#### E.0.1 `orbital15` 与 `raw_state18` 表示对比
+
+当前保存的 matched preliminary benchmark 使用相同的 `context_len=200`、
+`pred_len=50`、`split_seed=42`、32-variation group split、顺序采样和
+completion filtering。`orbital15` 测试集包含 `305` 个窗口，
+`raw_state18` 测试集包含 `306` 个窗口，因此两批结果基本匹配，但不是
+逐窗口完全相同。由于两种表示的物理量和原始尺度不同，比较应使用共同的
+标准化指标 `MSE-Z`、`MAE-Z` 和 `Spearman-Z`，不应直接比较 raw-scale
+MSE。
+
+| Model | orbital15 MSE-Z | raw_state18 MSE-Z | orbital15 Spearman-Z | raw_state18 Spearman-Z |
+|---|---:|---:|---:|---:|
+| TimesFM | **0.2516** | 0.5252 | **0.8567** | 0.4242 |
+| Chronos | **0.3044** | 0.5805 | **0.8388** | 0.4283 |
+| TCN | **0.4261** | 0.6233 | **0.7289** | 0.2208 |
+| iTransformer | **0.3854** | 0.6237 | **0.7530** | 0.1938 |
+| PatchTST | **0.3725** | 0.6265 | **0.7671** | 0.1972 |
+| Persistence | **0.6938** | 1.0541 | **0.6372** | 0.2043 |
+| Ridge | **2.0256** | 2.5951 | **0.4742** | 0.0994 |
+
+在所有具有共同运行结果的模型上，`orbital15` 都取得更低的标准化 MSE
+和更高的 Spearman 相关性。TimesFM 的 Spearman-Z 从 `raw_state18`
+的 `0.4242` 提升到 `orbital15` 的 `0.8567`；PatchTST 则从
+`0.1972` 提升到 `0.7671`。标准化 MAE 的趋势整体一致，但 TCN 在
+`raw_state18` 上略低（`0.4312` vs. `0.4628`），iTransformer 两者几乎
+相同（均约 `0.4191`）。
+
+`orbital15` 独有的 Panda Adapter 当前进一步达到
+`MSE-Z=0.2115`、`MAE-Z=0.2547`、`Spearman-Z=0.8810`。这些结果表明，
+在当前三体 forecasting 设置与训练预算下，预测经过物理结构化处理的
+`orbital15`，整体上明显比直接预测位置和速度组成的 `raw_state18`
+更容易。完整运行口径和原始结果见
+[`docs/task_e_experiment_summary.md`](docs/task_e_experiment_summary.md)。
 
 #### E.1 Foundation Forecasting
 
@@ -579,7 +618,11 @@ conda run -n stellar python -m tasks.task_d \
   --threshold 1000 \
   --growth-lower 1 \
   --growth-upper 100 \
+  --growth-sensitivity-uppers 10 30 100 \
   --min-growth-points 5 \
+  --lambda-r2-min 0.8 \
+  --min-valid-lambda-pairs 8 \
+  --max-pair-log-mad 0.75 \
   --aggregation median \
   --censoring-rule median_pair \
   --feature-aggregation first \
@@ -613,6 +656,10 @@ conda run -n stellar python -m tasks.task_d \
   --threshold 1000 \
   --growth-lower 1 \
   --growth-upper 100 \
+  --growth-sensitivity-uppers 10 30 100 \
+  --lambda-r2-min 0.8 \
+  --min-valid-lambda-pairs 8 \
+  --max-pair-log-mad 0.75 \
   --prefix-len 200 \
   --prefix-time-stride 1 \
   --sequence-aggregation mean_std \
@@ -626,8 +673,8 @@ conda run -n stellar python -m tasks.task_d \
 
 常用参数：
 
-- `--force-recompute`: 忽略缓存标签，重新计算 `tau_system`
-- `--exclude-censored`: 去掉 censored systems
+- `--force-recompute`: 忽略缓存标签，重新计算 slope、Lyapunov proxy 和 crossing-time 诊断
+- `--lambda-r2-min`, `--min-valid-lambda-pairs`, `--max-pair-log-mad`: 调整 slope 与 pair consistency 质量筛选
 - `--feature-aggregation first|mean_std`: initial setting 的 feature 聚合方式
 - `--no-mlp`, `--no-cnn-orbital`, `--no-cnn-phase-space`, `--no-set-cnn`: 关闭对应神经模型
 - `--loss mse|huber`: 神经网络回归损失
