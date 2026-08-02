@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import explained_variance_score, mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -28,9 +28,12 @@ from tasks.common.experiment_utils import (
     parse_name_list,
     save_csv,
     save_json,
+    save_binary_curves,
     select_device,
     set_random_seed,
+    stratified_split_indices,
     standardize_from_train,
+    binary_metrics_from_probs,
 )
 
 
@@ -162,7 +165,10 @@ def build_group_stable_labels(
     group_size: int = 32,
     threshold_time: float = 10000.0,
     require_complete: bool = True,
+    target_mode: str = "stable_fraction",
 ) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+    if target_mode not in {"stable_fraction", "binary_any"}:
+        raise ValueError(f"Unsupported target_mode: {target_mode}")
     df = pd.read_csv(
         labels_path,
         sep=r"\s+",
@@ -201,8 +207,15 @@ def build_group_stable_labels(
         )
         .reset_index()
     )
+    grouped["stable_binary"] = (grouped["stable_count"] == group_size).astype(np.int32)
+    grouped["any_unbound"] = (grouped["stable_count"] < group_size).astype(np.int32)
     case_ids = grouped["raw_case_id"].to_numpy(dtype=np.int64)
-    y = grouped["stable_fraction"].to_numpy(dtype=np.float32)
+    if target_mode == "stable_fraction":
+        y = grouped["stable_fraction"].to_numpy(dtype=np.float32)
+    else:
+        # A system is positive/stable only when all 32 variations survive.
+        # Thus one variation unbound before threshold_time gives label 0.
+        y = grouped["stable_binary"].to_numpy(dtype=np.float32)
     return case_ids, y, grouped
 
 
@@ -283,16 +296,64 @@ class MLPRegressor(nn.Module):
         return self.net(x)
 
 
-def regression_metrics_from_preds(y_true: np.ndarray, pred: np.ndarray) -> dict[str, float]:
+def _safe_correlation(x: np.ndarray, y: np.ndarray) -> float:
+    if x.size < 2 or np.std(x) <= 1e-12 or np.std(y) <= 1e-12:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def regression_metrics_from_preds(y_true: np.ndarray, pred: np.ndarray) -> dict[str, Any]:
     y_true = np.asarray(y_true).reshape(-1).astype(np.float64)
     pred = np.asarray(pred).reshape(-1).astype(np.float64)
     pred = np.clip(pred, 0.0, 1.0)
+    error = pred - y_true
+    mse = float(mean_squared_error(y_true, pred))
+    binomial_noise = float(np.mean(y_true * (1.0 - y_true) / 32.0)) if y_true.size else float("nan")
+    target_ranks = pd.Series(y_true).rank(method="average").to_numpy(dtype=np.float64)
+    pred_ranks = pd.Series(pred).rank(method="average").to_numpy(dtype=np.float64)
+    target_bins: dict[str, dict[str, float | int]] = {}
+    for lower, upper in ((0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)):
+        if upper == 1.0:
+            mask = (y_true >= lower) & (y_true <= upper)
+        else:
+            mask = (y_true >= lower) & (y_true < upper)
+        label = f"{lower:g}-{upper:g}"
+        if np.any(mask):
+            target_bins[label] = {
+                "count": int(mask.sum()),
+                "mae": float(np.mean(np.abs(error[mask]))),
+                "rmse": float(np.sqrt(np.mean(error[mask] ** 2))),
+                "bias": float(np.mean(error[mask])),
+            }
+        else:
+            target_bins[label] = {"count": 0, "mae": float("nan"), "rmse": float("nan"), "bias": float("nan")}
     return {
-        "mse": float(mean_squared_error(y_true, pred)),
-        "rmse": float(mean_squared_error(y_true, pred) ** 0.5),
+        "mse": mse,
+        "rmse": float(np.sqrt(mse)),
         "mae": float(mean_absolute_error(y_true, pred)),
+        "median_absolute_error": float(median_absolute_error(y_true, pred)),
         "r2": float(r2_score(y_true, pred)) if y_true.size > 1 else float("nan"),
+        "explained_variance": float(explained_variance_score(y_true, pred)) if y_true.size > 1 else float("nan"),
+        "pearson": _safe_correlation(y_true, pred),
+        "spearman": _safe_correlation(target_ranks, pred_ranks),
+        "mean_bias_error": float(np.mean(error)) if y_true.size else float("nan"),
+        "target_mean": float(np.mean(y_true)) if y_true.size else float("nan"),
+        "prediction_mean": float(np.mean(pred)) if pred.size else float("nan"),
+        "within_abs_error_0.05": float(np.mean(np.abs(error) <= 0.05)) if y_true.size else float("nan"),
+        "within_abs_error_0.10": float(np.mean(np.abs(error) <= 0.10)) if y_true.size else float("nan"),
+        "within_abs_error_0.20": float(np.mean(np.abs(error) <= 0.20)) if y_true.size else float("nan"),
+        "binomial_sampling_mse_estimate": binomial_noise,
+        "mse_over_binomial_noise": float(mse / binomial_noise) if binomial_noise > 1e-12 else float("nan"),
+        "by_target_bin": target_bins,
     }
+
+
+def save_binary_predictions(path: str | Path, y_true: np.ndarray, prob: np.ndarray) -> None:
+    rows = [
+        {"y_true": int(label), "probability": float(score), "prediction": int(score >= 0.5)}
+        for label, score in zip(np.asarray(y_true).reshape(-1), np.asarray(prob).reshape(-1))
+    ]
+    save_csv(path, rows)
 
 
 def save_regression_scatter(path: str | Path, y_true: np.ndarray, pred: np.ndarray, title: str) -> None:
@@ -338,6 +399,7 @@ def train_regressor(
     dropout: float,
     hidden: tuple[int, ...],
     loss_mode: str,
+    target_mode: str,
     early_stopping_patience: int | None,
     early_stopping_min_delta: float,
 ) -> tuple[MLPRegressor, list[dict[str, float]], dict[str, Any]]:
@@ -350,7 +412,8 @@ def train_regressor(
     else:
         raise ValueError(f"Unsupported loss_mode: {loss_mode}")
     history: list[dict[str, float]] = []
-    best_eval_mse = float("inf")
+    classification = target_mode == "binary_any"
+    best_eval_metric = float("inf")
     best_epoch = 0
     best_state = copy.deepcopy(model.state_dict())
     epochs_without_improvement = 0
@@ -369,38 +432,63 @@ def train_regressor(
             loss_sum += float(loss.item()) * xb.size(0)
             count += xb.size(0)
         y_eval, eval_pred = predict_regressor(model, eval_loader, device)
-        eval_metrics = regression_metrics_from_preds(y_eval, eval_pred)
-        history.append(
-            {
-                "epoch": epoch,
-                "loss": loss_sum / max(count, 1),
-                "eval_mse": eval_metrics["mse"],
-                "eval_mae": eval_metrics["mae"],
-                "eval_r2": eval_metrics["r2"],
-            }
-        )
-        improved = eval_metrics["mse"] < (best_eval_mse - early_stopping_min_delta)
+        if classification:
+            eval_metrics = binary_metrics_from_probs(y_eval, eval_pred)
+            # Brier score is the probability MSE and is a smooth, threshold-free
+            # validation criterion for selecting the best binary checkpoint.
+            eval_metric = float(np.mean((np.asarray(y_eval) - np.asarray(eval_pred)) ** 2))
+            history.append(
+                {
+                    "epoch": epoch,
+                    "loss": loss_sum / max(count, 1),
+                    "eval_brier": eval_metric,
+                    "eval_accuracy": eval_metrics["accuracy"],
+                    "eval_f1": eval_metrics["f1"],
+                    "eval_auc": eval_metrics["auc"],
+                }
+            )
+        else:
+            eval_metrics = regression_metrics_from_preds(y_eval, eval_pred)
+            eval_metric = eval_metrics["mse"]
+            history.append(
+                {
+                    "epoch": epoch,
+                    "loss": loss_sum / max(count, 1),
+                    "eval_mse": eval_metrics["mse"],
+                    "eval_mae": eval_metrics["mae"],
+                    "eval_r2": eval_metrics["r2"],
+                }
+            )
+        improved = eval_metric < (best_eval_metric - early_stopping_min_delta)
         if improved:
-            best_eval_mse = float(eval_metrics["mse"])
+            best_eval_metric = float(eval_metric)
             best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
-        print(
-            f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} "
-            f"eval_mse={history[-1]['eval_mse']:.5f} eval_mae={history[-1]['eval_mae']:.5f}"
-        )
+        if classification:
+            print(
+                f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} "
+                f"eval_brier={history[-1]['eval_brier']:.5f} "
+                f"eval_f1={history[-1]['eval_f1']:.5f}"
+            )
+        else:
+            print(
+                f"epoch={epoch:03d} loss={history[-1]['loss']:.5f} "
+                f"eval_mse={history[-1]['eval_mse']:.5f} eval_mae={history[-1]['eval_mae']:.5f}"
+            )
         if early_stopping_patience is not None and epochs_without_improvement >= early_stopping_patience:
             print(
                 f"Early stopping at epoch {epoch:03d}; "
-                f"best_epoch={best_epoch:03d} best_eval_mse={best_eval_mse:.5f}"
+                f"best_epoch={best_epoch:03d} best_eval_metric={best_eval_metric:.5f}"
             )
             break
     model.load_state_dict(best_state)
     fit_info = {
         "best_epoch": int(best_epoch),
-        "best_eval_mse": float(best_eval_mse),
+        "best_eval_metric": float(best_eval_metric),
+        "monitor": "brier" if classification else "mse",
         "epochs_ran": int(len(history)),
         "stopped_early": bool(len(history) < epochs),
         "early_stopping_patience": None if early_stopping_patience is None else int(early_stopping_patience),
@@ -439,12 +527,50 @@ def run_xgboost_regressor(
     }
 
 
+def run_xgboost_classifier(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    output_dir: Path,
+    random_state: int,
+    preset: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        import xgboost as xgb
+    except ImportError as exc:
+        raise ImportError("Install xgboost or omit --models xgboost.") from exc
+
+    classifier_preset = dict(preset)
+    classifier_preset["objective"] = "binary:logistic"
+    model = xgb.XGBClassifier(
+        **classifier_preset,
+        eval_metric="logloss",
+        tree_method="hist",
+        random_state=random_state,
+    )
+    model.fit(X_train, y_train.astype(np.int32))
+    train_prob = model.predict_proba(X_train)[:, 1]
+    test_prob = model.predict_proba(X_test)[:, 1]
+    model.get_booster().save_model(output_dir / "xgboost_binary_model.json")
+    return {
+        "train": binary_metrics_from_probs(y_train, train_prob),
+        "test": binary_metrics_from_probs(y_test, test_prob),
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task A: group-level stable-fraction regression from tokenized ICs.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
     parser.add_argument("--group-size", type=int, default=32)
     parser.add_argument("--time-horizon", type=float, default=10000.0)
+    parser.add_argument(
+        "--target-mode",
+        choices=["stable_fraction", "binary_any"],
+        default="stable_fraction",
+        help="Predict the 32-variation stable fraction, or binary all-stable (any unbound => 0).",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("results/task_a"))
     parser.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
     parser.add_argument("--regroup", action="store_true", help="Create/update ICs_sampling_*_groupof*.hdf5.")
@@ -487,8 +613,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mlp-loss",
         choices=["mse", "bce"],
-        default="mse",
-        help="MLP regression loss. 'mse' uses Sigmoid+MSE; 'bce' uses logits+BCEWithLogitsLoss with soft fraction labels.",
+        default=None,
+        help="MLP loss. Defaults to mse for stable_fraction and bce for binary_any.",
     )
     parser.add_argument("--device", type=str, default=None)
     return parser
@@ -499,6 +625,7 @@ def main() -> None:
     output_dir = ensure_dir(args.output_dir)
     set_random_seed(args.seed)
     device = select_device(args.device)
+    effective_mlp_loss = args.mlp_loss or ("bce" if args.target_mode == "binary_any" else "mse")
 
     ics_path = args.dataset_dir / f"ICs_sampling_{args.sampling_id}.hdf5"
     tokenized_path = args.dataset_dir / f"ICs_sampling_{args.sampling_id}_groupof{args.group_size}_taska_orbital15.hdf5"
@@ -541,7 +668,15 @@ def main() -> None:
         labels_path,
         group_size=args.group_size,
         threshold_time=args.time_horizon,
+        target_mode=args.target_mode,
     )
+    max_observed_horizon = float(label_df["max_time_unbound"].max())
+    if args.time_horizon > max_observed_horizon + 1e-6:
+        raise ValueError(
+            f"Requested --time-horizon={args.time_horizon:g} exceeds the maximum "
+            f"time_unbound={max_observed_horizon:g} in {labels_path}. "
+            "Use a horizon within the recorded completion-time range."
+        )
     if args.max_cases is not None:
         max_cases = max(1, int(args.max_cases))
         case_ids = case_ids[:max_cases]
@@ -549,17 +684,27 @@ def main() -> None:
         label_df = label_df.iloc[:max_cases].reset_index(drop=True)
     X, feature_names = load_tokenized_features(tokenized_path, case_ids, selected_features)
     X, y, label_df, case_ids = filter_finite_cases(X, y, label_df, case_ids)
-    train_val_idx, test_idx = train_test_split(
-        np.arange(len(y)),
-        test_size=args.test_size,
-        random_state=args.seed,
-    )
-    val_fraction_of_train_val = float(args.val_size) / max(1e-8, 1.0 - float(args.test_size))
-    train_idx, val_idx = train_test_split(
-        train_val_idx,
-        test_size=val_fraction_of_train_val,
-        random_state=args.seed,
-    )
+    if args.target_mode == "binary_any":
+        if np.unique(y).size < 2:
+            raise ValueError("binary_any requires both all-stable and any-unbound systems after filtering.")
+        train_idx, val_idx, test_idx = stratified_split_indices(
+            y,
+            test_size=args.test_size,
+            val_size=float(args.val_size) / max(1e-8, 1.0 - float(args.test_size)),
+            seed=args.seed,
+        )
+    else:
+        train_val_idx, test_idx = train_test_split(
+            np.arange(len(y)),
+            test_size=args.test_size,
+            random_state=args.seed,
+        )
+        val_fraction_of_train_val = float(args.val_size) / max(1e-8, 1.0 - float(args.test_size))
+        train_idx, val_idx = train_test_split(
+            train_val_idx,
+            test_size=val_fraction_of_train_val,
+            random_state=args.seed,
+        )
     X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
     y_train, y_val, y_test = y[train_idx], y[val_idx], y[test_idx]
     X_train, [X_val, X_test], norm = standardize_from_train(X_train, X_val, X_test)
@@ -577,9 +722,10 @@ def main() -> None:
             "num_cases": int(len(y)),
             "num_features": int(X.shape[1]),
             "feature_names": feature_names,
+            "target_mode": args.target_mode,
             "mlp_hidden": hidden,
             "mlp_dropout": dropout,
-            "mlp_loss": args.mlp_loss,
+            "mlp_loss": effective_mlp_loss,
             "xgb_preset": xgb_preset,
             "label_mean": float(y.mean()),
             "label_min": float(y.min()),
@@ -601,36 +747,59 @@ def main() -> None:
             weight_decay=args.weight_decay,
             dropout=dropout,
             hidden=hidden,
-            loss_mode=args.mlp_loss,
+            loss_mode=effective_mlp_loss,
+            target_mode=args.target_mode,
             early_stopping_patience=early_stopping_patience,
             early_stopping_min_delta=args.early_stopping_min_delta,
         )
         y_train_eval, train_pred = predict_regressor(mlp, train_loader, device)
         y_val_eval, val_pred = predict_regressor(mlp, val_loader, device)
         y_test_eval, test_pred = predict_regressor(mlp, test_loader, device)
+        model_stem = "binary" if args.target_mode == "binary_any" else "fraction"
         torch.save(
             {"model_state_dict": mlp.state_dict(), "feature_names": feature_names},
-            output_dir / "mlp_fraction_model.pt",
+            output_dir / f"mlp_{model_stem}_model.pt",
         )
-        save_csv(output_dir / "mlp_fraction_train_log.csv", history)
-        save_regression_scatter(output_dir / "mlp_fraction_test_scatter.png", y_test_eval, test_pred, "Task A MLP")
-        all_metrics["mlp"] = {
-            "fit": fit_info,
-            "train": regression_metrics_from_preds(y_train_eval, train_pred),
-            "val": regression_metrics_from_preds(y_val_eval, val_pred),
-            "test": regression_metrics_from_preds(y_test_eval, test_pred),
-        }
+        save_csv(output_dir / f"mlp_{model_stem}_train_log.csv", history)
+        if args.target_mode == "binary_any":
+            save_binary_predictions(output_dir / "mlp_binary_test_predictions.csv", y_test_eval, test_pred)
+            save_binary_curves(output_dir / "mlp_binary_test_curves.png", y_test_eval, test_pred, "Task A binary MLP")
+            all_metrics["mlp"] = {
+                "fit": fit_info,
+                "train": binary_metrics_from_probs(y_train_eval, train_pred),
+                "val": binary_metrics_from_probs(y_val_eval, val_pred),
+                "test": binary_metrics_from_probs(y_test_eval, test_pred),
+            }
+        else:
+            save_regression_scatter(output_dir / "mlp_fraction_test_scatter.png", y_test_eval, test_pred, "Task A MLP")
+            all_metrics["mlp"] = {
+                "fit": fit_info,
+                "train": regression_metrics_from_preds(y_train_eval, train_pred),
+                "val": regression_metrics_from_preds(y_val_eval, val_pred),
+                "test": regression_metrics_from_preds(y_test_eval, test_pred),
+            }
 
     if "xgboost" in models:
-        all_metrics["xgboost"] = run_xgboost_regressor(
-            X_train,
-            y_train,
-            X_test,
-            y_test,
-            output_dir,
-            random_state=args.seed,
-            preset=xgb_preset,
-        )
+        if args.target_mode == "binary_any":
+            all_metrics["xgboost"] = run_xgboost_classifier(
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                output_dir,
+                random_state=args.seed,
+                preset=xgb_preset,
+            )
+        else:
+            all_metrics["xgboost"] = run_xgboost_regressor(
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                output_dir,
+                random_state=args.seed,
+                preset=xgb_preset,
+            )
 
     save_json(output_dir / "metrics.json", all_metrics)
     print(f"Task A complete. Outputs: {output_dir}")

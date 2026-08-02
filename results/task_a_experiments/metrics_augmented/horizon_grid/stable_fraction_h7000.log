@@ -1,0 +1,40 @@
+epoch=001 loss=0.16318 eval_mse=0.13136 eval_mae=0.31570
+epoch=002 loss=0.13220 eval_mse=0.11647 eval_mae=0.28730
+epoch=003 loss=0.12251 eval_mse=0.11248 eval_mae=0.27723
+epoch=004 loss=0.11742 eval_mse=0.10979 eval_mae=0.26974
+epoch=005 loss=0.11167 eval_mse=0.10659 eval_mae=0.26777
+epoch=006 loss=0.10918 eval_mse=0.10589 eval_mae=0.26616
+epoch=007 loss=0.10660 eval_mse=0.10433 eval_mae=0.26240
+epoch=008 loss=0.10312 eval_mse=0.10273 eval_mae=0.25673
+epoch=009 loss=0.09788 eval_mse=0.10186 eval_mae=0.24465
+epoch=010 loss=0.09716 eval_mse=0.10031 eval_mae=0.24806
+epoch=011 loss=0.09588 eval_mse=0.09969 eval_mae=0.24901
+epoch=012 loss=0.09377 eval_mse=0.09826 eval_mae=0.24115
+epoch=013 loss=0.09010 eval_mse=0.09940 eval_mae=0.24215
+epoch=014 loss=0.09232 eval_mse=0.09999 eval_mae=0.24587
+epoch=015 loss=0.08852 eval_mse=0.09716 eval_mae=0.23569
+epoch=016 loss=0.08699 eval_mse=0.09618 eval_mae=0.23487
+epoch=017 loss=0.08528 eval_mse=0.09848 eval_mae=0.23756
+epoch=018 loss=0.08416 eval_mse=0.09778 eval_mae=0.23607
+epoch=019 loss=0.08372 eval_mse=0.09670 eval_mae=0.22969
+epoch=020 loss=0.08027 eval_mse=0.09574 eval_mae=0.22882
+epoch=021 loss=0.07839 eval_mse=0.09762 eval_mae=0.22992
+epoch=022 loss=0.07673 eval_mse=0.09867 eval_mae=0.23403
+epoch=023 loss=0.07628 eval_mse=0.09815 eval_mae=0.22717
+epoch=024 loss=0.07526 eval_mse=0.09829 eval_mae=0.23448
+epoch=025 loss=0.07306 eval_mse=0.09825 eval_mae=0.22431
+epoch=026 loss=0.07397 eval_mse=0.09708 eval_mae=0.22606
+epoch=027 loss=0.07094 eval_mse=0.10004 eval_mae=0.22833
+epoch=028 loss=0.07202 eval_mse=0.09603 eval_mae=0.22313
+epoch=029 loss=0.07119 eval_mse=0.09864 eval_mae=0.23018
+epoch=030 loss=0.06879 eval_mse=0.09692 eval_mae=0.21946
+epoch=031 loss=0.06733 eval_mse=0.09938 eval_mae=0.22789
+epoch=032 loss=0.07021 eval_mse=0.09776 eval_mae=0.22211
+epoch=033 loss=0.06753 eval_mse=0.09908 eval_mae=0.22568
+epoch=034 loss=0.06394 eval_mse=0.09832 eval_mae=0.22026
+epoch=035 loss=0.06333 eval_mse=0.10014 eval_mae=0.22167
+Early stopping at epoch 035; best_epoch=020 best_eval_metric=0.09574
+Task A complete. Outputs: results/task_a_experiments/metrics_augmented/horizon_grid/stable_fraction_h7000
+mlp {'mse': 0.09173553378993793, 'rmse': 0.3028787443680027, 'mae': 0.22251172278860581, 'median_absolute_error': 0.16063621640205383, 'r2': 0.41207388192682737, 'explained_variance': 0.4122517464224038, 'pearson': 0.6438765424220206, 'spearman': 0.6400218475263117, 'mean_bias_error': 0.005268076244282914, 'target_mean': 0.3218125, 'prediction_mean': 0.3270805762442829, 'within_abs_error_0.05': 0.243, 'within_abs_error_0.10': 0.366, 'within_abs_error_0.20': 0.574, 'binomial_sampling_mse_estimate': 0.00194427490234375, 'mse_over_binomial_noise': 47.182388498331285, 'by_target_bin': {'0-0.25': {'count': 618, 'mae': 0.17306494318361734, 'rmse': 0.2540094044613476, 'bias': 0.1597726934078686}, '0.25-0.5': {'count': 81, 'mae': 0.18341938288951362, 'rmse': 0.22084011377235388, 'bias': 0.029062905406326424}, '0.5-0.75': {'count': 60, 'mae': 0.22791411839425563, 'rmse': 0.2759417814978267, 'bias': -0.15530240101118883}, '0.75-1': {'count': 241, 'mae': 0.3611027833337111, 'rmse': 0.4240814453922675, 'bias': -0.35895186539012863}}}
+xgboost {'mse': 0.08766161338805388, 'rmse': 0.2960770396164719, 'mae': 0.2288941907787521, 'median_absolute_error': 0.19333751499652863, 'r2': 0.4381833305588416, 'explained_variance': 0.4395370995423328, 'pearson': 0.6646473734856414, 'spearman': 0.6673968293730748, 'mean_bias_error': 0.014533817387913586, 'target_mean': 0.3218125, 'prediction_mean': 0.3363463173879136, 'within_abs_error_0.05': 0.189, 'within_abs_error_0.10': 0.313, 'within_abs_error_0.20': 0.519, 'binomial_sampling_mse_estimate': 0.00194427490234375, 'mse_over_binomial_noise': 45.08704673520247, 'by_target_bin': {'0-0.25': {'count': 618, 'mae': 0.18514433851233694, 'rmse': 0.24687824514665502, 'bias': 0.17866417991030775}, '0.25-0.5': {'count': 81, 'mae': 0.15425348925737686, 'rmse': 0.19273822743472532, 'bias': 0.04369517700907625}, '0.5-0.75': {'count': 60, 'mae': 0.20543574430048467, 'rmse': 0.24925307152272413, 'bias': -0.16608544724682966}, '0.75-1': {'count': 241, 'mae': 0.3720095945653579, 'rmse': 0.4236699834246161, 'bias': -0.3711818601642407}}}
+

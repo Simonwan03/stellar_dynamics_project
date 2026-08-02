@@ -1,0 +1,115 @@
+{
+  "mlp": {
+    "fit": {
+      "best_epoch": 11,
+      "best_eval_metric": 0.11640302836894989,
+      "monitor": "brier",
+      "epochs_ran": 26,
+      "stopped_early": true,
+      "early_stopping_patience": 15,
+      "early_stopping_min_delta": 0.0001
+    },
+    "train": {
+      "threshold": 0.5,
+      "accuracy": 0.8419096626643796,
+      "balanced_accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 1.0,
+      "fpr": 0.0,
+      "fnr": 1.0,
+      "mcc": 0.0,
+      "confusion_matrix": [
+        [
+          2945,
+          0
+        ],
+        [
+          553,
+          0
+        ]
+      ],
+      "tn": 2945,
+      "fp": 0,
+      "fn": 553,
+      "tp": 0,
+      "positive_rate": 0.15809033733562036,
+      "predicted_positive_rate": 0.0,
+      "brier": 0.11921583770449422,
+      "log_loss": 0.382931546083323,
+      "ece_10bin": 0.007003001211079032,
+      "mce_10bin": 0.04152110027415412,
+      "auc": 0.7433311739946027,
+      "average_precision": 0.3448017662220899
+    },
+    "val": {
+      "threshold": 0.5,
+      "accuracy": 0.842,
+      "balanced_accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 1.0,
+      "fpr": 0.0,
+      "fnr": 1.0,
+      "mcc": 0.0,
+      "confusion_matrix": [
+        [
+          421,
+          0
+        ],
+        [
+          79,
+          0
+        ]
+      ],
+      "tn": 421,
+      "fp": 0,
+      "fn": 79,
+      "tp": 0,
+      "positive_rate": 0.158,
+      "predicted_positive_rate": 0.0,
+      "brier": 0.11640302685683007,
+      "log_loss": 0.37238430401309586,
+      "ece_10bin": 0.01660694869767758,
+      "mce_10bin": 0.08203731548218501,
+      "auc": 0.7673111037613879,
+      "average_precision": 0.38209349857902114
+    },
+    "test": {
+      "threshold": 0.5,
+      "accuracy": 0.842,
+      "balanced_accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 1.0,
+      "fpr": 0.0,
+      "fnr": 1.0,
+      "mcc": 0.0,
+      "confusion_matrix": [
+        [
+          842,
+          0
+        ],
+        [
+          158,
+          0
+        ]
+      ],
+      "tn": 842,
+      "fp": 0,
+      "fn": 158,
+      "tp": 0,
+      "positive_rate": 0.158,
+      "predicted_positive_rate": 0.0,
+      "brier": 0.11987915175500663,
+      "log_loss": 0.38553075439177725,
+      "ece_10bin": 0.01977371200765265,
+      "mce_10bin": 0.1105178296566009,
+      "auc": 0.741062569530052,
+      "average_precision": 0.3375380211959699
+    }
+  }
+}

@@ -1,0 +1,43 @@
+epoch=001 loss=0.58828 eval_brier=0.16700 eval_f1=0.00000
+epoch=002 loss=0.49036 eval_brier=0.15306 eval_f1=0.00000
+epoch=003 loss=0.46213 eval_brier=0.14990 eval_f1=0.23841
+epoch=004 loss=0.45547 eval_brier=0.14720 eval_f1=0.35928
+epoch=005 loss=0.44400 eval_brier=0.14210 eval_f1=0.43716
+epoch=006 loss=0.43826 eval_brier=0.13954 eval_f1=0.38857
+epoch=007 loss=0.42784 eval_brier=0.13544 eval_f1=0.45026
+epoch=008 loss=0.41774 eval_brier=0.13312 eval_f1=0.48731
+epoch=009 loss=0.41213 eval_brier=0.13078 eval_f1=0.53846
+epoch=010 loss=0.40481 eval_brier=0.12961 eval_f1=0.54902
+epoch=011 loss=0.39881 eval_brier=0.12656 eval_f1=0.52475
+epoch=012 loss=0.39909 eval_brier=0.12797 eval_f1=0.48677
+epoch=013 loss=0.39320 eval_brier=0.12688 eval_f1=0.59535
+epoch=014 loss=0.38503 eval_brier=0.12742 eval_f1=0.59556
+epoch=015 loss=0.37967 eval_brier=0.12575 eval_f1=0.58929
+epoch=016 loss=0.37884 eval_brier=0.12751 eval_f1=0.60759
+epoch=017 loss=0.37040 eval_brier=0.12466 eval_f1=0.57282
+epoch=018 loss=0.36027 eval_brier=0.12474 eval_f1=0.55610
+epoch=019 loss=0.36416 eval_brier=0.12456 eval_f1=0.57798
+epoch=020 loss=0.35658 eval_brier=0.12283 eval_f1=0.57416
+epoch=021 loss=0.34636 eval_brier=0.12227 eval_f1=0.54000
+epoch=022 loss=0.35070 eval_brier=0.12323 eval_f1=0.61472
+epoch=023 loss=0.34445 eval_brier=0.12114 eval_f1=0.60000
+epoch=024 loss=0.34285 eval_brier=0.12155 eval_f1=0.59361
+epoch=025 loss=0.34309 eval_brier=0.12210 eval_f1=0.55340
+epoch=026 loss=0.32474 eval_brier=0.12319 eval_f1=0.58559
+epoch=027 loss=0.33354 eval_brier=0.12149 eval_f1=0.57534
+epoch=028 loss=0.32851 eval_brier=0.12198 eval_f1=0.57416
+epoch=029 loss=0.31472 eval_brier=0.12363 eval_f1=0.58491
+epoch=030 loss=0.30959 eval_brier=0.12284 eval_f1=0.60377
+epoch=031 loss=0.30682 eval_brier=0.12478 eval_f1=0.57674
+epoch=032 loss=0.31200 eval_brier=0.12124 eval_f1=0.62069
+epoch=033 loss=0.30770 eval_brier=0.12262 eval_f1=0.62979
+epoch=034 loss=0.29920 eval_brier=0.12303 eval_f1=0.62338
+epoch=035 loss=0.30336 eval_brier=0.12246 eval_f1=0.62555
+epoch=036 loss=0.29156 eval_brier=0.12375 eval_f1=0.56481
+epoch=037 loss=0.28629 eval_brier=0.12293 eval_f1=0.60987
+epoch=038 loss=0.29509 eval_brier=0.12135 eval_f1=0.62281
+Early stopping at epoch 038; best_epoch=023 best_eval_metric=0.12114
+Task A complete. Outputs: results/task_a_experiments/metrics_augmented/horizon_grid/binary_any_h2000
+mlp {'threshold': 0.5, 'accuracy': 0.811, 'balanced_accuracy': 0.7186886725269229, 'precision': 0.6298076923076923, 'recall': 0.5390946502057613, 'f1': 0.5809312638580931, 'specificity': 0.8982826948480845, 'fpr': 0.10171730515191546, 'fnr': 0.4609053497942387, 'mcc': 0.46218207952195817, 'confusion_matrix': [[680, 77], [112, 131]], 'tn': 680, 'fp': 77, 'fn': 112, 'tp': 131, 'positive_rate': 0.243, 'predicted_positive_rate': 0.208, 'brier': 0.12369234565155128, 'log_loss': 0.37313151570573616, 'ece_10bin': 0.03375788453518032, 'mce_10bin': 0.1851922717748904, 'auc': 0.8680028920745199, 'average_precision': 0.6770494322879657}
+xgboost {'threshold': 0.5, 'accuracy': 0.819, 'balanced_accuracy': 0.6890449086985121, 'precision': 0.7066666666666667, 'recall': 0.43621399176954734, 'f1': 0.539440203562341, 'specificity': 0.9418758256274768, 'fpr': 0.05812417437252312, 'fnr': 0.5637860082304527, 'mcc': 0.45414126505654717, 'confusion_matrix': [[713, 44], [137, 106]], 'tn': 713, 'fp': 44, 'fn': 137, 'tp': 106, 'positive_rate': 0.243, 'predicted_positive_rate': 0.15, 'brier': 0.1228308334420271, 'log_loss': 0.37565832844263447, 'ece_10bin': 0.04084527420718223, 'mce_10bin': 0.14814743399620056, 'auc': 0.8708297318307592, 'average_precision': 0.6721500893488128}
+

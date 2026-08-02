@@ -1,0 +1,73 @@
+{
+  "mlp": {
+    "fit": {
+      "best_epoch": 18,
+      "best_eval_metric": 0.10279238969087601,
+      "monitor": "brier",
+      "epochs_ran": 33,
+      "stopped_early": true,
+      "early_stopping_patience": 15,
+      "early_stopping_min_delta": 0.0001
+    },
+    "train": {
+      "accuracy": 0.8965122927387078,
+      "precision": 0.7800586510263929,
+      "recall": 0.4810126582278481,
+      "f1": 0.5950782997762863,
+      "confusion_matrix": [
+        [
+          2870,
+          75
+        ],
+        [
+          287,
+          266
+        ]
+      ],
+      "positive_rate": 0.15809033733562036,
+      "predicted_positive_rate": 0.09748427672955975,
+      "auc": 0.896004813994971,
+      "average_precision": 0.6777966180296916
+    },
+    "val": {
+      "accuracy": 0.85,
+      "precision": 0.5434782608695652,
+      "recall": 0.31645569620253167,
+      "f1": 0.4,
+      "confusion_matrix": [
+        [
+          400,
+          21
+        ],
+        [
+          54,
+          25
+        ]
+      ],
+      "positive_rate": 0.158,
+      "predicted_positive_rate": 0.092,
+      "auc": 0.8437716106918428,
+      "average_precision": 0.5219771644135361
+    },
+    "test": {
+      "accuracy": 0.855,
+      "precision": 0.5631067961165048,
+      "recall": 0.3670886075949367,
+      "f1": 0.4444444444444444,
+      "confusion_matrix": [
+        [
+          797,
+          45
+        ],
+        [
+          100,
+          58
+        ]
+      ],
+      "positive_rate": 0.158,
+      "predicted_positive_rate": 0.103,
+      "auc": 0.8109459093779128,
+      "average_precision": 0.45671291022448857
+    }
+  }
+}

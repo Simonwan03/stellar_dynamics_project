@@ -34,12 +34,37 @@ Group-level stable-at-horizon modeling from tokenized initial conditions.
 By default this predicts the empirical stable fraction across the 32 perturbations
 for each system, matching the original Task A distribution-label objective.
 
+Set `--target-mode binary_any` to make this a system-level binary classifier:
+the label is `1` only when all 32 variations survive to `--time-horizon`; if any
+variation is unbound before that time, the label is `0`.
+
 ```bash
 conda run -n stellar python -m tasks.task_a \
   --output-dir results/task_a \
   --models mlp,xgboost \
   --epochs 80
 ```
+
+Binary all-stable classification:
+
+```bash
+conda run -n stellar python -m tasks.task_a \
+  --output-dir results/task_a_binary_any \
+  --target-mode binary_any \
+  --time-horizon 10000 \
+  --models mlp,xgboost \
+  --epochs 50 \
+  --device cuda
+```
+
+For `binary_any`, MLP defaults to `BCEWithLogitsLoss` and XGBoost uses a
+`binary:logistic` objective. The output metrics include accuracy, balanced
+accuracy, precision, recall, F1, specificity, FPR/FNR, MCC, AUROC, average
+precision, Brier score, log loss, confusion-matrix counts, and 10-bin ECE/MCE.
+For `stable_fraction`, regression metrics additionally include median absolute
+error, explained variance, Pearson/Spearman correlation, bias, tolerance
+accuracies, target-bin breakdowns, and the MSE relative to the 32-trial
+binomial sampling-noise estimate.
 
 MLP presets:
 - `--mlp-size small`: hidden `(64,64,32)`, dropout `0.1`
@@ -48,7 +73,7 @@ MLP presets:
 
 MLP loss modes:
 - `--mlp-loss mse`: `Sigmoid + MSELoss`
-- `--mlp-loss bce`: `Linear + BCEWithLogitsLoss` with the same `stable_fraction` labels
+- `--mlp-loss bce`: `Linear + BCEWithLogitsLoss`; useful for `binary_any`, and also supports soft `stable_fraction` labels
 
 MLP early stopping:
 - default: `--early-stopping-patience 15 --early-stopping-min-delta 1e-4`

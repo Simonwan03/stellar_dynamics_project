@@ -1,0 +1,44 @@
+{
+  "xgboost": {
+    "train": {
+      "accuracy": 0.8653516295025729,
+      "precision": 0.8059701492537313,
+      "recall": 0.19529837251356238,
+      "f1": 0.314410480349345,
+      "confusion_matrix": [
+        [
+          2919,
+          26
+        ],
+        [
+          445,
+          108
+        ]
+      ],
+      "positive_rate": 0.15809033733562036,
+      "predicted_positive_rate": 0.038307604345340196,
+      "auc": 0.8805754688886364,
+      "average_precision": 0.6188534429955167
+    },
+    "test": {
+      "accuracy": 0.85,
+      "precision": 0.625,
+      "recall": 0.12658227848101267,
+      "f1": 0.21052631578947367,
+      "confusion_matrix": [
+        [
+          830,
+          12
+        ],
+        [
+          138,
+          20
+        ]
+      ],
+      "positive_rate": 0.158,
+      "predicted_positive_rate": 0.032,
+      "auc": 0.8242580955530833,
+      "average_precision": 0.4607645463721668
+    }
+  }
+}

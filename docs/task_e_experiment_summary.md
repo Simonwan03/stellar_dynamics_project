@@ -44,7 +44,12 @@
 | Persistence (`.../raw18.../persistence`) | 最后值基线 | — | 1.054121 | 0.525768 | 0.204258 |
 | Ridge (`.../raw18.../ridge`) | 线性基线 | — | 2.595065 | 0.965088 | 0.099415 |
 
-Panda zero-shot 与 Panda Adapter 固定要求 15 通道 `orbital15`，因此不适用于 raw18。Chronos 因 18 通道展开推理导致原批次大小 32 显存不足，改用 `foundation_batch_size=4` 完成；这只改变推理分批方式，不改变预测样本或指标。
+该批次运行时 Task E 入口仍人为限制 Panda 只能使用 `orbital15`，所以没有保存
+raw18 的 Panda zero-shot 或 Panda Adapter 指标；这不是 Panda 模型本身的通道
+限制。当前入口已允许 Panda 直接接收 18 通道 `raw_state18`，但需要另行补跑，
+不能把新结果追填为本批次的历史结果。Chronos 因 18 通道展开推理导致原批次大小
+32 显存不足，改用 `foundation_batch_size=4` 完成；这只改变推理分批方式，不改变
+预测样本或指标。
 
 ## Panda Adapter：训练与早期小窗口评估
 

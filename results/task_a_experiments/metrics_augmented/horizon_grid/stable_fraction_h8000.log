@@ -1,0 +1,36 @@
+epoch=001 loss=0.16299 eval_mse=0.13153 eval_mae=0.31465
+epoch=002 loss=0.13167 eval_mse=0.11722 eval_mae=0.28766
+epoch=003 loss=0.12222 eval_mse=0.11352 eval_mae=0.27858
+epoch=004 loss=0.11707 eval_mse=0.11099 eval_mae=0.27124
+epoch=005 loss=0.11143 eval_mse=0.10774 eval_mae=0.26989
+epoch=006 loss=0.10884 eval_mse=0.10705 eval_mae=0.26783
+epoch=007 loss=0.10619 eval_mse=0.10546 eval_mae=0.26327
+epoch=008 loss=0.10289 eval_mse=0.10384 eval_mae=0.25667
+epoch=009 loss=0.09750 eval_mse=0.10320 eval_mae=0.24588
+epoch=010 loss=0.09702 eval_mse=0.10163 eval_mae=0.24876
+epoch=011 loss=0.09549 eval_mse=0.10205 eval_mae=0.25195
+epoch=012 loss=0.09325 eval_mse=0.10001 eval_mae=0.24312
+epoch=013 loss=0.08956 eval_mse=0.10131 eval_mae=0.24406
+epoch=014 loss=0.09184 eval_mse=0.10171 eval_mae=0.24797
+epoch=015 loss=0.08825 eval_mse=0.09878 eval_mae=0.23698
+epoch=016 loss=0.08725 eval_mse=0.09832 eval_mae=0.23825
+epoch=017 loss=0.08511 eval_mse=0.10055 eval_mae=0.24099
+epoch=018 loss=0.08385 eval_mse=0.10020 eval_mae=0.23970
+epoch=019 loss=0.08356 eval_mse=0.09902 eval_mae=0.23176
+epoch=020 loss=0.08028 eval_mse=0.09844 eval_mae=0.23149
+epoch=021 loss=0.07836 eval_mse=0.10061 eval_mae=0.23446
+epoch=022 loss=0.07716 eval_mse=0.10079 eval_mae=0.23765
+epoch=023 loss=0.07639 eval_mse=0.09992 eval_mae=0.22996
+epoch=024 loss=0.07595 eval_mse=0.10139 eval_mae=0.23816
+epoch=025 loss=0.07332 eval_mse=0.10007 eval_mae=0.22755
+epoch=026 loss=0.07342 eval_mse=0.09948 eval_mae=0.23045
+epoch=027 loss=0.07162 eval_mse=0.10330 eval_mae=0.23307
+epoch=028 loss=0.07187 eval_mse=0.09953 eval_mae=0.22848
+epoch=029 loss=0.07106 eval_mse=0.10189 eval_mae=0.23357
+epoch=030 loss=0.06892 eval_mse=0.09945 eval_mae=0.22363
+epoch=031 loss=0.06808 eval_mse=0.10105 eval_mae=0.23092
+Early stopping at epoch 031; best_epoch=016 best_eval_metric=0.09832
+Task A complete. Outputs: results/task_a_experiments/metrics_augmented/horizon_grid/stable_fraction_h8000
+mlp {'mse': 0.093953997267245, 'rmse': 0.3065191629690467, 'mae': 0.228427565094457, 'median_absolute_error': 0.1680976152420044, 'r2': 0.3894475045471715, 'explained_variance': 0.3897805785176671, 'pearson': 0.6254061931648157, 'spearman': 0.6237263112421823, 'mean_bias_error': 0.0071592326008291, 'target_mean': 0.31296875, 'prediction_mean': 0.3201279826008291, 'within_abs_error_0.05': 0.224, 'within_abs_error_0.10': 0.341, 'within_abs_error_0.20': 0.558, 'binomial_sampling_mse_estimate': 0.001910491943359375, 'mse_over_binomial_noise': 49.17790812665662, 'by_target_bin': {'0-0.25': {'count': 624, 'mae': 0.17667927587679616, 'rmse': 0.2539250943396141, 'bias': 0.16567936026117278}, '0.25-0.5': {'count': 82, 'mae': 0.17852958964138496, 'rmse': 0.21640606445052435, 'bias': 0.02926770070704018}, '0.5-0.75': {'count': 59, 'mae': 0.23565180422896045, 'rmse': 0.27493095887866154, 'bias': -0.1585415258245953}, '0.75-1': {'count': 235, 'mae': 0.3814332516903573, 'rmse': 0.4396319999600301, 'bias': -0.37987527504880375}}}
+xgboost {'mse': 0.08798371042124327, 'rmse': 0.29662048213372466, 'mae': 0.22820223859275574, 'median_absolute_error': 0.1865189523086883, 'r2': 0.4282449334849433, 'explained_variance': 0.42948668014119196, 'pearson': 0.6566933872311103, 'spearman': 0.658342851792236, 'mean_bias_error': 0.01382332838626462, 'target_mean': 0.31296875, 'prediction_mean': 0.3267920783862646, 'within_abs_error_0.05': 0.189, 'within_abs_error_0.10': 0.321, 'within_abs_error_0.20': 0.524, 'binomial_sampling_mse_estimate': 0.001910491943359375, 'mse_over_binomial_noise': 46.0529083763286, 'by_target_bin': {'0-0.25': {'count': 624, 'mae': 0.18175268325373906, 'rmse': 0.24323966406416084, 'bias': 0.17519323984402618}, '0.25-0.5': {'count': 82, 'mae': 0.1535484010308254, 'rmse': 0.19356665263951853, 'bias': 0.04362443480186346}, '0.5-0.75': {'count': 59, 'mae': 0.2190526372800439, 'rmse': 0.25833297254371884, 'bias': -0.1696372226638309}, '0.75-1': {'count': 235, 'mae': 0.37988719046115876, 'rmse': 0.43297396865386795, 'bias': -0.37900366294891275}}}
+

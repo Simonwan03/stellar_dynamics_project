@@ -1,0 +1,100 @@
+{
+  "dataset_dir": "dataset_v3",
+  "sampling_id": 2,
+  "group_size": 32,
+  "time_horizon": 5000.0,
+  "target_mode": "stable_fraction",
+  "output_dir": "results/task_a_experiments/fraction_h5000_xgb_base",
+  "features": "aratios,mratios,eccs,incs,APs,LANs",
+  "regroup": false,
+  "overwrite_tokenized": false,
+  "models": "xgboost",
+  "mlp_size": "base",
+  "xgb_size": "base",
+  "test_size": 0.2,
+  "val_size": 0.1,
+  "max_cases": null,
+  "seed": 42,
+  "batch_size": 128,
+  "epochs": 50,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "dropout": null,
+  "hidden": null,
+  "early_stopping_patience": 15,
+  "early_stopping_min_delta": 0.0001,
+  "mlp_loss": "mse",
+  "device": "cpu",
+  "tokenized_path": "dataset_v3/ICs_sampling_2_groupof32_taska_orbital15.hdf5",
+  "tokenized_shapes": {
+    "APs": [
+      5000,
+      32,
+      4
+    ],
+    "LANs": [
+      5000,
+      32,
+      4
+    ],
+    "aratios": [
+      5000,
+      32,
+      1
+    ],
+    "eccs": [
+      5000,
+      32,
+      2
+    ],
+    "incs": [
+      5000,
+      32,
+      2
+    ],
+    "mratios": [
+      5000,
+      32,
+      2
+    ]
+  },
+  "num_cases": 4998,
+  "num_features": 15,
+  "feature_names": [
+    "aratios_first_0",
+    "mratios_first_0",
+    "mratios_first_1",
+    "eccs_first_0",
+    "eccs_first_1",
+    "incs_first_0",
+    "incs_first_1",
+    "APs_first_0",
+    "APs_first_1",
+    "APs_first_2",
+    "APs_first_3",
+    "LANs_first_0",
+    "LANs_first_1",
+    "LANs_first_2",
+    "LANs_first_3"
+  ],
+  "mlp_hidden": [
+    128,
+    128,
+    64
+  ],
+  "mlp_dropout": 0.2,
+  "xgb_preset": {
+    "objective": "reg:squarederror",
+    "n_estimators": 1000,
+    "max_depth": 3,
+    "learning_rate": 0.02,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "reg_lambda": 5.0,
+    "n_jobs": -1
+  },
+  "label_mean": 0.36646533012390137,
+  "label_min": 0.0,
+  "label_max": 1.0
+}

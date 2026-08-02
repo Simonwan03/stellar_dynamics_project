@@ -15,8 +15,12 @@ import torch
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
+    balanced_accuracy_score,
+    brier_score_loss,
     confusion_matrix,
     f1_score,
+    log_loss,
+    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
@@ -148,20 +152,63 @@ def standardize_from_train(
     return out_train, out_arrays, {"mean": mu.astype(np.float32), "std": std.astype(np.float32)}
 
 
+def _expected_calibration_error(y_true: np.ndarray, prob: np.ndarray, n_bins: int = 10) -> tuple[float, float]:
+    """Return ECE and MCE using equally spaced probability bins."""
+    if y_true.size == 0:
+        return float("nan"), float("nan")
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_ids = np.minimum(np.digitize(prob, edges[1:-1], right=True), n_bins - 1)
+    gaps: list[float] = []
+    weighted_gap = 0.0
+    for bin_id in range(n_bins):
+        mask = bin_ids == bin_id
+        if not np.any(mask):
+            continue
+        confidence = float(prob[mask].mean())
+        accuracy = float(y_true[mask].mean())
+        gap = abs(confidence - accuracy)
+        gaps.append(gap)
+        weighted_gap += gap * float(mask.mean())
+    return float(weighted_gap), float(max(gaps) if gaps else float("nan"))
+
+
 def binary_metrics_from_probs(y_true: np.ndarray, prob: np.ndarray, threshold: float = 0.5) -> dict[str, Any]:
     y_true = np.asarray(y_true).reshape(-1).astype(np.int64)
-    prob = np.asarray(prob).reshape(-1).astype(np.float64)
+    prob = np.clip(np.asarray(prob).reshape(-1).astype(np.float64), 0.0, 1.0)
     pred = (prob >= threshold).astype(np.int64)
+    confusion = confusion_matrix(y_true, pred, labels=[0, 1])
+    tn, fp, fn, tp = confusion.ravel() if confusion.size == 4 else (0, 0, 0, 0)
+    specificity = float(tn / (tn + fp)) if (tn + fp) else float("nan")
+    fpr = float(fp / (tn + fp)) if (tn + fp) else float("nan")
+    fnr = float(fn / (fn + tp)) if (fn + tp) else float("nan")
+    ece, mce = _expected_calibration_error(y_true, prob)
+    has_both_classes = len(np.unique(y_true)) == 2
     metrics: dict[str, Any] = {
+        "threshold": float(threshold),
         "accuracy": float(accuracy_score(y_true, pred)),
+        "balanced_accuracy": float(balanced_accuracy_score(y_true, pred)) if has_both_classes else float("nan"),
         "precision": float(precision_score(y_true, pred, zero_division=0)),
         "recall": float(recall_score(y_true, pred, zero_division=0)),
         "f1": float(f1_score(y_true, pred, zero_division=0)),
-        "confusion_matrix": confusion_matrix(y_true, pred).tolist(),
+        "specificity": specificity,
+        "fpr": fpr,
+        "fnr": fnr,
+        "mcc": float(matthews_corrcoef(y_true, pred)) if has_both_classes else float("nan"),
+        "confusion_matrix": confusion.tolist(),
+        "tn": int(tn),
+        "fp": int(fp),
+        "fn": int(fn),
+        "tp": int(tp),
         "positive_rate": float(y_true.mean()) if y_true.size else float("nan"),
         "predicted_positive_rate": float(pred.mean()) if pred.size else float("nan"),
+        "brier": float(brier_score_loss(y_true, prob)) if y_true.size else float("nan"),
+        "log_loss": float(log_loss(y_true, np.clip(prob, 1e-7, 1.0 - 1e-7), labels=[0, 1]))
+        if y_true.size
+        else float("nan"),
+        "ece_10bin": ece,
+        "mce_10bin": mce,
     }
-    if len(np.unique(y_true)) == 2:
+    if has_both_classes:
         metrics["auc"] = float(roc_auc_score(y_true, prob))
         metrics["average_precision"] = float(average_precision_score(y_true, prob))
     else:

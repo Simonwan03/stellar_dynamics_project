@@ -1,0 +1,39 @@
+epoch=001 loss=0.16338 eval_mse=0.13113 eval_mae=0.31623
+epoch=002 loss=0.13250 eval_mse=0.11591 eval_mae=0.28740
+epoch=003 loss=0.12272 eval_mse=0.11218 eval_mae=0.27712
+epoch=004 loss=0.11801 eval_mse=0.10978 eval_mae=0.27016
+epoch=005 loss=0.11223 eval_mse=0.10631 eval_mae=0.26756
+epoch=006 loss=0.10958 eval_mse=0.10581 eval_mae=0.26667
+epoch=007 loss=0.10708 eval_mse=0.10473 eval_mae=0.26213
+epoch=008 loss=0.10337 eval_mse=0.10282 eval_mae=0.25592
+epoch=009 loss=0.09808 eval_mse=0.10256 eval_mae=0.24611
+epoch=010 loss=0.09795 eval_mse=0.10095 eval_mae=0.24870
+epoch=011 loss=0.09631 eval_mse=0.10087 eval_mae=0.24933
+epoch=012 loss=0.09404 eval_mse=0.09953 eval_mae=0.24170
+epoch=013 loss=0.09020 eval_mse=0.10066 eval_mae=0.24244
+epoch=014 loss=0.09317 eval_mse=0.10091 eval_mae=0.24653
+epoch=015 loss=0.08876 eval_mse=0.09795 eval_mae=0.23682
+epoch=016 loss=0.08790 eval_mse=0.09677 eval_mae=0.23443
+epoch=017 loss=0.08598 eval_mse=0.09864 eval_mae=0.23802
+epoch=018 loss=0.08453 eval_mse=0.09864 eval_mae=0.23592
+epoch=019 loss=0.08432 eval_mse=0.09655 eval_mae=0.22986
+epoch=020 loss=0.08131 eval_mse=0.09650 eval_mae=0.23181
+epoch=021 loss=0.07934 eval_mse=0.09822 eval_mae=0.22963
+epoch=022 loss=0.07805 eval_mse=0.09828 eval_mae=0.23552
+epoch=023 loss=0.07738 eval_mse=0.09794 eval_mae=0.22789
+epoch=024 loss=0.07638 eval_mse=0.09775 eval_mae=0.23273
+epoch=025 loss=0.07344 eval_mse=0.09871 eval_mae=0.22625
+epoch=026 loss=0.07403 eval_mse=0.09845 eval_mae=0.22858
+epoch=027 loss=0.07211 eval_mse=0.10036 eval_mae=0.22650
+epoch=028 loss=0.07254 eval_mse=0.09707 eval_mae=0.22511
+epoch=029 loss=0.07252 eval_mse=0.09935 eval_mae=0.23133
+epoch=030 loss=0.07004 eval_mse=0.09755 eval_mae=0.21992
+epoch=031 loss=0.06851 eval_mse=0.10064 eval_mae=0.22955
+epoch=032 loss=0.07148 eval_mse=0.09722 eval_mae=0.22093
+epoch=033 loss=0.06848 eval_mse=0.09972 eval_mae=0.22557
+epoch=034 loss=0.06483 eval_mse=0.09989 eval_mae=0.22244
+Early stopping at epoch 034; best_epoch=019 best_eval_metric=0.09655
+Task A complete. Outputs: results/task_a_experiments/metrics_augmented/horizon_grid/stable_fraction_h6000
+mlp {'mse': 0.09089865475378929, 'rmse': 0.3014940376753565, 'mae': 0.2229831647136963, 'median_absolute_error': 0.16820890456438065, 'r2': 0.42599310698871384, 'explained_variance': 0.4261309141232483, 'pearson': 0.6532184295621283, 'spearman': 0.6524545066424702, 'mean_bias_error': -0.004671496473497733, 'target_mean': 0.33309375, 'prediction_mean': 0.32842225352650223, 'within_abs_error_0.05': 0.241, 'within_abs_error_0.10': 0.368, 'within_abs_error_0.20': 0.564, 'binomial_sampling_mse_estimate': 0.001993255615234375, 'mse_over_binomial_noise': 45.603109836517916, 'by_target_bin': {'0-0.25': {'count': 604, 'mae': 0.17086353274027846, 'rmse': 0.24901755089890917, 'bias': 0.1561371187323855}, '0.25-0.5': {'count': 83, 'mae': 0.17219243122332067, 'rmse': 0.21427044756189292, 'bias': 0.03451576591076621}, '0.5-0.75': {'count': 65, 'mae': 0.22547951380793865, 'rmse': 0.2797223680067521, 'bias': -0.17394831633338562}, '0.75-1': {'count': 248, 'mae': 0.3662639143125665, 'rmse': 0.42382756090151397, 'bias': -0.36506646853541175}}}
+xgboost {'mse': 0.08837543579022106, 'rmse': 0.2972800628872058, 'mae': 0.2315543152160244, 'median_absolute_error': 0.196018747985363, 'r2': 0.4419267319866633, 'explained_variance': 0.4433477722875864, 'pearson': 0.6674612701533776, 'spearman': 0.672172295144304, 'mean_bias_error': 0.015001109166187234, 'target_mean': 0.33309375, 'prediction_mean': 0.3480948591661872, 'within_abs_error_0.05': 0.178, 'within_abs_error_0.10': 0.302, 'within_abs_error_0.20': 0.512, 'binomial_sampling_mse_estimate': 0.001993255615234375, 'mse_over_binomial_noise': 44.33723156968482, 'by_target_bin': {'0-0.25': {'count': 604, 'mae': 0.1888188421712735, 'rmse': 0.25132529809075016, 'bias': 0.18191714405675036}, '0.25-0.5': {'count': 83, 'mae': 0.16572602030383535, 'rmse': 0.20644150494505137, 'bias': 0.06693271350070655}, '0.5-0.75': {'count': 65, 'mae': 0.20470402733637735, 'rmse': 0.24558830338090343, 'bias': -0.15704835687692348}, '0.75-1': {'count': 248, 'mae': 0.3647044882358563, 'rmse': 0.41526540313864946, 'bias': -0.36380692688567984}}}
+

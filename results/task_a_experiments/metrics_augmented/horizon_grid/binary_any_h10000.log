@@ -1,0 +1,52 @@
+epoch=001 loss=0.51913 eval_brier=0.12815 eval_f1=0.00000
+epoch=002 loss=0.40206 eval_brier=0.11606 eval_f1=0.00000
+epoch=003 loss=0.37584 eval_brier=0.11237 eval_f1=0.00000
+epoch=004 loss=0.36869 eval_brier=0.11162 eval_f1=0.00000
+epoch=005 loss=0.36148 eval_brier=0.11073 eval_f1=0.00000
+epoch=006 loss=0.35314 eval_brier=0.10921 eval_f1=0.00000
+epoch=007 loss=0.34441 eval_brier=0.10743 eval_f1=0.04878
+epoch=008 loss=0.33931 eval_brier=0.10722 eval_f1=0.17978
+epoch=009 loss=0.33771 eval_brier=0.10555 eval_f1=0.19780
+epoch=010 loss=0.32719 eval_brier=0.10605 eval_f1=0.21277
+epoch=011 loss=0.31797 eval_brier=0.10535 eval_f1=0.23529
+epoch=012 loss=0.31890 eval_brier=0.10373 eval_f1=0.26415
+epoch=013 loss=0.31281 eval_brier=0.10344 eval_f1=0.33043
+epoch=014 loss=0.30947 eval_brier=0.10086 eval_f1=0.36364
+epoch=015 loss=0.29882 eval_brier=0.10040 eval_f1=0.38333
+epoch=016 loss=0.29729 eval_brier=0.10063 eval_f1=0.35294
+epoch=017 loss=0.29450 eval_brier=0.10044 eval_f1=0.38333
+epoch=018 loss=0.28917 eval_brier=0.09822 eval_f1=0.36697
+epoch=019 loss=0.28883 eval_brier=0.09961 eval_f1=0.34783
+epoch=020 loss=0.27864 eval_brier=0.10199 eval_f1=0.48052
+epoch=021 loss=0.27612 eval_brier=0.09985 eval_f1=0.42963
+epoch=022 loss=0.26898 eval_brier=0.09947 eval_f1=0.41221
+epoch=023 loss=0.27207 eval_brier=0.09829 eval_f1=0.42424
+epoch=024 loss=0.26411 eval_brier=0.09898 eval_f1=0.49645
+epoch=025 loss=0.26567 eval_brier=0.09622 eval_f1=0.42748
+epoch=026 loss=0.26625 eval_brier=0.09689 eval_f1=0.40336
+epoch=027 loss=0.25524 eval_brier=0.09753 eval_f1=0.47552
+epoch=028 loss=0.24875 eval_brier=0.09980 eval_f1=0.44755
+epoch=029 loss=0.24548 eval_brier=0.09808 eval_f1=0.40000
+epoch=030 loss=0.24144 eval_brier=0.09930 eval_f1=0.34483
+epoch=031 loss=0.23490 eval_brier=0.10112 eval_f1=0.46043
+epoch=032 loss=0.24180 eval_brier=0.09585 eval_f1=0.44776
+epoch=033 loss=0.22785 eval_brier=0.10200 eval_f1=0.50000
+epoch=034 loss=0.23638 eval_brier=0.09867 eval_f1=0.44275
+epoch=035 loss=0.23175 eval_brier=0.10056 eval_f1=0.40876
+epoch=036 loss=0.23276 eval_brier=0.10071 eval_f1=0.44604
+epoch=037 loss=0.22303 eval_brier=0.09947 eval_f1=0.44928
+epoch=038 loss=0.21889 eval_brier=0.10477 eval_f1=0.44872
+epoch=039 loss=0.21581 eval_brier=0.10308 eval_f1=0.53165
+epoch=040 loss=0.21686 eval_brier=0.10395 eval_f1=0.47297
+epoch=041 loss=0.20930 eval_brier=0.10466 eval_f1=0.48276
+epoch=042 loss=0.21445 eval_brier=0.10248 eval_f1=0.47482
+epoch=043 loss=0.19732 eval_brier=0.10770 eval_f1=0.51497
+epoch=044 loss=0.20941 eval_brier=0.10362 eval_f1=0.52000
+epoch=045 loss=0.18732 eval_brier=0.10728 eval_f1=0.52830
+epoch=046 loss=0.20590 eval_brier=0.10275 eval_f1=0.46809
+epoch=047 loss=0.20046 eval_brier=0.10067 eval_f1=0.47059
+Early stopping at epoch 047; best_epoch=032 best_eval_metric=0.09585
+Task A complete. Outputs: results/task_a_experiments/metrics_augmented/horizon_grid/binary_any_h10000
+mlp {'threshold': 0.5, 'accuracy': 0.842, 'balanced_accuracy': 0.6722390931777864, 'precision': 0.5, 'recall': 0.4240506329113924, 'f1': 0.4589041095890411, 'specificity': 0.9204275534441805, 'fpr': 0.07957244655581948, 'fnr': 0.5759493670886076, 'mcc': 0.3688374153381888, 'confusion_matrix': [[775, 67], [91, 67]], 'tn': 775, 'fp': 67, 'fn': 91, 'tp': 67, 'positive_rate': 0.158, 'predicted_positive_rate': 0.134, 'brier': 0.10976680284513794, 'log_loss': 0.36323148370199243, 'ece_10bin': 0.05860860488994158, 'mce_10bin': 0.22771668560961456, 'auc': 0.8271069484951441, 'average_precision': 0.4754893375461925}
+xgboost {'threshold': 0.5, 'accuracy': 0.849, 'balanced_accuracy': 0.5838494843501008, 'precision': 0.5636363636363636, 'recall': 0.1962025316455696, 'f1': 0.29107981220657275, 'specificity': 0.9714964370546318, 'fpr': 0.028503562945368172, 'fnr': 0.8037974683544303, 'mcc': 0.26829818334131883, 'confusion_matrix': [[818, 24], [127, 31]], 'tn': 818, 'fp': 24, 'fn': 127, 'tp': 31, 'positive_rate': 0.158, 'predicted_positive_rate': 0.055, 'brier': 0.10255877454983707, 'log_loss': 0.32396456957304715, 'ece_10bin': 0.018735002280212944, 'mce_10bin': 0.16239353020985925, 'auc': 0.8480561652485041, 'average_precision': 0.4891340232980936}
+
