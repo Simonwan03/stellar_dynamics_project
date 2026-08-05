@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from tasks.common.experiment_utils import ensure_dir, parse_name_list, save_csv, save_json, select_device, set_random_seed
 from tasks.task_b.main import (
     FULL_RESULT_KEYS,
+    ORBITAL15_RESULT_KEYS,
     build_prefix_features,
     discover_result_paths,
     filter_valid_samples,
@@ -49,6 +50,20 @@ class DirectCurveDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         return self.X_case[index], self.q[index]
+
+
+class InitialConditionCurveDataset(Dataset):
+    """Static initial-condition inputs paired with system survival curves."""
+
+    def __init__(self, X_ic: np.ndarray, q: np.ndarray):
+        self.X_ic = torch.from_numpy(X_ic).float()
+        self.q = torch.from_numpy(q).float()
+
+    def __len__(self) -> int:
+        return self.X_ic.size(0)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.X_ic[index], self.q[index]
 
 
 def parse_future_times(value: str) -> np.ndarray:
@@ -127,8 +142,16 @@ def standardize_case_train(
     *arrays: np.ndarray,
     eps: float = 1e-8,
 ) -> tuple[np.ndarray, list[np.ndarray], dict[str, np.ndarray]]:
-    mu = X_train.mean(axis=(0, 1, 2), keepdims=True)
-    std = X_train.std(axis=(0, 1, 2), keepdims=True)
+    if X_train.ndim == 4:
+        reduce_axes = (0, 1, 2)
+    elif X_train.ndim == 3:
+        reduce_axes = (0, 1)
+    elif X_train.ndim == 2:
+        reduce_axes = (0,)
+    else:
+        raise ValueError(f"Expected case tensors with 2, 3, or 4 dimensions, got shape {X_train.shape}.")
+    mu = X_train.mean(axis=reduce_axes, keepdims=True)
+    std = X_train.std(axis=reduce_axes, keepdims=True)
     std = np.where(std < eps, 1.0, std)
     return (
         ((X_train - mu) / std).astype(np.float32),
@@ -256,6 +279,30 @@ class DirectCurveModel(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.head(self.encoder(x))
+
+
+class InitialConditionMLP(nn.Module):
+    """MLP baseline using one 15-dimensional orbital IC per system."""
+
+    def __init__(self, input_dim: int, horizon: int, hidden_dim: int = 128, dropout: float = 0.2):
+        super().__init__()
+        bottleneck_dim = max(hidden_dim // 2, 1)
+        self.net = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, bottleneck_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(bottleneck_dim, horizon),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
 
 
 class DualAttentionSurvivalModel(nn.Module):
@@ -430,6 +477,50 @@ def train_direct_model(
     return model, history
 
 
+def train_initial_condition_model(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    criterion: nn.Module,
+    epochs: int,
+    lr: float,
+    weight_decay: float,
+    device: torch.device,
+) -> tuple[nn.Module, list[dict[str, float]]]:
+    model = model.to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    history: list[dict[str, float]] = []
+    best_state = None
+    best_val = float("inf")
+    for epoch in range(1, epochs + 1):
+        model.train()
+        loss_sum = 0.0
+        for xb, qb in train_loader:
+            xb = xb.to(device)
+            qb = qb.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            loss = criterion(model(xb), qb)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            loss_sum += float(loss.item()) * xb.size(0)
+        val = evaluate_direct_model(model, val_loader, criterion, device)
+        row = {
+            "epoch": epoch,
+            "train_loss": loss_sum / len(train_loader.dataset),
+            "val_loss": val["loss"],
+            "val_mae": val["overall_mae"],
+        }
+        history.append(row)
+        if row["val_loss"] < best_val:
+            best_val = row["val_loss"]
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        print(f"epoch={epoch:03d} train_loss={row['train_loss']:.5f} val_mae={row['val_mae']:.5f}")
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return model, history
+
+
 def mean_baseline_metrics(q_train: np.ndarray, q_eval: np.ndarray) -> dict[str, Any]:
     pred = np.broadcast_to(q_train.mean(axis=0, keepdims=True), q_eval.shape)
     abs_err = np.abs(pred - q_eval)
@@ -443,7 +534,7 @@ def mean_baseline_metrics(q_train: np.ndarray, q_eval: np.ndarray) -> dict[str, 
 
 
 def save_survival_plots(output_dir: Path, future_times: np.ndarray, metrics: dict[str, dict[str, Any]]) -> None:
-    preferred_models = ["direct", "direct_mean_std", "traj", "dual"]
+    preferred_models = ["direct", "direct_mean_std", "traj", "dual", "ic_mlp"]
     model_names = [name for name in preferred_models if name in metrics and "preds" in metrics[name]]
     if not model_names:
         raise ValueError("No neural-model predictions available for plotting.")
@@ -453,12 +544,14 @@ def save_survival_plots(output_dir: Path, future_times: np.ndarray, metrics: dic
         "direct_mean_std": "direct_stats",
         "traj": "traj",
         "dual": "dual",
+        "ic_mlp": "IC-MLP",
     }
     colors = {
         "direct": "#D1495B",
         "direct_mean_std": "#EDAE49",
         "traj": "#00798C",
         "dual": "#30638E",
+        "ic_mlp": "#6A4C93",
     }
     targets = metrics[model_names[0]]["targets"]
 
@@ -597,6 +690,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rows-per-shard", type=int, default=None)
     parser.add_argument("--max-cases", type=int, default=None)
     parser.add_argument("--group-size", type=int, default=32)
+    parser.add_argument(
+        "--input-mode",
+        choices=["prefix", "initial"],
+        default="prefix",
+        help="Use trajectory prefixes (prefix) or one t=0 orbital15 IC per system (initial).",
+    )
     parser.add_argument("--prefix-len", type=int, default=200)
     parser.add_argument("--time-stride", type=int, default=1)
     parser.add_argument("--future-times", type=str, default="500,800,1500,2500,4000,6500,10000")
@@ -626,25 +725,50 @@ def main() -> None:
     future_times = parse_future_times(args.future_times)
     requested_models = set(parse_name_list(args.models))
 
+    if args.input_mode == "initial":
+        allowed_models = {"baseline", "ic_mlp"}
+        unsupported = sorted(requested_models - allowed_models)
+        if unsupported:
+            raise ValueError(
+                f"Initial-condition mode supports baseline,ic_mlp; unsupported models: {unsupported}"
+            )
+        if "ic_mlp" not in requested_models:
+            raise ValueError("Initial-condition mode requires --models ic_mlp or baseline,ic_mlp.")
+        result_keys = ORBITAL15_RESULT_KEYS
+        effective_prefix_len = 1
+        include_geom = False
+        add_time = False
+    else:
+        result_keys = FULL_RESULT_KEYS
+        effective_prefix_len = args.prefix_len
+        include_geom = not args.no_geom
+        add_time = not args.no_time
+
     result_paths = discover_result_paths(args.dataset_dir, args.sampling_id, args.max_shards)
     data, batch_ids, rows_loaded = load_result_prefixes(
         result_paths,
-        result_keys=FULL_RESULT_KEYS,
-        prefix_len=args.prefix_len,
+        result_keys=result_keys,
+        prefix_len=effective_prefix_len,
         time_stride=args.time_stride,
         rows_per_shard=args.rows_per_shard,
-        include_geom=not args.no_geom,
-        add_time=not args.no_time,
+        include_geom=include_geom,
+        add_time=add_time,
     )
     labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
     X_traj, feature_names = build_prefix_features(
         data,
-        result_keys=FULL_RESULT_KEYS,
-        add_time=not args.no_time,
-        include_geom=not args.no_geom,
+        result_keys=result_keys,
+        add_time=add_time,
+        include_geom=include_geom,
     )
     X_traj, _, labels, _ = filter_valid_samples(X_traj, labels, data, time_horizon=None)
     X_cases, y_cases, case_ids = build_case_tensors(X_traj, labels, args.group_size, future_times, max_cases=args.max_cases)
+    initial_condition_max_abs_diff = None
+    if args.input_mode == "initial":
+        if X_cases.ndim != 4 or X_cases.shape[2] != 1:
+            raise ValueError(f"Expected one-step IC case tensor, got shape {X_cases.shape}.")
+        initial_condition_max_abs_diff = float(np.max(np.abs(X_cases - X_cases[:, :1, :, :])))
+        X_cases = X_cases[:, 0, 0, :]
     q_cases = y_cases.mean(axis=1)
 
     train_idx, val_idx, test_idx = stratified_case_split(q_cases, args.test_ratio, args.val_ratio, args.seed)
@@ -660,6 +784,7 @@ def main() -> None:
         {
             **vars(args),
             "device": str(device),
+            "effective_prefix_len": effective_prefix_len,
             "future_times": future_times,
             "result_paths": result_paths,
             "num_cases": int(X_cases.shape[0]),
@@ -668,16 +793,56 @@ def main() -> None:
             "train_cases": int(train_idx.size),
             "val_cases": int(val_idx.size),
             "test_cases": int(test_idx.size),
+            "initial_condition_max_abs_diff": initial_condition_max_abs_diff,
         },
     )
 
-    train_loader = DataLoader(TrajectorySurvivalDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-    val_loader = DataLoader(TrajectorySurvivalDataset(X_val, y_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    test_loader = DataLoader(TrajectorySurvivalDataset(X_test, y_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    if args.input_mode == "initial":
+        train_loader = DataLoader(InitialConditionCurveDataset(X_train, q_train), batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        val_loader = DataLoader(InitialConditionCurveDataset(X_val, q_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        test_loader = DataLoader(InitialConditionCurveDataset(X_test, q_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    else:
+        train_loader = DataLoader(TrajectorySurvivalDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        val_loader = DataLoader(TrajectorySurvivalDataset(X_val, y_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        test_loader = DataLoader(TrajectorySurvivalDataset(X_test, y_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     metrics: dict[str, dict[str, Any]] = {}
     if "baseline" in requested_models:
         metrics["baseline"] = mean_baseline_metrics(q_train, q_test)
+
+    if args.input_mode == "initial":
+        criterion = BinomialHazardNLL()
+        model = InitialConditionMLP(
+            input_dim=X_train.shape[-1],
+            horizon=len(future_times),
+            hidden_dim=args.hidden_dim,
+            dropout=args.dropout,
+        )
+        model, history = train_initial_condition_model(
+            model,
+            train_loader,
+            val_loader,
+            criterion,
+            args.epochs,
+            args.lr,
+            args.weight_decay,
+            device,
+        )
+        metrics["ic_mlp"] = evaluate_direct_model(model, test_loader, criterion, device)
+        save_csv(output_dir / "ic_mlp_train_log.csv", history)
+        torch.save({"model_state_dict": model.state_dict()}, output_dir / "ic_mlp_model.pt")
+        save_survival_plots(output_dir, future_times, metrics)
+        np.savez(
+            output_dir / "test_predictions.npz",
+            **{f"{name}_preds": payload["preds"] for name, payload in metrics.items() if "preds" in payload},
+            targets=q_test,
+            future_times=future_times,
+        )
+        save_json(output_dir / "metrics.json", {name: compact_metrics(payload) for name, payload in metrics.items()})
+        print(f"Task C initial-condition complete. Outputs: {output_dir}")
+        for name, payload in metrics.items():
+            print(name, compact_metrics(payload))
+        return
 
     if "direct" in requested_models:
         X_case_train = aggregate_case_trajectories(X_train, mode="mean")

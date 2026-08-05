@@ -277,6 +277,7 @@ Task B 有两个模式：
 - `svm`: prefix flatten 后的线性 baseline
 - `cnn`: 1D temporal CNN
 - `tcn`: dilated temporal convolution
+- `gru`: 两层单向 GRU temporal encoder
 - `attention`: Transformer encoder over time
 - `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
 
@@ -287,16 +288,19 @@ Task B 有两个模式：
 - `T = 100`
   - `cnn`: ~`92K`
   - `tcn`: ~`355K`
+  - `gru`: ~`155K`
   - `attention`: ~`399K`
 - `T = 200`
   - `cnn`: ~`141K`
   - `tcn`: ~`454K`
+  - `gru`: ~`155K`
   - `attention`: ~`597K`
 - `T = 500`
   - `cnn`: ~`200K`
   - `tcn`: ~`706K`
+  - `gru`: ~`240K`
   - `attention`: ~`931K`
-- 这些规模由脚本按实际输入时间步数自动选择；若显式设置 `--hidden-dim`，则 `cnn/tcn/attention` 统一改用该 hidden width；`--tcn-levels`、`--attention-layers`、`--attention-heads` 也可单独覆盖
+- 这些规模由脚本按实际输入时间步数自动选择；若显式设置 `--hidden-dim`，则 `cnn/tcn/gru/attention` 统一改用该 hidden width；`--tcn-levels`、`--gru-layers`、`--attention-layers`、`--attention-heads` 也可单独覆盖
 - 默认最大训练轮数是 `50`，并启用 early stopping：`patience = 8`
 
 这项任务是仓库里最直接的 early-warning 分类线。
@@ -687,6 +691,14 @@ conda run -n stellar python -m tasks.task_b \
   --device cuda
 ```
 
+如需把新增的 GRU 一起加入 trajectory binary 对比，将上面的模型列表改为：
+
+```bash
+--models svm,cnn,gru,tcn,attention
+```
+
+GRU 默认使用两层单向结构；可通过 `--gru-layers` 和 `--hidden-dim` 调整层数与 hidden width。
+
 Group fraction / set-attention 版本：
 
 ```bash
@@ -720,6 +732,7 @@ conda run -n stellar python -m tasks.task_b \
 - `--group-aggregation concat|set_attention`: 只影响 `group_fraction`
 - `--max-shards N --rows-per-shard M`: smoke test / 限制数据量
 - `--hidden-dim`, `--tcn-levels`, `--attention-layers`, `--attention-heads`: 覆盖自动模型规模
+- `--gru-layers`: 覆盖 GRU 层数，默认 `2`
 - `--no-geom --no-time`: 仅对 `--representation full` 生效
 
 ### Task C
@@ -749,6 +762,36 @@ conda run -n stellar python -m tasks.task_c \
   --num-workers 0 \
   --device cuda
 ```
+
+Task C 的 initial-condition 子实验只使用每个 system 在 `t=0` 的一份
+`orbital15` 特征，不读取后续轨迹；由于 32 条 variation 的 IC 相同，使用
+一个简单的 `15 → 128 → 128 → 64 → 7` MLP 预测 7 个 future horizons：
+
+```bash
+conda run -n stellar python -m tasks.task_c \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --output-dir results/task_c_initial_condition_mlp \
+  --input-mode initial \
+  --group-size 32 \
+  --future-times 500,800,1500,2500,4000,6500,10000 \
+  --models baseline,ic_mlp \
+  --test-ratio 0.2 \
+  --val-ratio 0.1 \
+  --seed 42 \
+  --batch-size 128 \
+  --epochs 40 \
+  --lr 0.001 \
+  --weight-decay 0.0001 \
+  --hidden-dim 128 \
+  --dropout 0.2 \
+  --num-workers 0 \
+  --device cuda
+```
+
+`initial` 模式固定读取 `orbital15` 的 `t=0` 特征，并将 32 条轨迹的
+survival labels 汇总成 system-level survival curve；它与 prefix 模式共享
+future horizons、system split、hazard head 和评估指标。
 
 常用参数：
 

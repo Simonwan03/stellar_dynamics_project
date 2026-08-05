@@ -368,17 +368,20 @@ def infer_temporal_model_scale(num_steps: int) -> dict[str, dict[str, int]]:
         return {
             "cnn": {"hidden": 128},
             "tcn": {"hidden": 128, "levels": 4},
+            "gru": {"hidden": 128, "layers": 2},
             "attention": {"hidden": 128, "layers": 2, "heads": 4},
         }
     if num_steps <= 200:
         return {
             "cnn": {"hidden": 160},
             "tcn": {"hidden": 128, "levels": 5},
+            "gru": {"hidden": 128, "layers": 2},
             "attention": {"hidden": 128, "layers": 3, "heads": 4},
         }
     return {
         "cnn": {"hidden": 192},
         "tcn": {"hidden": 160, "levels": 5},
+        "gru": {"hidden": 160, "layers": 2},
         "attention": {"hidden": 160, "layers": 3, "heads": 4},
     }
 
@@ -421,6 +424,35 @@ class CNN1DClassifier(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.transpose(1, 2)
         h = self.net(x).squeeze(-1)
+        return self.head(h)
+
+
+class GRUClassifier(nn.Module):
+    """Temporal GRU baseline for trajectory prefixes.
+
+    A two-layer unidirectional GRU is used by default.  The hidden width is
+    selected from the same prefix-length scale table as the other temporal
+    models, keeping the parameter count between the CNN and TCN baselines for
+    the default 15-channel representation.
+    """
+
+    def __init__(self, input_dim: int, hidden: int = 128, layers: int = 2, dropout: float = 0.2):
+        super().__init__()
+        if layers < 1:
+            raise ValueError(f"GRU layers must be positive, got {layers}")
+        self.gru = nn.GRU(
+            input_size=input_dim,
+            hidden_size=hidden,
+            num_layers=layers,
+            batch_first=True,
+            dropout=dropout if layers > 1 else 0.0,
+        )
+        self.norm = nn.LayerNorm(hidden)
+        self.head = nn.Linear(hidden, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, h = self.gru(x)
+        h = self.norm(h[-1])
         return self.head(h)
 
 
@@ -888,6 +920,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-dim", type=int, default=None)
     parser.add_argument("--attention-heads", type=int, default=4)
     parser.add_argument("--attention-layers", type=int, default=None)
+    parser.add_argument("--gru-layers", type=int, default=2)
     parser.add_argument("--tcn-levels", type=int, default=None)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -961,6 +994,8 @@ def main() -> None:
     attention_hidden = args.hidden_dim if args.hidden_dim is not None else temporal_scale["attention"]["hidden"]
     attention_layers = args.attention_layers if args.attention_layers is not None else temporal_scale["attention"]["layers"]
     attention_heads = args.attention_heads
+    gru_hidden = args.hidden_dim if args.hidden_dim is not None else temporal_scale["gru"]["hidden"]
+    gru_layers = args.gru_layers if args.gru_layers is not None else temporal_scale["gru"]["layers"]
     group_attention_hidden = args.hidden_dim if args.hidden_dim is not None else attention_hidden
 
     labels.to_csv(output_dir / "labels_filtered.csv", index=False)
@@ -981,6 +1016,7 @@ def main() -> None:
             "effective_model_scale": {
                 "cnn": {"hidden": cnn_hidden},
                 "tcn": {"hidden": tcn_hidden, "levels": tcn_levels},
+                "gru": {"hidden": gru_hidden, "layers": gru_layers},
                 "attention": {"hidden": attention_hidden, "layers": attention_layers, "heads": attention_heads},
                 "group_attention": {"hidden": group_attention_hidden, "heads": attention_heads},
             },
@@ -1029,6 +1065,9 @@ def main() -> None:
             model_factories = {
                 "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=cnn_hidden, dropout=args.dropout),
                 "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=tcn_hidden, levels=tcn_levels, dropout=args.dropout),
+                "gru": lambda: GRUClassifier(
+                    X_train.shape[-1], hidden=gru_hidden, layers=gru_layers, dropout=args.dropout
+                ),
                 "attention": lambda: AttentionClassifier(
                     X_train.shape[-1],
                     hidden=attention_hidden,
@@ -1038,7 +1077,7 @@ def main() -> None:
                 ),
             }
         else:
-            unsupported = sorted((models & {"cnn", "tcn", "attention"}) - {"group_attention"})
+            unsupported = sorted((models & {"cnn", "tcn", "gru", "attention"}) - {"group_attention"})
             if unsupported:
                 print(f"Skipping {unsupported} in set_attention mode; use --models group_attention or svm.")
             model_factories = {
@@ -1105,6 +1144,7 @@ def main() -> None:
     model_factories = {
         "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=cnn_hidden, dropout=args.dropout),
         "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=tcn_hidden, levels=tcn_levels, dropout=args.dropout),
+        "gru": lambda: GRUClassifier(X_train.shape[-1], hidden=gru_hidden, layers=gru_layers, dropout=args.dropout),
         "attention": lambda: AttentionClassifier(
             X_train.shape[-1],
             hidden=attention_hidden,

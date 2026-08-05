@@ -96,7 +96,7 @@ conda run -n stellar python -m tasks.task_b \
   --output-dir results/task_b \
   --representation orbital15 \
   --prefix-len 100 \
-  --models svm,cnn,tcn,attention \
+  --models svm,cnn,gru,tcn,attention \
   --epochs 50
 ```
 
@@ -114,7 +114,7 @@ conda run -n stellar python -m tasks.task_b \
   --epochs 50
 ```
 
-Use `--group-aggregation concat --models svm,cnn,tcn,attention` for the simpler
+Use `--group-aggregation concat --models svm,cnn,gru,tcn,attention` for the simpler
 baseline that flattens the 32 variations into the feature channel dimension.
 
 `Task B` now defaults to the `orbital15` sequence representation:
@@ -124,9 +124,15 @@ Use `--representation full` to restore the older wider stack with extra orbital 
 
 The temporal models now auto-scale with the effective number of input steps `T`:
 - `SVM`: params follow `T * 15`
-- `T=100`: `cnn ~92K`, `tcn ~355K`, `attention ~399K`
-- `T=200`: `cnn ~141K`, `tcn ~454K`, `attention ~597K`
-- `T=500`: `cnn ~200K`, `tcn ~706K`, `attention ~931K`
+- `GRU`: two-layer unidirectional GRU; its hidden width is auto-scaled with `T`
+- `T=100`: `cnn ~92K`, `gru ~155K`, `tcn ~355K`, `attention ~399K`
+- `T=200`: `cnn ~141K`, `gru ~155K`, `tcn ~454K`, `attention ~597K`
+- `T=500`: `cnn ~200K`, `gru ~240K`, `tcn ~706K`, `attention ~931K`
+
+For the default 15-channel input, the automatic GRU scale is approximately
+`155K` parameters for `T <= 200` (`hidden=128, layers=2`) and `240K` for
+longer prefixes (`hidden=160, layers=2`). Use `--gru-layers` or
+`--hidden-dim` to override its size.
 
 If you set `--hidden-dim`, that hidden width is used directly instead of the automatic per-`T` scale. You can also override `--tcn-levels`, `--attention-layers`, and `--attention-heads`.
 Early stopping defaults to `--early-stopping-patience 8`; set it to `0` to disable.
@@ -169,6 +175,11 @@ the cumulative product of one minus those hazards. `traj` and `dual` optimize a
 variation-level masked hazard negative log-likelihood. `direct` and
 `direct_mean_std` optimize the corresponding interval-count binomial hazard
 negative log-likelihood from the aggregated 32-variation survival fractions.
+
+For the initial-condition control experiment, use `--input-mode initial
+--models baseline,ic_mlp`. It reads one `orbital15` vector at `t=0` per system
+and predicts the same seven-horizon survival curve with a `15 -> 128 -> 128 ->
+64 -> 7` MLP. No later trajectory steps are loaded in this mode.
 
 The run saves five result figures:
 

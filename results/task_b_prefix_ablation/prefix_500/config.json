@@ -1,0 +1,102 @@
+{
+  "dataset_dir": "dataset_v3",
+  "sampling_id": 2,
+  "output_dir": "results/task_b_prefix_ablation/prefix_500",
+  "representation": "orbital15",
+  "target_mode": "trajectory_binary",
+  "group_size": 32,
+  "group_aggregation": "concat",
+  "max_shards": null,
+  "rows_per_shard": null,
+  "prefix_len": 500,
+  "time_stride": 1,
+  "time_horizon": 10000.0,
+  "models": "gru,tcn",
+  "test_size": 0.125,
+  "val_size": 0.1,
+  "seed": 42,
+  "batch_size": 512,
+  "epochs": 50,
+  "early_stopping_patience": 8,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "hidden_dim": null,
+  "attention_heads": 4,
+  "attention_layers": null,
+  "gru_layers": 2,
+  "tcn_levels": null,
+  "dropout": 0.2,
+  "num_workers": 0,
+  "device": "cuda",
+  "no_geom": false,
+  "no_time": false,
+  "result_paths": [
+    "dataset_v3/results_batch_00_sampling_2.hdf5",
+    "dataset_v3/results_batch_01_sampling_2.hdf5",
+    "dataset_v3/results_batch_02_sampling_2.hdf5",
+    "dataset_v3/results_batch_03_sampling_2.hdf5",
+    "dataset_v3/results_batch_04_sampling_2.hdf5",
+    "dataset_v3/results_batch_05_sampling_2.hdf5",
+    "dataset_v3/results_batch_06_sampling_2.hdf5",
+    "dataset_v3/results_batch_07_sampling_2.hdf5",
+    "dataset_v3/results_batch_08_sampling_2.hdf5",
+    "dataset_v3/results_batch_09_sampling_2.hdf5",
+    "dataset_v3/results_batch_10_sampling_2.hdf5",
+    "dataset_v3/results_batch_11_sampling_2.hdf5",
+    "dataset_v3/results_batch_12_sampling_2.hdf5",
+    "dataset_v3/results_batch_13_sampling_2.hdf5",
+    "dataset_v3/results_batch_14_sampling_2.hdf5",
+    "dataset_v3/results_batch_15_sampling_2.hdf5",
+    "dataset_v3/results_batch_16_sampling_2.hdf5",
+    "dataset_v3/results_batch_17_sampling_2.hdf5",
+    "dataset_v3/results_batch_18_sampling_2.hdf5",
+    "dataset_v3/results_batch_19_sampling_2.hdf5"
+  ],
+  "num_samples": 159953,
+  "target_mean": 0.3150925636291504,
+  "target_min": 0.0,
+  "target_max": 1.0,
+  "input_shape": [
+    500,
+    15
+  ],
+  "feature_names": [
+    "aratios_complete_0",
+    "mratios_complete_0",
+    "mratios_complete_1",
+    "eccs_complete_0",
+    "eccs_complete_1",
+    "incs_complete_0",
+    "incs_complete_1",
+    "APs_complete_0",
+    "APs_complete_1",
+    "APs_complete_2",
+    "APs_complete_3",
+    "LANs_complete_0",
+    "LANs_complete_1",
+    "LANs_complete_2",
+    "LANs_complete_3"
+  ],
+  "effective_model_scale": {
+    "cnn": {
+      "hidden": 192
+    },
+    "tcn": {
+      "hidden": 160,
+      "levels": 5
+    },
+    "gru": {
+      "hidden": 160,
+      "layers": 2
+    },
+    "attention": {
+      "hidden": 160,
+      "layers": 3,
+      "heads": 4
+    },
+    "group_attention": {
+      "hidden": 160,
+      "heads": 4
+    }
+  }
+}
