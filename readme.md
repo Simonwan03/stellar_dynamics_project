@@ -508,7 +508,7 @@ conda run -n stellar python -m tasks.task_d \
 推荐优先使用统一入口 `tasks/task_e/main.py`。它按 32-variation base system
 完成 train/val/test group split，使用 completion-aware train-window scaler，并统一输出 transformed/z
 scale 的 overall、horizon-wise、channel-wise metrics。支持
-`persistence`, `ridge`, `tcn`, `patchtst`, `transformer`, 简化版
+`ridge`, `tcn`, `patchtst`, `transformer`, 简化版
 `itransformer`, `timesfm`, `chronos`, `panda_zero_shot` 和
 `panda_adapter`。
 
@@ -995,17 +995,12 @@ conda run -n stellar python -m tasks.task_e \
   --num_eval_windows 128 \
   --foundation_batch_size 32 \
   --timesfm_model_id google/timesfm-2.5-200m-pytorch \
-  --timesfm_backend auto \
   --chronos_model_id amazon/chronos-bolt-small \
   --chronos_variant bolt \
   --chronos_num_samples 20 \
   --panda_model_id GilpinLab/panda-72M \
   --freeze_panda \
   --adapter_lr 0.0001 \
-  --adapter_chunk_size 4096 \
-  --chronos_adapter_context_len 512 \
-  --timesfm_adapter_context_len 512 \
-  --timesfm_adapter_pred_len 64 \
   --num_train_windows_for_adapter 4096 \
   --hf-local-files-only \
   --torch_dtype auto \
@@ -1013,6 +1008,30 @@ conda run -n stellar python -m tasks.task_e \
   --prediction_samples 16 \
   --log_every_batches 100
 ```
+
+固定 `orbital15` prefix=64、预测 32 步并比较 adapter decoder：
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model panda_adapter \
+  --context_len 64 \
+  --pred_len 32 \
+  --stride 20 \
+  --max_variations_per_system 2 \
+  --max_windows_per_trajectory 2 \
+  --window_sampling sequential \
+  --adapter_decoder gru \
+  --adapter_gru_layers 2 \
+  --num_train_windows_for_adapter 0 \
+  --output_dir runs/task_e_orbital15_ctx64_pred32_panda_gru
+```
+
+使用 `--adapter_decoder mlp` 和不同输出目录运行对照组。每个 system 最多保留 2 条
+满足 completion-aware 过滤的 trajectory，每条取开头 2 个窗口；因此实际窗口数可能
+少于理论上的 10000 条 trajectory / 20000 个窗口。实验会生成 `horizon_metrics.csv`
+与 `test_horizon_trend.json`，用于判断第 1 到第 32 步的 MSE/MAE 是否总体递增。
 
 更轻量的 supervised smoke test：
 
@@ -1033,7 +1052,7 @@ conda run -n stellar python -m tasks.task_e \
 
 常用参数：
 
-- `--model persistence|ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
+- `--model ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
 - `--representation orbital15|raw_state18|trajectory`
 - `chronos` 默认使用 `amazon/chronos-bolt-small`；使用
   `--chronos_model_id amazon/chronos-2 --chronos_variant chronos2` 可切换到

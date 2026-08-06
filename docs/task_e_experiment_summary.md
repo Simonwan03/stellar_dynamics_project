@@ -2,6 +2,8 @@
 
 生成日期：2026-07-13。本文根据 `runs/**/config.json`、`val_metrics.json`、`test_metrics.json` 与 `train_log.csv` 汇总当前工作区中保存的所有 Task E 相关运行；数值直接来自对应运行目录，并非重新评估。
 
+> 注：Persistence 运行目录和结果表作为历史记录保留；当前统一入口已不再提供该模型。
+
 ## 口径与可比性
 
 - 统一 Task E 基准使用 `orbital15`（15 通道）、输入 200 步、预测 50 步、`split_seed=42`、按 32 个变体组成的系统分组切分，并过滤未完成系统。
@@ -83,7 +85,7 @@ raw18 的 Panda zero-shot 或 Panda Adapter 指标；这不是 Panda 模型本�
 1. 对 Panda Adapter 使用独立验证集选择 checkpoint（当前为续训 epoch 8）；今后的测试实验应避免在同一测试集上反复挑选模型。此前的 128 窗口测试结果应视为探索性记录。
 2. 将 Panda Adapter 的训练窗口数由 256 扩展至 1398，量化训练数据预算对其领先结果的影响。
 3. 扩展全监督模型的训练预算并记录早停状态。现有 PatchTST、iTransformer 和 TCN 仅训练 4 或 10 epoch，尚不足以判断它们的充分训练上限。
-4. 为两个 2048 轨迹 persistence 运行补跑/恢复最终评估，或删除未完成目录，避免在后续汇总中产生歧义。
+4. 历史 persistence 运行不再纳入当前模型比较；未完成目录仅作历史记录，若需清理应单独处理。
 
 ## 结果位置
 

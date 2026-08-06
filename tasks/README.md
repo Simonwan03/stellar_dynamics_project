@@ -290,18 +290,18 @@ Unified past-window -> future-window benchmark:
 conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
-  --model persistence \
+  --model ridge \
   --context_len 200 \
   --pred_len 50 \
   --stride 20 \
-  --output_dir runs/task_e_persistence_orbital15_ctx200_pred50
+  --output_dir runs/task_e_ridge_orbital15_ctx200_pred50
 ```
 
 The unified entry supports `orbital15` and `raw_state18`/`trajectory`, with
 base-system group train/validation/test splits, completion-aware windows, and
 train-window-only standardization. Available models are:
 
-- `persistence`, `ridge`
+- `ridge`
 - `tcn`, `patchtst`, `transformer`, `itransformer`
 - `timesfm`, `chronos`, `panda_zero_shot`, `panda_adapter`
 
@@ -333,7 +333,7 @@ conda run -n stellar python -m tasks.task_e \
 
 Foundation dependencies are optional. Missing TimesFM, Chronos, or Panda
 packages/checkpoints produce a model-specific installation/checkpoint error;
-they do not affect persistence, ridge, or supervised models. `panda_zero_shot`
+they do not affect ridge or supervised models. `panda_zero_shot`
 and the current `panda_adapter` require `orbital15`. The `itransformer` option
 is the documented simple variable-token implementation.
 

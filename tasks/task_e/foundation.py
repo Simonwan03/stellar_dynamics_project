@@ -425,7 +425,13 @@ def build_timesfm_predictor(args: argparse.Namespace, device: str) -> Callable[[
         if hasattr(model, "to"):
             model = model.to(device)
         if hasattr(model, "compile") and hasattr(timesfm, "ForecastConfig"):
-            model.compile(timesfm.ForecastConfig(max_context=args.context_len, max_horizon=args.pred_len))
+            model.compile(
+                timesfm.ForecastConfig(
+                    max_context=args.context_len,
+                    max_horizon=args.pred_len,
+                    per_core_batch_size=max(1, int(args.batch_size)),
+                )
+            )
 
         def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
             point_forecast, _ = model.forecast(

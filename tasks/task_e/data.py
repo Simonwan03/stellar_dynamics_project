@@ -212,6 +212,7 @@ def prepare_forecasting_data(
     completion_table: str | Path | None = None,
     require_complete_systems: bool = True,
     max_trajectories: int = 0,
+    max_variations_per_system: int = 0,
     max_train_variations_per_system: int = 0,
     max_windows_per_trajectory: int = 0,
     window_sampling: str = "sequential",
@@ -252,6 +253,12 @@ def prepare_forecasting_data(
         completion_table, sources, group_size, require_complete_systems
     )
     eligible = np.flatnonzero(valid_mask & (valid_lengths >= context_len + pred_len))
+    eligible = cap_variations_per_system(
+        eligible,
+        max_variations_per_system=max_variations_per_system,
+        group_size=group_size,
+        seed=split_seed,
+    )
     split_indices = split_grouped_trajectory_indices(
         eligible, group_size, split_seed, train_frac, val_frac
     )
@@ -567,6 +574,37 @@ def cap_split_trajectories(
         rng = np.random.default_rng(seed + 1000 + offset)
         capped[name] = np.sort(rng.choice(indices, size=counts[name], replace=False))
     return capped
+
+
+def cap_variations_per_system(
+    indices: np.ndarray,
+    max_variations_per_system: int,
+    group_size: int,
+    seed: int,
+) -> np.ndarray:
+    """Keep a reproducible random subset from every system before splitting.
+
+    Applying this before grouped splitting keeps the selected variations of each
+    system in the same train/validation/test split.
+    """
+    indices = np.asarray(indices, dtype=np.int64)
+    if max_variations_per_system <= 0 or not indices.size:
+        return indices
+    if group_size <= 0:
+        raise ValueError("group_size must be positive.")
+
+    rng = np.random.default_rng(seed + 3000)
+    selected: list[np.ndarray] = []
+    for system_id in np.unique(indices // group_size):
+        system_indices = indices[(indices // group_size) == system_id]
+        if system_indices.size > max_variations_per_system:
+            system_indices = rng.choice(
+                system_indices,
+                size=max_variations_per_system,
+                replace=False,
+            )
+        selected.append(np.asarray(system_indices, dtype=np.int64))
+    return np.sort(np.concatenate(selected))
 
 
 def cap_train_variations_per_system(

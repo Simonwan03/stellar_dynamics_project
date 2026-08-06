@@ -96,6 +96,21 @@ class PandaChannelSupportTest(unittest.TestCase):
         output = model(torch.randn(2, 6, 18))
         self.assertEqual(output.shape, (2, 3, 18))
 
+    def test_panda_gru_decoder_supports_another_output_length(self) -> None:
+        args = adapter_args("orbital15")
+        args.adapter_decoder = "gru"
+        args.adapter_gru_layers = 2
+        with patch("tasks.task_e.foundation.load_panda_model", return_value=FakePanda()):
+            model = task_e_main.build_panda_adapter(
+                args,
+                num_features=15,
+                device=torch.device("cpu"),
+            )
+
+        context = torch.randn(2, 6, 15)
+        self.assertEqual(model(context).shape, (2, 3, 15))
+        self.assertEqual(model(context, output_len=7).shape, (2, 7, 15))
+
     def test_panda_adapter_rejects_a_genuinely_fixed_channel_mismatch(self) -> None:
         with (
             patch(
