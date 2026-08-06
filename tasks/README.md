@@ -191,37 +191,67 @@ The run saves five result figures:
 
 ## Task D
 
-Task D now predicts a finite-time Lyapunov-time proxy rather than threshold-crossing time.
-For each of the 16 `(i, i+16)` perturbation pairs, it fits the slope of `log R(t)`
-in the configured early-growth interval, rejects low-quality fits, aggregates the
-accepted positive slopes, and uses
-`log_lyapunov_time_proxy = log(1 / lambda_phase_space)` as the training target.
-The old `R(t) > 1000` crossing time remains an auxiliary diagnostic.
+Task D now predicts the same-group minimum instability time by default.
+For each of the 16 `(i, i+16)` perturbation pairs, it reads only the scalar
+`aratios_complete` trajectory, forms
+`R_a(t) = |a_ratio_i(t) - a_ratio_j(t)| / |a_ratio_i(0) - a_ratio_j(0)|`,
+fits the slope of `log R_a(t)` in the configured growth interval, takes the
+largest valid pair slope, and uses
+`log_min_instability_time = log(1 / max(lambda_pair))` as the training target.
+This is an observable-based finite-time label, not a variational-equation
+maximum Lyapunov exponent. Use `--label-observable phase_space` to restore the
+legacy position+velocity construction.
+
+Use `--target-mode lyapunov_proxy --lyapunov-aggregation median` for the older
+typical-system median proxy.
+
+Because the scalar aratio is not guaranteed to have a clean single-exponential
+growth segment, the aratio run uses relaxed fit-quality settings in the example
+below (`--lambda-r2-min 0 --min-valid-lambda-pairs 1`). The minimum-instability
+mode does not require pair-to-pair MAD consistency; add
+`--require-pair-consistency` only for the older conservative filter.
+
+For an observed crossing-time upper bound instead of a Lyapunov-time proxy, use:
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
+  --label-observable aratio \
+  --lambda-r2-min 0 \
+  --max-pair-log-mad 2 \
+  --target-mode crossing_upper \
+  --aggregation min \
+  --output-dir results/task_d_initial_crossing_upper \
+  --mlp-epochs 80
+```
+
+This predicts the earliest sampled time with `R(t) > threshold` among the 16
+valid pairs. Systems with no observed crossing are right-censored and excluded
+from point-regression training; their fraction is retained in diagnostics.
+
+```bash
+conda run -n stellar python -m tasks.task_d \
+  --task-setting initial \
+  --label-observable aratio \
+  --target-mode min_instability \
+  --lyapunov-aggregation max \
   --output-dir results/task_d_initial \
   --growth-lower 1 \
   --growth-upper 100 \
   --growth-sensitivity-uppers 10 30 100 \
-  --lambda-r2-min 0.8 \
-  --min-valid-lambda-pairs 8 \
-  --max-pair-log-mad 0.75 \
+  --lambda-r2-min 0 \
+  --min-valid-lambda-pairs 1 \
   --mlp-epochs 80
 ```
 
-The prefix setting predicts the same Lyapunov-time proxy using `cnn_orbital`,
+The prefix setting predicts the same minimum-instability target using `cnn_orbital`,
 `cnn_phase_space`, and `set_cnn`. Its current label fit uses the stored full
 trajectory, including the prefix interval, so a future-only non-overlapping fit
 is required before interpreting it as strict forecasting.
 
-The saved dataset is generally too coarsely sampled to obtain five points in
-the `R=1–10`, `1–30`, or `1–100` growth ranges. The quality filter intentionally
-rejects such systems. Production Lyapunov labels therefore require higher-cadence
-early trajectory output or variational/tangent-equation integrations with periodic
-renormalization. The result should be described as a finite-time Lyapunov-time
-proxy, not a strict asymptotic Lyapunov time.
+The minimum-instability mode is limited by coarse sampling in the early growth ranges.
+The crossing-upper mode avoids fitting those slopes, but its time precision is
+still limited by the first sampled crossing point.
 
 ## Task E
 
@@ -245,6 +275,11 @@ train-window-only standardization. Available models are:
 - `persistence`, `ridge`
 - `tcn`, `patchtst`, `transformer`, `itransformer`
 - `timesfm`, `chronos`, `panda_zero_shot`, `panda_adapter`
+
+其中 `chronos` 默认使用 `amazon/chronos-bolt-small`。将
+`--chronos_model_id` 改为 `amazon/chronos-2`（并设置
+`--chronos_variant chronos2`）时，会使用 Chronos-2 原生多变量预测，
+不再把各通道拆成独立的单变量序列。
 
 Every run writes `config.json`, `feature_metadata.json`, `scaler.npz`,
 `val_metrics.json`, `test_metrics.json`, `horizon_metrics.csv`,

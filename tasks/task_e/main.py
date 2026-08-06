@@ -25,9 +25,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tasks.task_e.foundation import (  # noqa: E402
+    build_chronos2_predictor,
     build_chronos_predictor,
     build_panda_predictor,
     build_timesfm_predictor,
+    is_chronos2_model,
     patch_timesfm_2p5_init,
     resolve_torch_dtype,
 )
@@ -79,6 +81,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--train_frac", type=float, default=0.7)
     parser.add_argument("--val_frac", type=float, default=0.15)
     parser.add_argument("--max_trajectories", type=int, default=0)
+    parser.add_argument(
+        "--max_train_variations_per_system",
+        type=int,
+        default=0,
+        help=(
+            "Randomly keep at most this many training trajectories from each grouped "
+            "system (0 keeps all training variations). Use 1 for one variation per "
+            "32-variation system; validation/test variations are unchanged."
+        ),
+    )
     parser.add_argument("--max_windows_per_trajectory", type=int, default=0)
     parser.add_argument("--max_train_windows", type=int, default=0)
     parser.add_argument("--max_val_windows", type=int, default=0)
@@ -188,6 +200,7 @@ def main() -> None:
         train_frac=args.train_frac,
         val_frac=args.val_frac,
         max_trajectories=args.max_trajectories,
+        max_train_variations_per_system=args.max_train_variations_per_system,
         max_windows_per_trajectory=args.max_windows_per_trajectory,
         window_sampling=args.window_sampling,
         drop_nan_windows=args.drop_nan_windows,
@@ -759,6 +772,7 @@ def build_foundation_predictor(
         freq=0,
         hf_local_files_only=args.hf_local_files_only,
         chronos_model_id=args.chronos_model_id,
+        chronos_variant=getattr(args, "chronos_variant", "bolt"),
         chronos_num_samples=args.chronos_num_samples,
         panda_model_id=args.panda_model_id,
         torch_dtype=args.torch_dtype,
@@ -766,6 +780,14 @@ def build_foundation_predictor(
     if args.model == "timesfm":
         return build_timesfm_predictor(foundation_args, str(device)), False
     if args.model == "chronos":
+        chronos_variant = getattr(args, "chronos_variant", "bolt")
+        if is_chronos2_model(args.chronos_model_id) or chronos_variant == "chronos2":
+            if not is_chronos2_model(args.chronos_model_id):
+                raise ValueError(
+                    "--chronos_variant chronos2 requires a Chronos-2 checkpoint, "
+                    "for example --chronos_model_id amazon/chronos-2."
+                )
+            return build_chronos2_predictor(foundation_args, str(device)), True
         return build_chronos_predictor(foundation_args, str(device)), False
     if args.model == "panda_zero_shot":
         return build_panda_predictor(foundation_args, str(device)), True

@@ -391,7 +391,7 @@ Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
 32 条扰动 variation 的集合结构最有效。各模型误差总体随预测 horizon
 增长，符合混沌系统长期可预测性逐渐下降的预期。
 
-### Task D: Finite-Time Lyapunov-Time Proxy Regression
+### Task D: Minimum-Instability-Time Regression
 
 入口脚本：[tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 
@@ -399,33 +399,86 @@ Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
 
 **任务定义**
 
-`Task D` 在质心系中用 position + velocity 定义无量纲 phase-space separation：
+`Task D` 默认只用 `aratios_complete` 构造同组最小失稳时间 label：
 
-- 每条 trajectory 逐时刻减去自身的质量加权质心位置和质心速度
-- position 和 velocity 分别用 pair 在 `t=0` 的 characteristic scale 归一化
-- 合并得到 `delta_x(t)`，并计算 `R_x(t) = delta_x(t) / delta_x(0)`
-- 对 16 个 `(i, i+16)` perturbation pairs，在 `log R_x(t)` 的早期增长段拟合 slope `lambda_pair`
-- 只保留正 slope、`R² >= 0.8`、至少 `5` 个拟合点的 pair
-- 默认至少要求 `8/16` 个有效 pair，并要求 pair 间 `log(lambda)` MAD 不超过 `0.75`
-- 对合格 pair 的 slope 取 median，得到 `lambda_phase_space`
-- 定义 `lyapunov_time_proxy = 1 / lambda_phase_space`
-- 主训练目标为 `log_lyapunov_time_proxy = log(1 / lambda_phase_space)`
+- 对 16 个 `(i, i+16)` perturbation pairs，读取标量 `aratios_complete`
+- 计算 `R_a(t) = |a_ratio_i(t)-a_ratio_j(t)| / |a_ratio_i(0)-a_ratio_j(0)|`
+- 在 `log R_a(t)` 的配置增长段拟合 slope `lambda_aratio`
+- 对合格 pair 的 slope 取最大值 `lambda_fast = max(lambda_pair)`
+- 定义 `min_instability_time = 1 / lambda_fast`
+- 主训练目标为 `log_min_instability_time = log(1 / max(lambda_pair))`
+
+这表示同组 16 个扰动方向中，只要最快的一个方向开始失稳，就把该 system
+视为进入失稳状态。若想恢复典型 system Lyapunov-time proxy，可使用
+`--target-mode lyapunov_proxy --lyapunov-aggregation median`。
+
+这里的 label 是由 aratio 观测量得到的有限时间增长标签，不是通过变分方程
+计算的严格最大 Lyapunov 指数。若需要旧的相空间构造，可显式设置
+`--label-observable phase_space`。
+
+由于 aratio 是单一标量观测量，增长段不一定满足严格单指数形式；aratio 主实验
+在最小失稳模式下只要求至少一个有效正 slope，不要求 pair 间一致性；建议显式记录
+`--lambda-r2-min 0 --min-valid-lambda-pairs 1`。若要恢复旧的一致性筛选，加入
+`--require-pair-consistency`。
 
 脚本同时计算 `1 < R < 10`、`1 < R < 30`、`1 < R < 100` 三个区间的
 slope sensitivity，并保留 `R > 1000` 的首次 crossing time `tau_cross` 作为辅助诊断，
 不再将 `tau_cross` 作为训练 target。
 
+主实验命令：
+
+```bash
+conda run -n stellar python -m tasks.task_d \
+  --task-setting initial \
+  --target-mode min_instability \
+  --label-observable aratio \
+  --lyapunov-aggregation max \
+  --lambda-r2-min 0 \
+  --min-valid-lambda-pairs 1 \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --output-dir results/task_d_initial_min_instability \
+  --device cuda
+```
+
+如果只需要首次 crossing 的观测上界，可使用
+`--target-mode crossing_upper --aggregation min`。此时 target 是 16 个有效
+pair 中最早出现 `R(t) > threshold` 的采样时间；未 crossing 的 system 属于
+right-censored 样本，会被排除出 point-regression 训练，但其比例会写入诊断结果。
+
+```bash
+conda run -n stellar python -m tasks.task_d \
+  --task-setting initial \
+  --label-observable aratio \
+  --lambda-r2-min 0 \
+  --max-pair-log-mad 2 \
+  --target-mode crossing_upper \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --threshold 1000 \
+  --aggregation min \
+  --test-size 0.2 \
+  --seed 42 \
+  --output-dir results/task_d_initial_crossing_upper \
+  --completion-table-name completed_systems_sampling_2.txt \
+  --mlp-epochs 80 \
+  --batch-size 128 \
+  --device cuda
+```
+
 **Task D-IC：initial-condition prediction**
 
 - 默认主实验：`--task-setting initial`
 - 输入只使用 `t=0` 的 masses、质量比、轨道尺度、偏心率、倾角、能量、角动量和周期等初始条件
-- 目标：`log(finite_time_lyapunov_time_proxy)`
+- 目标：`log(min_instability_time)`
 - 模型：`constant_median`、`random_forest`、`mlp`
 
 **Task D-Prefix：early-window prediction**
 
 - 显式使用：`--task-setting prefix`
-- 目标与 initial setting 相同，仍为 `log(finite_time_lyapunov_time_proxy)`
+- 目标与 initial setting 相同，仍为 `log(min_instability_time)`
 - 模型：`cnn_orbital`、`cnn_phase_space`、`set_cnn`
 - 当前 proxy 使用整条保存轨迹拟合，包含 prefix 区间；若要把 prefix 版本解释为严格的未来预测，
   应改为只在 `t > t_obs` 的非重叠未来窗口拟合 label
@@ -435,13 +488,10 @@ slope sensitivity，并保留 `R > 1000` 的首次 crossing time `tau_cross` 作
 
 **数据分辨率限制**
 
-当前 `dataset_v3` 的时间采样间隔约为 `50000`。抽样检查中，不少 pair 从
+当前最小失稳时间模式的 pair slope 拟合受 `dataset_v3` 时间采样间隔约为 `50000` 的限制。抽样检查中，不少 pair 从
 `R(0)=1` 在第一个非零采样点直接跳到 `R≈400–1500`，使 `1–10`、`1–30`
-甚至 `1–100` 区间没有足够的观测点。严格质量筛选会正确拒绝这些标签；
-要得到可用于正式训练的 Lyapunov-time proxy，需要重新输出更高时间分辨率的早期轨迹，
-或直接积分 variational/tangent equations 并周期 renormalize deviation vector。
-因此该 target 应称为 `finite-time Lyapunov-time proxy`，不应写成严格的
-asymptotic Lyapunov time。
+甚至 `1–100` 区间没有足够的观测点。crossing-upper 模式不拟合这些 slope，
+但时间精度仍由首次 crossing 的采样网格决定。
 
 当前这套高质量筛选口径下尚无可用于正式横向比较的完整模型指标表；Task D
 结果应在提高早期时间采样分辨率或改用 variational equations 后重新评估。
@@ -803,7 +853,7 @@ future horizons、system split、hazard head 和评估指标。
 
 ### Task D
 
-当前 `results/task_d_initial/metrics.json` 对应的 initial-condition 主实验：
+当前 Task D 的 initial-condition 主实验预测同组最小失稳时间：
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
@@ -812,13 +862,16 @@ conda run -n stellar python -m tasks.task_d \
   --sampling-id 2 \
   --group-size 32 \
   --threshold 1000 \
+  --target-mode min_instability \
+  --label-observable aratio \
+  --lyapunov-aggregation max \
   --growth-lower 1 \
   --growth-upper 100 \
   --growth-sensitivity-uppers 10 30 100 \
   --min-growth-points 5 \
-  --lambda-r2-min 0.8 \
-  --min-valid-lambda-pairs 8 \
-  --max-pair-log-mad 0.75 \
+  --lambda-r2-min 0 \
+  --min-valid-lambda-pairs 1 \
+  --max-pair-log-mad 2 \
   --aggregation median \
   --censoring-rule median_pair \
   --feature-aggregation first \
@@ -846,6 +899,8 @@ Prefix setting：
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting prefix \
+  --target-mode min_instability \
+  --lyapunov-aggregation max \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --group-size 32 \
@@ -853,9 +908,8 @@ conda run -n stellar python -m tasks.task_d \
   --growth-lower 1 \
   --growth-upper 100 \
   --growth-sensitivity-uppers 10 30 100 \
-  --lambda-r2-min 0.8 \
-  --min-valid-lambda-pairs 8 \
-  --max-pair-log-mad 0.75 \
+  --lambda-r2-min 0 \
+  --min-valid-lambda-pairs 1 \
   --prefix-len 200 \
   --prefix-time-stride 1 \
   --sequence-aggregation mean_std \
@@ -869,7 +923,10 @@ conda run -n stellar python -m tasks.task_d \
 
 常用参数：
 
-- `--force-recompute`: 忽略缓存标签，重新计算 slope、Lyapunov proxy 和 crossing-time 诊断
+- `--force-recompute`: 忽略缓存标签，重新计算 slope、minimum-instability label 和 crossing-time 诊断
+- `--target-mode min_instability`: 使用有效 pair 中最大 `lambda` 的倒数作为最小失稳时间；默认只需 1 个有效 pair
+- `--lyapunov-aggregation max|median|mean`: 控制 Lyapunov pair slope 的聚合方式
+- `--require-pair-consistency`: 恢复 pair 间 MAD 一致性筛选
 - `--lambda-r2-min`, `--min-valid-lambda-pairs`, `--max-pair-log-mad`: 调整 slope 与 pair consistency 质量筛选
 - `--feature-aggregation first|mean_std`: initial setting 的 feature 聚合方式
 - `--no-mlp`, `--no-cnn-orbital`, `--no-cnn-phase-space`, `--no-set-cnn`: 关闭对应神经模型
@@ -951,6 +1008,9 @@ conda run -n stellar python -m tasks.task_e \
 
 - `--model persistence|ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
 - `--representation orbital15|raw_state18|trajectory`
+- `chronos` 默认使用 `amazon/chronos-bolt-small`；使用
+  `--chronos_model_id amazon/chronos-2 --chronos_variant chronos2` 可切换到
+  Chronos-2 原生 multivariate pipeline。
 - `--max_trajectories`, `--max_windows_per_trajectory`, `--max_train_windows`, `--max_val_windows`, `--max_test_windows`: 控制窗口数量
 - `--drop_nan_windows` / `--no-drop_nan_windows`: 默认拒绝 completion-filtered 后仍含非有限值的窗口
 - `--completion_table`: completion metadata 路径，用于过滤无效 trajectory 和事件后窗口

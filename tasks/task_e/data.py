@@ -212,6 +212,7 @@ def prepare_forecasting_data(
     completion_table: str | Path | None = None,
     require_complete_systems: bool = True,
     max_trajectories: int = 0,
+    max_train_variations_per_system: int = 0,
     max_windows_per_trajectory: int = 0,
     window_sampling: str = "sequential",
     drop_nan_windows: bool = False,
@@ -253,6 +254,12 @@ def prepare_forecasting_data(
     eligible = np.flatnonzero(valid_mask & (valid_lengths >= context_len + pred_len))
     split_indices = split_grouped_trajectory_indices(
         eligible, group_size, split_seed, train_frac, val_frac
+    )
+    split_indices = cap_train_variations_per_system(
+        split_indices,
+        max_train_variations_per_system=max_train_variations_per_system,
+        group_size=group_size,
+        seed=split_seed,
     )
     split_indices = cap_split_trajectories(split_indices, max_trajectories, split_seed)
     selected = np.sort(np.concatenate(list(split_indices.values())))
@@ -560,6 +567,44 @@ def cap_split_trajectories(
         rng = np.random.default_rng(seed + 1000 + offset)
         capped[name] = np.sort(rng.choice(indices, size=counts[name], replace=False))
     return capped
+
+
+def cap_train_variations_per_system(
+    splits: dict[str, np.ndarray],
+    max_train_variations_per_system: int,
+    group_size: int,
+    seed: int,
+) -> dict[str, np.ndarray]:
+    """Keep a reproducible random subset of variations in the training split only.
+
+    System assignment to train/validation/test is performed before this function,
+    so selecting training variations here cannot move a system across splits. A
+    value of one selects one trajectory from every eligible training system while
+    leaving validation and test trajectories unchanged.
+    """
+    if max_train_variations_per_system <= 0:
+        return splits
+    if group_size <= 0:
+        raise ValueError("group_size must be positive.")
+
+    train_indices = np.asarray(splits["train"], dtype=np.int64)
+    if not train_indices.size:
+        return {**splits, "train": train_indices.copy()}
+
+    rng = np.random.default_rng(seed + 2000)
+    selected: list[np.ndarray] = []
+    system_ids = np.unique(train_indices // group_size)
+    for system_id in system_ids:
+        system_indices = train_indices[(train_indices // group_size) == system_id]
+        if system_indices.size > max_train_variations_per_system:
+            system_indices = rng.choice(
+                system_indices,
+                size=max_train_variations_per_system,
+                replace=False,
+            )
+        selected.append(np.asarray(system_indices, dtype=np.int64))
+
+    return {**splits, "train": np.sort(np.concatenate(selected))}
 
 
 def build_source_lookup(sources: list[SequenceSource]) -> tuple[np.ndarray, np.ndarray]:

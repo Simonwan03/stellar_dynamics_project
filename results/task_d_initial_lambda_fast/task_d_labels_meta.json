@@ -1,0 +1,199 @@
+{
+  "label_version": 5,
+  "target": "log_min_instability_time_from_aratio",
+  "label_observable": "aratio",
+  "lyapunov_aggregation": "max",
+  "require_pair_consistency": false,
+  "num_systems": 4998,
+  "num_valid_lyapunov_labels": 3199,
+  "num_rejected_lyapunov_labels": 1799,
+  "dropped_invalid_groups": 2,
+  "dropped_nan_labels": 0,
+  "pair_phase_distance0_summary": {
+    "count": 0.0,
+    "mean": NaN,
+    "median": NaN,
+    "min": NaN,
+    "max": NaN
+  },
+  "pair_label_distance0_summary": {
+    "count": 79968.0,
+    "mean": 9.999999008635584e-10,
+    "median": 9.999999994736442e-10,
+    "min": 9.984806106921873e-10,
+    "max": 1.0018543425416304e-09
+  },
+  "pair_lambda_summary": {
+    "count": 34628.0,
+    "mean": 2.713836468666325e-06,
+    "median": 1.3528301926591937e-06,
+    "min": -1.231150521189356e-05,
+    "max": 2.4498203929729276e-05
+  },
+  "lambda_fast_summary": {
+    "count": 3199.0,
+    "mean": 7.911332008721147e-06,
+    "median": 7.784548922447058e-06,
+    "min": 6.77505080250057e-13,
+    "max": 2.4498203929729276e-05
+  },
+  "pair_lambda_r2_summary": {
+    "count": 34628.0,
+    "mean": 0.30851474015982217,
+    "median": 0.2519977559012816,
+    "min": 2.2202018001848955e-11,
+    "max": 0.9993661053068611
+  },
+  "valid_lambda_pair_count_summary": {
+    "count": 4998.0,
+    "mean": 6.628251300520208,
+    "median": 4.0,
+    "min": 0.0,
+    "max": 16.0
+  },
+  "pair_lambda_log_mad_summary": {
+    "count": 2912.0,
+    "mean": 0.6466514593429205,
+    "median": 0.5131922813023664,
+    "min": 0.0009823486902380552,
+    "max": 4.368392655127299
+  },
+  "growth_range_sensitivity": {
+    "1_10": {
+      "valid_system_count": 2525,
+      "valid_system_fraction": 0.505202080832333,
+      "lambda_summary": {
+        "count": 2525.0,
+        "mean": 2.3508799228628153e-06,
+        "median": 1.8640525426200873e-06,
+        "min": 2.2984546257245356e-13,
+        "max": 1.1780378669434158e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 2525.0,
+        "mean": 2210573849.9856987,
+        "median": 536465.5647498076,
+        "min": 84886.9147640084,
+        "max": 4350749363541.4824
+      }
+    },
+    "1_30": {
+      "valid_system_count": 2955,
+      "valid_system_fraction": 0.5912364945978391,
+      "lambda_summary": {
+        "count": 2955.0,
+        "mean": 4.9088246082929055e-06,
+        "median": 4.532808379219889e-06,
+        "min": 6.77505080250057e-13,
+        "max": 1.9183341454640007e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 2955.0,
+        "mean": 1116840539.2104602,
+        "median": 220613.78208361485,
+        "min": 52128.561771396875,
+        "max": 1476003692298.3884
+      }
+    },
+    "1_100": {
+      "valid_system_count": 3199,
+      "valid_system_fraction": 0.6400560224089635,
+      "lambda_summary": {
+        "count": 3199.0,
+        "mean": 7.911332008721147e-06,
+        "median": 7.784548922447058e-06,
+        "min": 6.77505080250057e-13,
+        "max": 2.4498203929729276e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 3199.0,
+        "mean": 1216066377.9391398,
+        "median": 128459.59476424639,
+        "min": 40819.318953683425,
+        "max": 1476003692298.3884
+      }
+    }
+  },
+  "valid_pairs": [
+    [
+      0,
+      16
+    ],
+    [
+      1,
+      17
+    ],
+    [
+      2,
+      18
+    ],
+    [
+      3,
+      19
+    ],
+    [
+      4,
+      20
+    ],
+    [
+      5,
+      21
+    ],
+    [
+      6,
+      22
+    ],
+    [
+      7,
+      23
+    ],
+    [
+      8,
+      24
+    ],
+    [
+      9,
+      25
+    ],
+    [
+      10,
+      26
+    ],
+    [
+      11,
+      27
+    ],
+    [
+      12,
+      28
+    ],
+    [
+      13,
+      29
+    ],
+    [
+      14,
+      30
+    ],
+    [
+      15,
+      31
+    ]
+  ],
+  "group_size": 32,
+  "threshold": 1000.0,
+  "growth_lower": 1.0,
+  "growth_upper": 100.0,
+  "growth_sensitivity_uppers": [
+    10.0,
+    30.0,
+    100.0
+  ],
+  "min_growth_points": 5,
+  "lambda_r2_min": 0.0,
+  "min_valid_lambda_pairs": 1,
+  "max_pair_log_mad": 2.0,
+  "divergence_observable": "aratios_complete scalar difference",
+  "aggregation": "median",
+  "censoring_rule": "median_pair"
+}

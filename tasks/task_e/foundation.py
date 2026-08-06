@@ -156,7 +156,7 @@ def main() -> None:
         started = time.perf_counter()
         try:
             predictor = build_predictor(model_name, args, device)
-            if uses_multivariate_context(model_name):
+            if uses_multivariate_context(model_name, args):
                 print(
                     f"Running {model_name} on {data.context.shape[0]} multivariate windows "
                     f"with {len(data.channel_names)} channels...",
@@ -384,6 +384,8 @@ def build_predictor(model_name: str, args: argparse.Namespace, device: str) -> C
     if model_name == "timesfm":
         return build_timesfm_predictor(args, device)
     if model_name == "chronos":
+        if is_chronos2_model(args.chronos_model_id):
+            return build_chronos2_predictor(args, device)
         return build_chronos_predictor(args, device)
     if model_name == "panda":
         return build_panda_predictor(args, device)
@@ -392,8 +394,10 @@ def build_predictor(model_name: str, args: argparse.Namespace, device: str) -> C
     raise ValueError(f"Unknown model '{model_name}'. Supported: naive,timesfm,chronos,panda,patchtst")
 
 
-def uses_multivariate_context(model_name: str) -> bool:
-    return model_name == "panda"
+def uses_multivariate_context(model_name: str, args: argparse.Namespace | None = None) -> bool:
+    if model_name == "panda":
+        return True
+    return model_name == "chronos" and args is not None and is_chronos2_model(args.chronos_model_id)
 
 
 def build_timesfm_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
@@ -525,6 +529,94 @@ def build_chronos_predictor(args: argparse.Namespace, device: str) -> Callable[[
         return reduce_forecast_array(arr, pred_len)
 
     return predict
+
+
+def is_chronos2_model(model_id: str) -> bool:
+    """Return whether a checkpoint should be loaded through Chronos2Pipeline."""
+    return "chronos-2" in str(model_id).lower()
+
+
+def build_chronos2_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
+    """Build a native multivariate Chronos-2 predictor.
+
+    The unified Task E data layout is ``[batch, time, channels]`` while
+    Chronos-2 expects a batch of ``[channels, time]`` targets.  Chronos-2
+    returns one tensor per target with shape ``[channels, quantiles, horizon]``;
+    this adapter selects the median quantile and converts it back to
+    ``[batch, horizon, channels]``.
+    """
+    try:
+        from chronos import Chronos2Pipeline  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Chronos-2 requires a recent chronos-forecasting installation with "
+            "Chronos2Pipeline. Upgrade with: pip install -U chronos-forecasting"
+        ) from exc
+
+    pipeline_kwargs: dict[str, Any] = {"device_map": device}
+    dtype = resolve_torch_dtype(args.torch_dtype, device)
+    if dtype is not None:
+        pipeline_kwargs["dtype"] = dtype
+    try:
+        pipeline = Chronos2Pipeline.from_pretrained(
+            args.chronos_model_id,
+            local_files_only=args.hf_local_files_only,
+            **pipeline_kwargs,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument 'dtype'" not in str(exc):
+            raise
+        legacy_kwargs = dict(pipeline_kwargs)
+        dtype = legacy_kwargs.pop("dtype", None)
+        if dtype is not None:
+            legacy_kwargs["torch_dtype"] = dtype
+        pipeline = Chronos2Pipeline.from_pretrained(
+            args.chronos_model_id,
+            local_files_only=args.hf_local_files_only,
+            **legacy_kwargs,
+        )
+
+    def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
+        batch = np.asarray(batch, dtype=np.float32)
+        if batch.ndim != 3:
+            raise ValueError(f"Chronos-2 expects [B,T,C] Task E input, got {batch.shape}.")
+        batch_size, context_len, channels = batch.shape
+        chronos_inputs = np.transpose(batch, (0, 2, 1))
+        forecasts = pipeline.predict(
+            chronos_inputs,
+            prediction_length=pred_len,
+            batch_size=max(1, int(getattr(args, "batch_size", batch_size))),
+            context_length=context_len,
+        )
+        if len(forecasts) != batch_size:
+            raise ValueError(
+                f"Chronos-2 returned {len(forecasts)} forecasts for a batch of {batch_size} windows."
+            )
+        predictions = [
+            reduce_chronos2_forecast(forecast, pred_len, channels)
+            for forecast in forecasts
+        ]
+        return np.stack(predictions, axis=0).astype(np.float32)
+
+    return predict
+
+
+def reduce_chronos2_forecast(forecast: Any, pred_len: int, num_channels: int) -> np.ndarray:
+    """Convert one Chronos-2 ``[C,Q,H]`` forecast to Task E ``[H,C]``."""
+    if isinstance(forecast, torch.Tensor):
+        array = forecast.detach().cpu().float().numpy()
+    else:
+        array = np.asarray(forecast, dtype=np.float32)
+    if array.ndim != 3:
+        raise ValueError(
+            f"Chronos-2 returned a forecast with shape {array.shape}; expected [channels, quantiles, horizon]."
+        )
+    if array.shape[0] != num_channels or array.shape[2] < pred_len:
+        raise ValueError(
+            f"Chronos-2 returned shape {array.shape}; expected [{num_channels}, quantiles, >= {pred_len}]."
+        )
+    median_forecast = np.median(array[:, :, :pred_len], axis=1)
+    return median_forecast.transpose(1, 0).astype(np.float32)
 
 
 def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:

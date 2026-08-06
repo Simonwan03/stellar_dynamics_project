@@ -241,6 +241,7 @@ window[context_len:] → target
 
 ```text
 --max_trajectories
+--max_train_variations_per_system
 --max_windows_per_trajectory
 --max_train_windows
 --max_val_windows
@@ -249,6 +250,18 @@ window[context_len:] → target
 ```
 
 如果限制每条 trajectory 的窗口数量，`sequential` 会保留最早窗口，`random` 会随机选择。正式实验更适合使用 random 或 early/middle/late 分层抽样。
+
+`--max_train_variations_per_system` 在完成 train/validation/test 的 system-level
+切分之后，仅对训练集每个 system 内的 variations 做随机上限。例如：
+
+```bash
+--max_train_variations_per_system 1
+```
+
+表示每个训练用的 32-variation system 最多保留一条 trajectory。它不会把同一个
+system 拆到不同 split，也不会减少 validation/test 中的 variations。默认值 `0`
+表示训练集保留所有 variations。若需要保持每个 system 的代表性，建议配合固定
+`--split_seed` 和 `--seed` 使用。
 
 ## 7. 非有限值处理
 
@@ -287,9 +300,29 @@ Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 
 
 - `timesfm`：默认 `google/timesfm-2.5-200m-pytorch`；逐 channel 单变量预测；
 - `chronos`：默认 `amazon/chronos-bolt-small`；逐 channel 单变量预测；
+  如果 `--chronos_model_id` 选择 `amazon/chronos-2`，则自动切换到
+  Chronos-2 的原生 multivariate pipeline，输入 `[B,T,C]` 会转换为
+  Chronos-2 所需的 `[B,C,T]`，并取中位 quantile 作为点预测；
 - `panda_zero_shot`：默认 `GilpinLab/panda-72M`；直接处理 multivariate
   `orbital15` 或 `raw_state18`。Panda 的共享通道 embedding/forecast head
   支持运行时通道数，因此 15 通道和 18 通道都可传入。
+
+Chronos-2 示例：
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --model chronos \
+  --chronos_model_id amazon/chronos-2 \
+  --chronos_variant chronos2 \
+  --context_len 200 \
+  --pred_len 50 \
+  --foundation_batch_size 16 \
+  --output_dir runs/task_e_chronos2
+```
+
+旧版 Chronos-T5 和 Chronos-Bolt 仍走逐 channel 单变量路径；Chronos-2
+的 `prediction_length` 超过 checkpoint 默认 horizon 时，官方 API 可能发出
+质量提醒并使用长 horizon 策略。
 
 Panda 源码默认位于：
 

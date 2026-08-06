@@ -37,10 +37,18 @@ except ImportError:  # pragma: no cover
 
 
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
-LABEL_VERSION = 2
+LABEL_VERSION = 5
 DEFAULT_GROUP_SIZE = 32
 DEFAULT_VALID_PAIRS = tuple((i, i + 16) for i in range(16))
 LEGACY_VALID_PAIRS_8 = ((0, 4), (1, 5), (2, 6), (3, 7))
+ORBITAL15_FEATURE_KEYS = (
+    "aratios_complete",
+    "mratios_complete",
+    "eccs_complete",
+    "incs_complete",
+    "APs_complete",
+    "LANs_complete",
+)
 INITIAL_FEATURE_KEYS = (
     "masses_complete",
     "mratios_complete",
@@ -52,6 +60,7 @@ INITIAL_FEATURE_KEYS = (
     "angMomentum_complete",
     "periods_complete",
 )
+INITIAL_ANGLE_KEYS = frozenset({"APs_complete", "LANs_complete"})
 PREFIX_FEATURE_KEYS = (
     "smaxes_complete",
     "eccs_complete",
@@ -61,12 +70,20 @@ PREFIX_FEATURE_KEYS = (
     "angMomentum_complete",
 )
 PREFIX_EXTRA_STATE_KEYS = ("positions_complete", "velocities_complete")
+INITIAL_PREFIX_TRAJECTORY_KEYS = (
+    "aratios_complete",
+    "eccs_complete",
+    "incs_complete",
+)
 INVALID_PAIR_CHECKS = ((0, 1), (0, 2), (0, 4))
 
 
 @dataclass
 class PipelineConfig:
     task_setting: str = "initial"
+    target_mode: str = "min_instability"
+    label_observable: str = "aratio"
+    lyapunov_aggregation: str = "max"
     dataset_dir: str | Path = "./dataset_v3"
     sampling_id: int = 2
     group_size: int = DEFAULT_GROUP_SIZE
@@ -76,11 +93,13 @@ class PipelineConfig:
     growth_upper: float = 100.0
     growth_sensitivity_uppers: tuple[float, ...] = (10.0, 30.0, 100.0)
     min_growth_points: int = 5
-    lambda_r2_min: float = 0.8
-    min_valid_lambda_pairs: int = 8
-    max_pair_log_mad: float = 0.75
+    lambda_r2_min: float = 0.0
+    min_valid_lambda_pairs: int = 1
+    max_pair_log_mad: float = 2.0
+    require_pair_consistency: bool = False
     aggregation: str = "median"
     censoring_rule: str = "median_pair"
+    initial_representation: str = "orbital15"
     feature_aggregation: str = "first"
     exclude_censored: bool = False
     test_size: float = 0.2
@@ -361,6 +380,80 @@ def compute_pair_phase_space_divergence(
     }
 
 
+def compute_pair_aratio_divergence(
+    aratios: np.ndarray,
+    times: np.ndarray,
+    idx_i: int,
+    idx_j: int,
+    threshold: float = 1e3,
+    growth_lower: float = 1.0,
+    growth_upper: float = 100.0,
+    min_growth_points: int = 5,
+    eps: float = 1e-12,
+) -> dict[str, Any]:
+    """Compute a finite-time divergence label from ``aratios_complete`` only.
+
+    ``aratios_complete`` contains one scalar observable per trajectory and time
+    step.  The pair separation is the absolute observable difference,
+    normalized by its value at the first stored time.  The fitted slope is an
+    observable-based finite-time growth rate, not a strict variational-equation
+    maximum Lyapunov exponent.
+    """
+    aratios = np.asarray(aratios, dtype=np.float64)
+    if aratios.ndim not in {2, 3}:
+        raise ValueError(f"Expected aratios with shape (N, T) or (N, T, 1), got {aratios.shape}")
+    if aratios.ndim == 3 and aratios.shape[-1] != 1:
+        raise ValueError(
+            "The aratio label expects one scalar channel in aratios_complete; "
+            f"got shape {aratios.shape}."
+        )
+    series_i = aratios[idx_i].reshape(aratios.shape[1], -1)
+    series_j = aratios[idx_j].reshape(aratios.shape[1], -1)
+    if series_i.shape[1] != 1 or series_j.shape[1] != 1:
+        raise ValueError(
+            "The aratio label expects one scalar channel in aratios_complete; "
+            f"got pair shapes {series_i.shape} and {series_j.shape}."
+        )
+    pair_times = np.asarray(times[idx_i], dtype=np.float64)
+    if idx_i != idx_j:
+        other_times = np.asarray(times[idx_j], dtype=np.float64)
+        if pair_times.shape != other_times.shape or not np.allclose(
+            np.nan_to_num(pair_times, nan=-1.0),
+            np.nan_to_num(other_times, nan=-1.0),
+            rtol=1e-10,
+            atol=1e-10,
+        ):
+            warnings.warn(
+                f"Time grids differ for pair ({idx_i}, {idx_j}); using times[{idx_i}] as reference.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+    tau, censored, ratio, delta = _compute_pair_divergence_from_series(
+        a_i=series_i[:, 0],
+        a_j=series_j[:, 0],
+        times=pair_times,
+        threshold=threshold,
+        eps=eps,
+    )
+    growth_rate, growth_r2, growth_points = _fit_log_growth_rate(
+        ratio=ratio,
+        times=pair_times,
+        lower=growth_lower,
+        upper=growth_upper,
+        min_points=min_growth_points,
+    )
+    return {
+        "tau": tau,
+        "censored": censored,
+        "ratio": ratio,
+        "distance": delta,
+        "distance0": float(delta[0]) if delta.size and np.isfinite(delta[0]) else math.nan,
+        "lambda_aratio": growth_rate,
+        "lambda_fit_r2": growth_r2,
+        "lambda_fit_points": growth_points,
+    }
+
+
 def compute_pair_divergence_time(
     smaxes: np.ndarray,
     times: np.ndarray,
@@ -467,6 +560,10 @@ def _aggregate_tau(
         return float(np.median(finite))
     if aggregation == "mean":
         return float(np.mean(finite))
+    if aggregation == "min":
+        return float(np.min(finite))
+    if aggregation == "max":
+        return float(np.max(finite))
     raise ValueError(f"Unsupported aggregation: {aggregation}")
 
 
@@ -491,9 +588,9 @@ def _aggregate_censoring_flag(
 
 
 def _compute_group_divergence_label(
-    positions_group: np.ndarray,
-    velocities_group: np.ndarray,
-    masses_group: np.ndarray,
+    positions_group: np.ndarray | None,
+    velocities_group: np.ndarray | None,
+    masses_group: np.ndarray | None,
     times_group: np.ndarray,
     system_id: int,
     valid_pairs: Sequence[tuple[int, int]],
@@ -508,7 +605,26 @@ def _compute_group_divergence_label(
     min_valid_lambda_pairs: int = 8,
     max_pair_log_mad: float = 0.75,
     eps: float = 1e-12,
+    aratios_group: np.ndarray | None = None,
+    label_observable: str = "phase_space",
+    lyapunov_aggregation: str = "median",
+    require_pair_consistency: bool = True,
+    label_start_index: int = 0,
 ) -> dict[str, Any]:
+    if label_observable not in {"aratio", "phase_space"}:
+        raise ValueError(f"Unsupported label_observable: {label_observable}")
+    if lyapunov_aggregation not in {"median", "mean", "max"}:
+        raise ValueError(f"Unsupported lyapunov_aggregation: {lyapunov_aggregation}")
+    if label_observable == "aratio" and aratios_group is None:
+        raise ValueError("aratios_group is required when label_observable='aratio'.")
+    if label_observable == "phase_space" and (
+        positions_group is None or velocities_group is None or masses_group is None
+    ):
+        raise ValueError(
+            "positions_group, velocities_group, and masses_group are required "
+            "when label_observable='phase_space'."
+        )
+
     pair_taus: list[float] = []
     pair_censored: list[bool] = []
     pair_distance0s: list[float] = []
@@ -520,23 +636,42 @@ def _compute_group_divergence_label(
         upper: [] for upper in sensitivity_uppers if upper > growth_lower
     }
     for idx_i, idx_j in valid_pairs:
-        pair_result = compute_pair_phase_space_divergence(
-            positions=positions_group,
-            velocities=velocities_group,
-            masses=masses_group,
-            times=times_group,
-            idx_i=idx_i,
-            idx_j=idx_j,
-            threshold=threshold,
-            growth_lower=growth_lower,
-            growth_upper=growth_upper,
-            min_growth_points=min_growth_points,
-            eps=eps,
-        )
+        if label_observable == "aratio":
+            pair_result = compute_pair_aratio_divergence(
+                aratios=aratios_group,
+                times=times_group,
+                idx_i=idx_i,
+                idx_j=idx_j,
+                threshold=threshold,
+                growth_lower=growth_lower,
+                growth_upper=growth_upper,
+                min_growth_points=min_growth_points,
+                eps=eps,
+            )
+        else:
+            pair_result = compute_pair_phase_space_divergence(
+                positions=positions_group,
+                velocities=velocities_group,
+                masses=masses_group,
+                times=times_group,
+                idx_i=idx_i,
+                idx_j=idx_j,
+                threshold=threshold,
+                growth_lower=growth_lower,
+                growth_upper=growth_upper,
+                min_growth_points=min_growth_points,
+                eps=eps,
+            )
         pair_taus.append(float(pair_result["tau"]))
         pair_censored.append(bool(pair_result["censored"]))
         pair_distance0s.append(float(pair_result["distance0"]))
-        pair_lambdas.append(float(pair_result["lambda_phase_space"]))
+        pair_lambdas.append(
+            float(
+                pair_result[
+                    "lambda_aratio" if label_observable == "aratio" else "lambda_phase_space"
+                ]
+            )
+        )
         pair_lambda_r2s.append(float(pair_result["lambda_fit_r2"]))
         pair_lambda_points.append(int(pair_result["lambda_fit_points"]))
         for upper in sensitivity_fits:
@@ -551,7 +686,7 @@ def _compute_group_divergence_label(
             )
 
     tau_system = _aggregate_tau(pair_taus, aggregation=aggregation)
-    lambda_system_unfiltered = _aggregate_tau(pair_lambdas, aggregation=aggregation)
+    lambda_system_unfiltered = _aggregate_tau(pair_lambdas, aggregation=lyapunov_aggregation)
     pair_lambda_quality = _lambda_quality_mask(
         pair_lambdas,
         pair_lambda_r2s,
@@ -560,12 +695,18 @@ def _compute_group_divergence_label(
         min_points=min_growth_points,
     )
     valid_pair_lambdas = np.asarray(pair_lambdas, dtype=np.float64)[pair_lambda_quality]
-    lambda_system = _aggregate_tau(valid_pair_lambdas, aggregation=aggregation)
+    lambda_system = _aggregate_tau(valid_pair_lambdas, aggregation=lyapunov_aggregation)
+    lambda_fast = _aggregate_tau(valid_pair_lambdas, aggregation="max")
+    log_lambda_fast = (
+        float(np.log(lambda_fast)) if np.isfinite(lambda_fast) and lambda_fast > 0.0 else math.nan
+    )
     pair_log_mad = _pair_log_mad(valid_pair_lambdas)
     valid_lambda_pair_count = int(pair_lambda_quality.sum())
     enough_valid_pairs = valid_lambda_pair_count >= min_valid_lambda_pairs
-    pair_consistency_pass = bool(
-        np.isfinite(pair_log_mad) and pair_log_mad <= max_pair_log_mad
+    pair_consistency_pass = (
+        bool(np.isfinite(pair_log_mad) and pair_log_mad <= max_pair_log_mad)
+        if require_pair_consistency
+        else True
     )
     lyapunov_label_valid = bool(
         enough_valid_pairs
@@ -591,12 +732,14 @@ def _compute_group_divergence_label(
             range_lambdas, range_r2s, range_points, lambda_r2_min, min_growth_points
         )
         filtered = np.asarray(range_lambdas, dtype=np.float64)[range_quality]
-        system_value = _aggregate_tau(filtered, aggregation=aggregation)
+        system_value = _aggregate_tau(filtered, aggregation=lyapunov_aggregation)
         range_log_mad = _pair_log_mad(filtered)
         range_valid = bool(
             int(range_quality.sum()) >= min_valid_lambda_pairs
-            and np.isfinite(range_log_mad)
-            and range_log_mad <= max_pair_log_mad
+            and (
+                not require_pair_consistency
+                or (np.isfinite(range_log_mad) and range_log_mad <= max_pair_log_mad)
+            )
             and np.isfinite(system_value)
             and system_value > 0.0
         )
@@ -620,15 +763,31 @@ def _compute_group_divergence_label(
     )
     return {
         "system_id": system_id,
+        "label_observable": label_observable,
+        "lyapunov_aggregation": lyapunov_aggregation,
+        "require_pair_consistency": require_pair_consistency,
+        "divergence_observable": (
+            "aratios_complete scalar difference"
+            if label_observable == "aratio"
+            else "center-of-mass position+velocity phase-space distance"
+        ),
         "tau_system": tau_system,
         "phase_space_divergence_time": tau_system,
         "lyapunov_like_divergence_time": tau_system,
         "tau_div": tau_system,
         "log_tau_system": float(np.log1p(tau_system)) if np.isfinite(tau_system) else math.nan,
-        "lambda_phase_space_unfiltered": lambda_system_unfiltered,
-        "lambda_phase_space": lambda_system,
+        "lambda_phase_space_unfiltered": (
+            lambda_system_unfiltered if label_observable == "phase_space" else math.nan
+        ),
+        "lambda_phase_space": lambda_system if label_observable == "phase_space" else math.nan,
+        "lambda_aratio": lambda_system if label_observable == "aratio" else math.nan,
+        "lambda_observable": lambda_system,
+        "lambda_fast": lambda_fast,
+        "log_lambda_fast": log_lambda_fast,
         "lyapunov_time_proxy": lyapunov_time_proxy,
         "log_lyapunov_time_proxy": log_lyapunov_time_proxy,
+        "lyapunov_time_label": lyapunov_time_proxy,
+        "log_lyapunov_time_label": log_lyapunov_time_proxy,
         "lyapunov_label_valid": lyapunov_label_valid,
         "valid_lambda_pair_count": valid_lambda_pair_count,
         "valid_lambda_pair_fraction": float(valid_lambda_pair_count / max(len(valid_pairs), 1)),
@@ -648,9 +807,9 @@ def _compute_group_divergence_label(
 
 
 def compute_system_divergence_label(
-    positions: np.ndarray,
-    velocities: np.ndarray,
-    masses: np.ndarray,
+    positions: np.ndarray | None,
+    velocities: np.ndarray | None,
+    masses: np.ndarray | None,
     times: np.ndarray,
     system_id: int,
     group_size: int = 8,
@@ -661,24 +820,48 @@ def compute_system_divergence_label(
     min_growth_points: int = 5,
     aggregation: str = "median",
     censoring_rule: str = "median_pair",
+    aratios: np.ndarray | None = None,
+    label_observable: str = "phase_space",
+    lyapunov_aggregation: str = "median",
+    require_pair_consistency: bool = True,
 ) -> dict[str, Any]:
+    """Compute a system-level divergence label from near-identical pairs.
+
+    Set ``label_observable='aratio'`` and pass ``aratios`` to compute the label
+    from the scalar observable. The default preserves the legacy
+    position/velocity implementation.
     """
-    Compute system-level divergence label from the valid near-identical pairs.
-    """
-    if positions.shape[0] % group_size != 0:
-        raise ValueError(f"Position row count {positions.shape[0]} is not divisible by group_size={group_size}")
-    if positions.shape != velocities.shape:
-        raise ValueError(f"Position/velocity shape mismatch: {positions.shape} vs {velocities.shape}")
-    if positions.shape[:2] != times.shape:
-        raise ValueError(f"State/time shape mismatch: {positions.shape} vs {times.shape}")
+    if label_observable not in {"aratio", "phase_space"}:
+        raise ValueError(f"Unsupported label_observable: {label_observable}")
+    if label_observable == "aratio":
+        if aratios is None:
+            raise ValueError("aratios is required when label_observable='aratio'.")
+        if aratios.shape[0] % group_size != 0:
+            raise ValueError(
+                f"Aratio row count {aratios.shape[0]} is not divisible by group_size={group_size}"
+            )
+        if aratios.shape[:2] != times.shape:
+            raise ValueError(f"Aratio/time shape mismatch: {aratios.shape} vs {times.shape}")
+    else:
+        if positions is None or velocities is None or masses is None:
+            raise ValueError("State arrays are required when label_observable='phase_space'.")
+        if positions.shape[0] % group_size != 0:
+            raise ValueError(
+                f"Position row count {positions.shape[0]} is not divisible by group_size={group_size}"
+            )
+        if positions.shape != velocities.shape:
+            raise ValueError(f"Position/velocity shape mismatch: {positions.shape} vs {velocities.shape}")
+        if positions.shape[:2] != times.shape:
+            raise ValueError(f"State/time shape mismatch: {positions.shape} vs {times.shape}")
     start = system_id * group_size
     stop = start + group_size
-    if stop > positions.shape[0]:
+    row_count = aratios.shape[0] if label_observable == "aratio" else positions.shape[0]
+    if stop > row_count:
         raise IndexError(f"system_id {system_id} exceeds available rows")
     return _compute_group_divergence_label(
-        positions_group=positions[start:stop],
-        velocities_group=velocities[start:stop],
-        masses_group=masses[start:stop],
+        positions_group=None if positions is None else positions[start:stop],
+        velocities_group=None if velocities is None else velocities[start:stop],
+        masses_group=None if masses is None else masses[start:stop],
         times_group=times[start:stop],
         system_id=system_id,
         valid_pairs=valid_pairs,
@@ -688,13 +871,17 @@ def compute_system_divergence_label(
         min_growth_points=min_growth_points,
         aggregation=aggregation,
         censoring_rule=censoring_rule,
+        aratios_group=None if aratios is None else aratios[start:stop],
+        label_observable=label_observable,
+        lyapunov_aggregation=lyapunov_aggregation,
+        require_pair_consistency=require_pair_consistency,
     )
 
 
 def build_task_c_labels(
-    positions: np.ndarray,
-    velocities: np.ndarray,
-    masses: np.ndarray,
+    positions: np.ndarray | None,
+    velocities: np.ndarray | None,
+    masses: np.ndarray | None,
     times: np.ndarray,
     group_size: int = 8,
     threshold: float = 1e3,
@@ -704,6 +891,10 @@ def build_task_c_labels(
     aggregation: str = "median",
     censoring_rule: str = "median_pair",
     valid_pairs: Sequence[tuple[int, int]] = LEGACY_VALID_PAIRS_8,
+    aratios: np.ndarray | None = None,
+    label_observable: str = "phase_space",
+    lyapunov_aggregation: str = "median",
+    require_pair_consistency: bool = True,
 ) -> pd.DataFrame:
     """
     Build labels for all systems from in-memory arrays.
@@ -711,7 +902,8 @@ def build_task_c_labels(
     Returns a DataFrame with one row per system.
     """
     rows: list[dict[str, Any]] = []
-    n_systems = positions.shape[0] // group_size
+    n_rows = aratios.shape[0] if label_observable == "aratio" else positions.shape[0]
+    n_systems = n_rows // group_size
     for system_id in range(n_systems):
         label = compute_system_divergence_label(
             positions=positions,
@@ -727,6 +919,10 @@ def build_task_c_labels(
             min_growth_points=min_growth_points,
             aggregation=aggregation,
             censoring_rule=censoring_rule,
+            aratios=aratios,
+            label_observable=label_observable,
+            lyapunov_aggregation=lyapunov_aggregation,
+            require_pair_consistency=require_pair_consistency,
         )
         row = {
             "system_id": label["system_id"],
@@ -736,7 +932,13 @@ def build_task_c_labels(
                 "tau_div": label["tau_system"],
                 "log_tau_system": label["log_tau_system"],
             "lambda_phase_space": label["lambda_phase_space"],
+            "lambda_aratio": label["lambda_aratio"],
+            "lambda_observable": label["lambda_observable"],
+            "lambda_fast": label["lambda_fast"],
+            "log_lambda_fast": label["log_lambda_fast"],
             "lambda_tau_ratio": label["lambda_tau_ratio"],
+            "lyapunov_time_label": label["lyapunov_time_label"],
+            "log_lyapunov_time_label": label["log_lyapunov_time_label"],
             "system_censored": label["system_censored"],
         }
         for (idx_i, idx_j), tau in zip(valid_pairs, label["pair_taus"], strict=True):
@@ -858,7 +1060,17 @@ def build_labels_from_result_shards(
     completion_df: pd.DataFrame | None = None,
     require_complete_valid_group: bool = True,
     max_systems: int | None = None,
+    label_observable: str = "aratio",
+    lyapunov_aggregation: str = "median",
+    require_pair_consistency: bool = True,
+    label_start_index: int = 0,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if label_observable not in {"aratio", "phase_space"}:
+        raise ValueError(f"Unsupported label_observable: {label_observable}")
+    if lyapunov_aggregation not in {"median", "mean", "max"}:
+        raise ValueError(f"Unsupported lyapunov_aggregation: {lyapunov_aggregation}")
+    if label_start_index < 0:
+        raise ValueError(f"label_start_index must be non-negative, got {label_start_index}")
     rows: list[dict[str, Any]] = []
     dropped_invalid_groups = 0
     dropped_nan_labels = 0
@@ -871,15 +1083,34 @@ def build_labels_from_result_shards(
     for result_path in result_paths:
         batch_id = extract_batch_id(result_path)
         with h5py.File(result_path, "r") as f:
-            position_ds = f["positions_complete"]
-            velocity_ds = f["velocities_complete"]
-            mass_ds = f["masses_complete"]
+            position_ds = f["positions_complete"] if label_observable == "phase_space" else None
+            velocity_ds = f["velocities_complete"] if label_observable == "phase_space" else None
+            mass_ds = f["masses_complete"] if label_observable == "phase_space" else None
+            aratio_ds = f["aratios_complete"] if label_observable == "aratio" else None
             time_ds = f["times_complete"]
-            row_count, time_steps = position_ds.shape[:2]
-            if velocity_ds.shape != position_ds.shape:
-                raise ValueError(f"{result_path} position/velocity shape mismatch: {position_ds.shape} vs {velocity_ds.shape}")
-            if mass_ds.shape != position_ds.shape[:3]:
-                raise ValueError(f"{result_path} mass/state shape mismatch: {mass_ds.shape} vs {position_ds.shape}")
+            row_count, time_steps = time_ds.shape[:2]
+            if label_observable == "phase_space":
+                if velocity_ds.shape != position_ds.shape:
+                    raise ValueError(
+                        f"{result_path} position/velocity shape mismatch: "
+                        f"{position_ds.shape} vs {velocity_ds.shape}"
+                    )
+                if mass_ds.shape != position_ds.shape[:3]:
+                    raise ValueError(
+                        f"{result_path} mass/state shape mismatch: {mass_ds.shape} vs {position_ds.shape}"
+                    )
+                if position_ds.shape[:2] != time_ds.shape:
+                    raise ValueError(f"{result_path} state/time shape mismatch: {position_ds.shape} vs {time_ds.shape}")
+            else:
+                if aratio_ds.shape[:2] != time_ds.shape:
+                    raise ValueError(
+                        f"{result_path} aratio/time shape mismatch: {aratio_ds.shape} vs {time_ds.shape}"
+                    )
+                if aratio_ds.ndim != 3 or aratio_ds.shape[-1] != 1:
+                    raise ValueError(
+                        "The aratio label expects aratios_complete with shape (N, T, 1); "
+                        f"got {aratio_ds.shape} in {result_path}."
+                    )
             if row_count % group_size != 0:
                 raise ValueError(f"{result_path} has {row_count} rows, not divisible by group_size={group_size}")
 
@@ -893,6 +1124,10 @@ def build_labels_from_result_shards(
                 batch_valid = batch_df["valid"].to_numpy(dtype=bool)
 
             group_count = row_count // group_size
+            if label_start_index >= time_steps:
+                raise ValueError(
+                    f"label_start_index={label_start_index} is outside the {time_steps}-step trajectory"
+                )
             for local_group_id in range(group_count):
                 row_start = local_group_id * group_size
                 row_stop = row_start + group_size
@@ -903,10 +1138,24 @@ def build_labels_from_result_shards(
                         continue
 
                 label = _compute_group_divergence_label(
-                    positions_group=np.asarray(position_ds[row_start:row_stop], dtype=np.float64),
-                    velocities_group=np.asarray(velocity_ds[row_start:row_stop], dtype=np.float64),
-                    masses_group=np.asarray(mass_ds[row_start:row_stop], dtype=np.float64),
-                    times_group=np.asarray(time_ds[row_start:row_stop], dtype=np.float64),
+                    positions_group=(
+                        np.asarray(position_ds[row_start:row_stop], dtype=np.float64)
+                        if position_ds is not None
+                        else None
+                    ),
+                    velocities_group=(
+                        np.asarray(velocity_ds[row_start:row_stop], dtype=np.float64)
+                        if velocity_ds is not None
+                        else None
+                    ),
+                    masses_group=(
+                        np.asarray(mass_ds[row_start:row_stop], dtype=np.float64)
+                        if mass_ds is not None
+                        else None
+                    ),
+                    times_group=np.asarray(
+                        time_ds[row_start:row_stop, label_start_index:], dtype=np.float64
+                    ),
                     system_id=raw_system_id,
                     valid_pairs=valid_pairs,
                     threshold=threshold,
@@ -919,6 +1168,17 @@ def build_labels_from_result_shards(
                     lambda_r2_min=lambda_r2_min,
                     min_valid_lambda_pairs=min_valid_lambda_pairs,
                     max_pair_log_mad=max_pair_log_mad,
+                    aratios_group=(
+                        np.asarray(
+                            aratio_ds[row_start:row_stop, label_start_index:], dtype=np.float64
+                        )
+                        if aratio_ds is not None
+                        else None
+                    ),
+                    label_observable=label_observable,
+                    lyapunov_aggregation=lyapunov_aggregation,
+                    require_pair_consistency=require_pair_consistency,
+                    label_start_index=label_start_index,
                 )
                 if not np.isfinite(label["tau_system"]):
                     dropped_nan_labels += 1
@@ -931,12 +1191,21 @@ def build_labels_from_result_shards(
                     "raw_row_start": global_row_offset + row_start,
                     "rows_per_batch": row_count,
                     "time_steps": time_steps,
+                    "label_start_index": int(label_start_index),
+                    "label_time_steps": int(time_steps - label_start_index),
+                    "label_observable": label_observable,
                     "tau_system": label["tau_system"],
                     "log_tau_system": label["log_tau_system"],
                     "lambda_phase_space_unfiltered": label["lambda_phase_space_unfiltered"],
                     "lambda_phase_space": label["lambda_phase_space"],
+                    "lambda_aratio": label["lambda_aratio"],
+                    "lambda_observable": label["lambda_observable"],
+                    "lambda_fast": label["lambda_fast"],
+                    "log_lambda_fast": label["log_lambda_fast"],
                     "lyapunov_time_proxy": label["lyapunov_time_proxy"],
                     "log_lyapunov_time_proxy": label["log_lyapunov_time_proxy"],
+                    "lyapunov_time_label": label["lyapunov_time_label"],
+                    "log_lyapunov_time_label": label["log_lyapunov_time_label"],
                     "lyapunov_label_valid": label["lyapunov_label_valid"],
                     "valid_lambda_pair_count": label["valid_lambda_pair_count"],
                     "valid_lambda_pair_fraction": label["valid_lambda_pair_fraction"],
@@ -999,14 +1268,35 @@ def build_labels_from_result_shards(
             }
     metadata = {
         "label_version": LABEL_VERSION,
-        "target": "log_finite_time_lyapunov_time_proxy",
+        "target": (
+            "log_min_instability_time_from_aratio"
+            if label_observable == "aratio" and lyapunov_aggregation == "max"
+            else (
+                "log_finite_time_lyapunov_time_proxy_from_aratio"
+                if label_observable == "aratio"
+                else "log_finite_time_lyapunov_time_proxy"
+            )
+        ),
+        "label_observable": label_observable,
+        "lyapunov_aggregation": lyapunov_aggregation,
+        "require_pair_consistency": require_pair_consistency,
+        "label_start_index": int(label_start_index),
+        "label_window": (
+            "trajectory after the prefix"
+            if label_start_index > 0
+            else "full stored trajectory"
+        ),
         "num_systems": int(len(labels_df)),
         "num_valid_lyapunov_labels": valid_label_count,
         "num_rejected_lyapunov_labels": int(len(labels_df) - valid_label_count),
         "dropped_invalid_groups": int(dropped_invalid_groups),
         "dropped_nan_labels": int(dropped_nan_labels),
-        "pair_phase_distance0_summary": summarize_series(valid_pair_distance0s),
+        "pair_phase_distance0_summary": summarize_series(valid_pair_distance0s)
+        if label_observable == "phase_space"
+        else summarize_series([]),
+        "pair_label_distance0_summary": summarize_series(valid_pair_distance0s),
         "pair_lambda_summary": summarize_series(valid_pair_lambdas),
+        "lambda_fast_summary": summarize_series(labels_df["lambda_fast"].to_numpy(dtype=np.float64)),
         "pair_lambda_r2_summary": summarize_series(valid_pair_lambda_r2s),
         "valid_lambda_pair_count_summary": summarize_series(
             labels_df["valid_lambda_pair_count"].to_numpy(dtype=np.float64)
@@ -1025,7 +1315,11 @@ def build_labels_from_result_shards(
         "lambda_r2_min": float(lambda_r2_min),
         "min_valid_lambda_pairs": int(min_valid_lambda_pairs),
         "max_pair_log_mad": float(max_pair_log_mad),
-        "divergence_observable": "center-of-mass position+velocity phase-space distance",
+        "divergence_observable": (
+            "aratios_complete scalar difference"
+            if label_observable == "aratio"
+            else "center-of-mass position+velocity phase-space distance"
+        ),
         "aggregation": aggregation,
         "censoring_rule": censoring_rule,
     }
@@ -1037,7 +1331,7 @@ def build_initial_condition_features(
     labels_df: pd.DataFrame,
     group_size: int,
     feature_aggregation: str = "first",
-    feature_keys: Sequence[str] = INITIAL_FEATURE_KEYS,
+    feature_keys: Sequence[str] = ORBITAL15_FEATURE_KEYS,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any], pd.DataFrame]:
     """
     Build one feature vector per system from t=0 orbital/system features.
@@ -1064,6 +1358,9 @@ def build_initial_condition_features(
 
         with h5py.File(result_path, "r") as f:
             shard = {key: np.asarray(f[key][:, 0, ...], dtype=np.float64) for key in feature_keys}
+        for key in feature_keys:
+            if key in INITIAL_ANGLE_KEYS:
+                shard[key] = np.concatenate([np.sin(shard[key]), np.cos(shard[key])], axis=-1)
 
         for row in labels_by_batch[batch_id].itertuples(index=False):
             start = int(row.local_group_id) * group_size
@@ -1107,7 +1404,213 @@ def build_initial_condition_features(
         "feature_columns": feature_columns,
         "feature_aggregation": feature_aggregation,
         "feature_keys": list(feature_keys),
+        "angle_features_encoded_as_sin_cos": sorted(
+            set(feature_keys).intersection(INITIAL_ANGLE_KEYS)
+        ),
         "num_features": int(len(feature_columns)),
+    }
+    return X, y, metadata, merged
+
+
+def build_initial_prefix_features(
+    result_paths: Sequence[str | Path],
+    labels_df: pd.DataFrame,
+    prefix_len: int = 100,
+    time_stride: int = 1,
+    group_size: int = DEFAULT_GROUP_SIZE,
+    feature_aggregation: str = "first",
+    valid_pairs: Sequence[tuple[int, int]] = DEFAULT_VALID_PAIRS,
+    growth_lower: float = 1.0,
+    growth_upper: float = 100.0,
+    min_growth_points: int = 5,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any], pd.DataFrame]:
+    """Build initial orbital15 plus an early-trajectory summary per system.
+
+    The initial vector is the 15-dimensional orbital representation at t=0.
+    The prefix part contains group-mean/std trajectories for aratio/ecc/inc,
+    pair-wise log R(t) summaries, and early pair-growth-rate summaries. The
+    latter are computed only from the observed prefix and are therefore valid
+    covariates for a future-only label.
+    """
+    if prefix_len < 2 or time_stride < 1:
+        raise ValueError(
+            f"prefix_len must be at least 2 and time_stride positive, got {prefix_len}, {time_stride}"
+        )
+    if feature_aggregation not in {"first", "mean_std"}:
+        raise ValueError(f"Unsupported feature_aggregation: {feature_aggregation}")
+    if labels_df.empty:
+        raise ValueError("labels_df is empty")
+
+    label_records = labels_df[["system_id", "batch_id", "local_group_id", "log_tau_system"]].copy()
+    labels_by_batch: dict[int, pd.DataFrame] = {
+        int(batch_id): batch_df.sort_values("local_group_id")
+        for batch_id, batch_df in label_records.groupby("batch_id", sort=True)
+    }
+    feature_rows: list[dict[str, Any]] = []
+    feature_columns: list[str] | None = None
+
+    for result_path in result_paths:
+        batch_id = extract_batch_id(result_path)
+        if batch_id not in labels_by_batch:
+            continue
+        with h5py.File(result_path, "r") as f:
+            time_steps = int(f["times_complete"].shape[1])
+            stop = min(prefix_len * time_stride, time_steps)
+            if stop < 2:
+                raise ValueError(f"No usable prefix in {result_path}: {time_steps} time steps")
+            initial_shard = {
+                key: np.asarray(f[key][:, 0, ...], dtype=np.float64)
+                for key in ORBITAL15_FEATURE_KEYS
+            }
+            trajectory_shard = {
+                key: np.asarray(f[key][:, :stop:time_stride, ...], dtype=np.float64)
+                for key in INITIAL_PREFIX_TRAJECTORY_KEYS
+            }
+            times = np.asarray(f["times_complete"][:, :stop:time_stride], dtype=np.float64)
+
+        prefix_points = int(times.shape[1])
+        sampled_points = np.unique(
+            np.linspace(0, prefix_points - 1, min(20, prefix_points), dtype=np.int64)
+        )
+        for row in labels_by_batch[batch_id].itertuples(index=False):
+            start = int(row.local_group_id) * group_size
+            stop_row = start + group_size
+            feature_row: dict[str, Any] = {"system_id": int(row.system_id)}
+            names_local: list[str] = []
+
+            initial_blocks: list[np.ndarray] = []
+            initial_names: list[str] = []
+            for key in ORBITAL15_FEATURE_KEYS:
+                data0 = initial_shard[key][start:stop_row, ...].reshape(group_size, -1)
+                if key in INITIAL_ANGLE_KEYS:
+                    data0 = np.concatenate([np.sin(data0), np.cos(data0)], axis=-1)
+                if feature_aggregation == "first":
+                    vector = data0[0]
+                    prefix = f"initial__{key}"
+                    names = [f"{prefix}_{idx}" for idx in range(vector.size)]
+                else:
+                    mean_vector = np.nanmean(data0, axis=0)
+                    std_vector = np.nanstd(data0, axis=0)
+                    vector = np.concatenate([mean_vector, std_vector])
+                    names = (
+                        [f"initial_mean__{key}_{idx}" for idx in range(mean_vector.size)]
+                        + [f"initial_std__{key}_{idx}" for idx in range(std_vector.size)]
+                    )
+                initial_blocks.append(np.asarray(vector, dtype=np.float64))
+                initial_names.extend(names)
+            initial_vector = np.concatenate(initial_blocks)
+            for name, value in zip(initial_names, initial_vector, strict=True):
+                feature_row[name] = float(value) if np.isfinite(value) else math.nan
+            names_local.extend(initial_names)
+
+            for key in INITIAL_PREFIX_TRAJECTORY_KEYS:
+                data = trajectory_shard[key][start:stop_row].reshape(group_size, prefix_points, -1)
+                mean_series = np.nanmean(data, axis=0)
+                std_series = np.nanstd(data, axis=0)
+                for stat_name, values in (("mean", mean_series), ("std", std_series)):
+                    flat = np.asarray(values[sampled_points], dtype=np.float64).reshape(-1)
+                    names = [
+                        f"trajectory_{stat_name}__{key}_{idx}"
+                        for idx in range(flat.size)
+                    ]
+                    for name, value in zip(names, flat, strict=True):
+                        feature_row[name] = float(value) if np.isfinite(value) else math.nan
+                    names_local.extend(names)
+                for stat_name, values in (
+                    ("last", mean_series[-1]),
+                    ("delta", mean_series[-1] - mean_series[0]),
+                    ("time_mean", np.nanmean(mean_series, axis=0)),
+                    ("time_std", np.nanstd(mean_series, axis=0)),
+                ):
+                    flat = np.asarray(values, dtype=np.float64).reshape(-1)
+                    names = [f"trajectory_{stat_name}__{key}_{idx}" for idx in range(flat.size)]
+                    for name, value in zip(names, flat, strict=True):
+                        feature_row[name] = float(value) if np.isfinite(value) else math.nan
+                    names_local.extend(names)
+
+            aratio = trajectory_shard["aratios_complete"][start:stop_row].reshape(
+                group_size, prefix_points
+            )
+            time_grid = times[start:stop_row]
+            log_ratio_rows: list[np.ndarray] = []
+            prefix_slopes: list[float] = []
+            for idx_i, idx_j in valid_pairs:
+                if idx_i >= group_size or idx_j >= group_size:
+                    continue
+                delta = np.abs(aratio[idx_i] - aratio[idx_j])
+                delta0 = delta[0] if np.isfinite(delta[0]) else math.nan
+                scale = max(float(delta0), 1e-12) if np.isfinite(delta0) else 1e-12
+                ratio = delta / scale
+                log_ratio_rows.append(
+                    np.log(np.where(np.isfinite(ratio) & (ratio > 0.0), ratio, np.nan))
+                )
+                slope, _, _ = _fit_log_growth_rate(
+                    ratio=ratio,
+                    times=time_grid[idx_i],
+                    lower=growth_lower,
+                    upper=growth_upper,
+                    min_points=min_growth_points,
+                )
+                if np.isfinite(slope) and slope > 0.0:
+                    prefix_slopes.append(float(slope))
+
+            if log_ratio_rows:
+                log_ratio = np.stack(log_ratio_rows, axis=0)
+                ratio_stats = {
+                    "mean": np.nanmean(log_ratio, axis=0),
+                    "std": np.nanstd(log_ratio, axis=0),
+                    "q90": np.nanpercentile(log_ratio, 90, axis=0),
+                    "max": np.nanmax(log_ratio, axis=0),
+                }
+            else:
+                ratio_stats = {
+                    name: np.full(prefix_points, np.nan, dtype=np.float64)
+                    for name in ("mean", "std", "q90", "max")
+                }
+            for stat_name, values in ratio_stats.items():
+                sampled_values = np.asarray(values, dtype=np.float64)[sampled_points]
+                names = [f"early_log_R_{stat_name}_{idx}" for idx in range(len(sampled_values))]
+                for name, value in zip(names, sampled_values, strict=True):
+                    feature_row[name] = float(value) if np.isfinite(value) else math.nan
+                names_local.extend(names)
+
+            slope_summary = {
+                "median": float(np.median(prefix_slopes)) if prefix_slopes else math.nan,
+                "mean": float(np.mean(prefix_slopes)) if prefix_slopes else math.nan,
+                "max": float(np.max(prefix_slopes)) if prefix_slopes else math.nan,
+                "std": float(np.std(prefix_slopes)) if prefix_slopes else math.nan,
+                "count": float(len(prefix_slopes)),
+            }
+            for stat_name, value in slope_summary.items():
+                name = f"early_lambda_{stat_name}"
+                feature_row[name] = value if np.isfinite(value) else math.nan
+                names_local.append(name)
+
+            if feature_columns is None:
+                feature_columns = names_local
+            feature_rows.append(feature_row)
+
+    feature_df = pd.DataFrame(feature_rows).sort_values("system_id").reset_index(drop=True)
+    merged = labels_df[["system_id", "log_tau_system"]].merge(feature_df, on="system_id", how="inner")
+    if len(merged) != len(labels_df):
+        raise ValueError(
+            f"Initial-prefix feature/label mismatch: merged {len(merged)} rows vs labels {len(labels_df)}"
+        )
+    feature_cols = [col for col in merged.columns if col not in {"system_id", "log_tau_system"}]
+    X = merged[feature_cols].to_numpy(dtype=np.float64)
+    y = merged["log_tau_system"].to_numpy(dtype=np.float64)
+    metadata = {
+        "feature_columns": feature_cols,
+        "feature_aggregation": feature_aggregation,
+        "initial_representation": "orbital15",
+        "initial_feature_count": 15 if feature_aggregation == "first" else 30,
+        "trajectory_feature_keys": list(INITIAL_PREFIX_TRAJECTORY_KEYS),
+        "prefix_len": int(prefix_len),
+        "time_stride": int(time_stride),
+        "prefix_points": int(prefix_points),
+        "feature_sample_points": int(len(sampled_points)),
+        "valid_pairs": [list(pair) for pair in valid_pairs],
+        "num_features": int(len(feature_cols)),
     }
     return X, y, metadata, merged
 
@@ -2085,25 +2588,26 @@ def save_label_plots(
     fig.savefig(output_dir / "hist_log_tau_system.png", dpi=160)
     plt.close(fig)
 
-    finite_lambda = labels_df["lambda_phase_space"].to_numpy(dtype=np.float64)
+    lambda_column = "lambda_observable" if "lambda_observable" in labels_df.columns else "lambda_phase_space"
+    finite_lambda = labels_df[lambda_column].to_numpy(dtype=np.float64)
     finite_lambda = finite_lambda[np.isfinite(finite_lambda)]
     if finite_lambda.size:
         fig, ax = plt.subplots(figsize=(7, 4))
         ax.hist(finite_lambda, bins=40, color="#5B9BD5", alpha=0.85)
-        ax.set_title("Phase-Space Growth Rate Distribution")
-        ax.set_xlabel("lambda_phase_space")
+        ax.set_title("Observable Growth Rate Distribution")
+        ax.set_xlabel(lambda_column)
         ax.set_ylabel("count")
         fig.tight_layout()
-        fig.savefig(output_dir / "hist_lambda_phase_space.png", dpi=160)
+        fig.savefig(output_dir / "hist_lambda_observable.png", dpi=160)
         plt.close(fig)
 
-    relation = labels_df[["tau_system", "lambda_phase_space"]].replace([np.inf, -np.inf], np.nan).dropna()
+    relation = labels_df[["tau_system", lambda_column]].replace([np.inf, -np.inf], np.nan).dropna()
     if not relation.empty:
         fig, ax = plt.subplots(figsize=(5, 5))
-        ax.scatter(relation["tau_system"], relation["lambda_phase_space"], s=16, alpha=0.55, color="#4472C4")
-        ax.set_title("Divergence Time vs Phase-Space Growth Rate")
+        ax.scatter(relation["tau_system"], relation[lambda_column], s=16, alpha=0.55, color="#4472C4")
+        ax.set_title("Divergence Time vs Observable Growth Rate")
         ax.set_xlabel("tau_system")
-        ax.set_ylabel("lambda_phase_space")
+        ax.set_ylabel(lambda_column)
         fig.tight_layout()
         fig.savefig(output_dir / "scatter_tau_vs_lambda.png", dpi=160)
         plt.close(fig)
@@ -2230,7 +2734,14 @@ def save_feature_correlation_heatmap(
     feature_cols = [col for col in feature_df.columns if col not in {"system_id", target_column}]
     if not feature_cols:
         return
-    corr = feature_df[feature_cols + [target_column]].corr(numeric_only=True)[target_column].drop(target_column)
+    # Compute feature-target correlations directly. Building the full
+    # feature-by-feature matrix is quadratic in the number of features and is
+    # prohibitively expensive for initial_prefix inputs.
+    numeric = feature_df[feature_cols + [target_column]].apply(
+        pd.to_numeric, errors="coerce"
+    )
+    corr = numeric[feature_cols].corrwith(numeric[target_column])
+    corr = corr.replace([np.inf, -np.inf], np.nan).dropna()
     corr = corr.reindex(corr.abs().sort_values(ascending=False).head(top_k).index)
 
     fig_h = max(4, 0.25 * len(corr))
@@ -2257,8 +2768,9 @@ def print_pipeline_summary(
     threshold: float,
 ) -> None:
     tau_summary = summarize_series(labels_df["tau_system"].to_numpy(dtype=np.float64))
-    lambda_summary = summarize_series(labels_df["lambda_phase_space"].to_numpy(dtype=np.float64))
-    print("Lyapunov divergence label construction complete.")
+    lambda_column = "lambda_observable" if "lambda_observable" in labels_df.columns else "lambda_phase_space"
+    lambda_summary = summarize_series(labels_df[lambda_column].to_numpy(dtype=np.float64))
+    print("Task D divergence label construction complete.")
     print(f"Number of trajectories used: {len(labels_df) * group_size}")
     print(f"Number of systems: {len(labels_df)}")
     print(f"Group size: {group_size}")
@@ -2276,7 +2788,7 @@ def print_pipeline_summary(
     print(f"  min:    {tau_summary['min']:.6g}")
     print(f"  max:    {tau_summary['max']:.6g}")
     print(f"  censored fraction: {labels_df['system_censored'].mean():.4f}")
-    print("Lambda_phase_space summary:")
+    print(f"{lambda_column} summary:")
     print(f"  finite count: {int(lambda_summary['count'])}")
     print(f"  median:       {lambda_summary['median']:.6g}")
     print(f"  min:          {lambda_summary['min']:.6g}")
@@ -2293,8 +2805,20 @@ def print_pipeline_summary(
 
 
 def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
-    if config.task_setting not in {"initial", "prefix"}:
+    if config.task_setting not in {"initial", "initial_prefix", "prefix"}:
         raise ValueError(f"Unsupported task_setting: {config.task_setting}")
+    if config.target_mode not in {"min_instability", "lambda_fast", "lyapunov_proxy", "crossing_upper"}:
+        raise ValueError(f"Unsupported target_mode: {config.target_mode}")
+    if config.label_observable not in {"aratio", "phase_space"}:
+        raise ValueError(f"Unsupported label_observable: {config.label_observable}")
+    if config.initial_representation not in {"orbital15", "full"}:
+        raise ValueError(
+            f"Unsupported initial_representation: {config.initial_representation}"
+        )
+    if config.task_setting == "initial_prefix" and config.label_observable != "aratio":
+        raise ValueError("initial_prefix currently requires --label-observable aratio")
+    if config.lyapunov_aggregation not in {"median", "mean", "max"}:
+        raise ValueError(f"Unsupported lyapunov_aggregation: {config.lyapunov_aggregation}")
     if not 0.0 < config.growth_lower < config.growth_upper:
         raise ValueError(
             f"Expected 0 < growth_lower < growth_upper, got {config.growth_lower} and {config.growth_upper}."
@@ -2312,6 +2836,10 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         )
     if config.max_pair_log_mad < 0.0:
         raise ValueError(f"max_pair_log_mad must be non-negative, got {config.max_pair_log_mad}.")
+    if config.target_mode == "crossing_upper" and config.aggregation not in {"min", "median", "mean"}:
+        raise ValueError(
+            "crossing_upper target requires aggregation to be one of min, median, or mean."
+        )
     invalid_sensitivity_uppers = [
         value for value in config.growth_sensitivity_uppers if value <= config.growth_lower
     ]
@@ -2333,8 +2861,15 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     )
     labels_path = output_dir / "task_d_labels.csv"
     labels_meta_path = output_dir / "task_d_labels_meta.json"
+    label_start_index = (
+        config.prefix_len * config.prefix_time_stride
+        if config.task_setting == "initial_prefix"
+        else 0
+    )
     expected_label_config = {
         "label_version": LABEL_VERSION,
+        "label_observable": config.label_observable,
+        "lyapunov_aggregation": config.lyapunov_aggregation,
         "threshold": float(config.threshold),
         "group_size": int(config.group_size),
         "aggregation": config.aggregation,
@@ -2345,6 +2880,8 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         "lambda_r2_min": float(config.lambda_r2_min),
         "min_valid_lambda_pairs": int(config.min_valid_lambda_pairs),
         "max_pair_log_mad": float(config.max_pair_log_mad),
+        "require_pair_consistency": bool(config.require_pair_consistency),
+        "label_start_index": int(label_start_index),
     }
     use_cached_labels = False
     if labels_path.exists() and labels_meta_path.exists() and not config.force_recompute_labels:
@@ -2377,6 +2914,10 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
             completion_df=completion_df,
             require_complete_valid_group=config.require_complete_valid_group,
             max_systems=config.max_systems,
+            label_observable=config.label_observable,
+            lyapunov_aggregation=config.lyapunov_aggregation,
+            require_pair_consistency=config.require_pair_consistency,
+            label_start_index=label_start_index,
         )
         labels_df.to_csv(labels_path, index=False)
         write_json(labels_meta_path, label_meta)
@@ -2393,38 +2934,127 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     combined_predictions: pd.DataFrame
     split_payload: dict[str, Any]
     target_name: str
-    label_quality_mask = (
-        labels_df["lyapunov_label_valid"].astype(bool).to_numpy()
-        & np.isfinite(labels_df["log_lyapunov_time_proxy"].to_numpy(dtype=np.float64))
-    )
+    if config.target_mode == "crossing_upper":
+        # The first sampled threshold crossing is an upper bound on the true
+        # continuous crossing time. A trajectory group that never crosses is
+        # right-censored, not a valid finite upper-bound target.
+        label_quality_mask = (
+            ~labels_df["system_censored"].astype(bool).to_numpy()
+            & np.isfinite(labels_df["tau_system"].to_numpy(dtype=np.float64))
+            & (labels_df["tau_system"].to_numpy(dtype=np.float64) > 0.0)
+        )
+        target_filter_name = "uncensored_threshold_crossing"
+    elif config.target_mode == "lambda_fast":
+        label_quality_mask = (
+            labels_df["lyapunov_label_valid"].astype(bool).to_numpy()
+            & np.isfinite(labels_df["log_lambda_fast"].to_numpy(dtype=np.float64))
+        )
+        target_filter_name = "lambda_fast_label_quality"
+    else:
+        label_quality_mask = (
+            labels_df["lyapunov_label_valid"].astype(bool).to_numpy()
+            & np.isfinite(labels_df["log_lyapunov_time_label"].to_numpy(dtype=np.float64))
+        )
+        target_filter_name = "lyapunov_label_quality"
     working_labels = labels_df.loc[label_quality_mask].copy().reset_index(drop=True)
     if working_labels.empty:
+        if config.target_mode == "crossing_upper":
+            raise ValueError(
+                "No systems with an observed threshold crossing survived; lower --threshold "
+                "or use a denser trajectory output."
+            )
         raise ValueError(
             "No systems passed the Lyapunov-label quality filters; relax --lambda-r2-min, "
             "--min-valid-lambda-pairs, or --max-pair-log-mad."
         )
     working_labels["tau_cross_system"] = working_labels["tau_system"]
     working_labels["crossing_time_censored"] = working_labels["system_censored"]
-    working_labels["tau_system"] = working_labels["lyapunov_time_proxy"]
-    working_labels["log_tau_system"] = working_labels["log_lyapunov_time_proxy"]
+    if config.target_mode == "lambda_fast":
+        working_labels["tau_system"] = working_labels["lambda_fast"]
+        working_labels["log_tau_system"] = working_labels["log_lambda_fast"]
+    else:
+        working_labels["tau_system"] = working_labels["lyapunov_time_label"]
+        working_labels["log_tau_system"] = working_labels["log_lyapunov_time_label"]
     working_labels["system_censored"] = False
     setting_diagnostics.update(
         {
+            "target_mode": config.target_mode,
+            "target_filter": target_filter_name,
             "num_labels_before_quality_filter": int(len(labels_df)),
             "num_labels_after_quality_filter": int(len(working_labels)),
             "num_labels_rejected_by_quality_filter": int(len(labels_df) - len(working_labels)),
-            "lyapunov_target": "log(1 / lambda_phase_space)",
+            "censored_fraction_before_target_filter": float(labels_df["system_censored"].mean()),
+            "lyapunov_target": (
+                f"log(max_pair_lambda_{config.label_observable})"
+                if config.target_mode == "lambda_fast"
+                else (
+                    f"log(1 / max_pair_lambda_{config.label_observable})"
+                    if config.target_mode == "min_instability"
+                    else f"log(1 / lambda_{config.label_observable})"
+                )
+            ),
+            "label_observable": config.label_observable,
+            "lyapunov_aggregation": config.lyapunov_aggregation,
+            "initial_representation": config.initial_representation,
+            "require_pair_consistency": config.require_pair_consistency,
+            "crossing_upper_target": "log(first sampled time with R > threshold)",
         }
     )
 
-    if config.task_setting == "initial":
-        target_name = "log_finite_time_lyapunov_time_proxy"
-        X, _, feature_meta, feature_df = build_initial_condition_features(
-            result_paths=result_paths,
-            labels_df=working_labels,
-            group_size=config.group_size,
-            feature_aggregation=config.feature_aggregation,
+    if config.target_mode == "crossing_upper":
+        target_name = "log_observed_crossing_upper_time"
+        working_labels["tau_system"] = working_labels["tau_cross_system"]
+        working_labels["log_tau_system"] = np.log(working_labels["tau_system"].to_numpy(dtype=np.float64))
+        # Censored systems were removed above, so the remaining regression
+        # target is an ordinary finite point target.
+        working_labels["system_censored"] = False
+    if config.task_setting in {"initial", "initial_prefix"}:
+        target_name = (
+            "log_observed_crossing_upper_time"
+            if config.target_mode == "crossing_upper"
+            else (
+                "log_lambda_fast"
+                if config.target_mode == "lambda_fast"
+                else (
+                "log_min_instability_time_from_aratio"
+                if config.target_mode == "min_instability" and config.label_observable == "aratio"
+                else (
+                    "log_min_instability_time_from_phase_space"
+                    if config.target_mode == "min_instability"
+                    else (
+                        "log_finite_time_lyapunov_time_proxy_from_aratio"
+                        if config.label_observable == "aratio"
+                        else "log_finite_time_lyapunov_time_proxy"
+                    )
+                )
+                )
+            )
         )
+        if config.task_setting == "initial_prefix":
+            X, _, feature_meta, feature_df = build_initial_prefix_features(
+                result_paths=result_paths,
+                labels_df=working_labels,
+                prefix_len=config.prefix_len,
+                time_stride=config.prefix_time_stride,
+                group_size=config.group_size,
+                feature_aggregation=config.feature_aggregation,
+                valid_pairs=config.valid_pairs,
+                growth_lower=config.growth_lower,
+                growth_upper=config.growth_upper,
+                min_growth_points=config.min_growth_points,
+            )
+        else:
+            X, _, feature_meta, feature_df = build_initial_condition_features(
+                result_paths=result_paths,
+                labels_df=working_labels,
+                group_size=config.group_size,
+                feature_aggregation=config.feature_aggregation,
+                feature_keys=(
+                    ORBITAL15_FEATURE_KEYS
+                    if config.initial_representation == "orbital15"
+                    else INITIAL_FEATURE_KEYS
+                ),
+            )
         feature_joined = working_labels[["system_id", "log_tau_system"]].merge(
             feature_df.drop(columns=["log_tau_system"], errors="ignore"),
             on="system_id",
@@ -2505,13 +3135,33 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
                 "t_obs_min": float(finite_obs.min()),
                 "t_obs_max": float(finite_obs.max()),
                 "prefix_target_overlap_note": (
-                    "The finite-time Lyapunov proxy is fitted from the stored trajectory, including "
+                    "The finite-time pair-growth target is fitted from the stored trajectory, including "
                     "the prefix interval; use a future-only fit for a strict forecasting study."
                 ),
             }
         )
         working_labels.to_csv(output_dir / "task_d_prefix_labels.csv", index=False)
-        target_name = "log_finite_time_lyapunov_time_proxy"
+        target_name = (
+            "log_observed_crossing_upper_time"
+            if config.target_mode == "crossing_upper"
+            else (
+                "log_lambda_fast"
+                if config.target_mode == "lambda_fast"
+                else (
+                "log_min_instability_time_from_aratio"
+                if config.target_mode == "min_instability" and config.label_observable == "aratio"
+                else (
+                    "log_min_instability_time_from_phase_space"
+                    if config.target_mode == "min_instability"
+                    else (
+                        "log_finite_time_lyapunov_time_proxy_from_aratio"
+                        if config.label_observable == "aratio"
+                        else "log_finite_time_lyapunov_time_proxy"
+                    )
+                )
+                )
+            )
+        )
 
         prefix_arrays, sequence_meta = build_prefix_model_inputs(
             result_paths=result_paths,
@@ -2616,7 +3266,7 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
             how="left",
         )
 
-    if config.task_setting == "initial":
+    if config.task_setting in {"initial", "initial_prefix"}:
         combined_predictions["true_log_tau"] = combined_predictions["y_true_log_tau"]
         combined_predictions["true_tau"] = combined_predictions["y_true_tau"]
     combined_predictions.to_csv(output_dir / "predictions.csv", index=False)
@@ -2645,7 +3295,18 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
 
     metrics = {
         "task_setting": config.task_setting,
+        "target_mode": config.target_mode,
+        "label_observable": config.label_observable,
         "target": target_name,
+        "target_value_name": (
+            "lambda_fast"
+            if config.target_mode == "lambda_fast"
+            else (
+                "min_instability_time"
+                if config.target_mode == "min_instability"
+                else "time"
+            )
+        ),
         "t_obs": setting_diagnostics.get("t_obs"),
         "config": asdict(config),
         "diagnostics": diagnostics,
@@ -2658,13 +3319,23 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         "split": split_payload,
         "tau_cross_system_summary": summarize_series(labels_df["tau_system"].to_numpy(dtype=np.float64)),
         "log_tau_cross_system_summary": summarize_series(labels_df["log_tau_system"].to_numpy(dtype=np.float64)),
-        "lambda_phase_space_summary": summarize_series(labels_df["lambda_phase_space"].to_numpy(dtype=np.float64)),
+        "lambda_observable_summary": summarize_series(
+            labels_df["lambda_observable"].to_numpy(dtype=np.float64)
+        ),
+        "lambda_phase_space_summary": summarize_series(
+            labels_df["lambda_phase_space"].to_numpy(dtype=np.float64)
+        ),
+        "lambda_aratio_summary": summarize_series(
+            labels_df["lambda_aratio"].to_numpy(dtype=np.float64)
+        ),
         "lyapunov_time_proxy_summary": summarize_series(
             labels_df["lyapunov_time_proxy"].to_numpy(dtype=np.float64)
         ),
         "log_lyapunov_time_proxy_summary": summarize_series(
             labels_df["log_lyapunov_time_proxy"].to_numpy(dtype=np.float64)
         ),
+        "target_time_summary": summarize_series(working_labels["tau_system"].to_numpy(dtype=np.float64)),
+        "target_log_time_summary": summarize_series(working_labels["log_tau_system"].to_numpy(dtype=np.float64)),
         "lambda_tau_ratio_summary": summarize_series(labels_df["lambda_tau_ratio"].to_numpy(dtype=np.float64)),
         "system_censored_fraction": float(labels_df["system_censored"].mean()),
         "labels_csv": str(labels_path),
