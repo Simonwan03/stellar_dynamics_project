@@ -282,7 +282,6 @@ system 拆到不同 split，也不会减少 validation/test 中的 variations。
 
 ### 8.1 Baselines
 
-- `persistence`：将 context 最后一步复制到所有未来步；不训练；
 - `ridge`：flatten 整个 context，直接线性回归完整未来窗口。
 
 Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 个 test 窗口，因为它需要将窗口物化进内存。
@@ -292,7 +291,7 @@ Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 
 - `tcn`：causal dilated temporal convolution；
 - `patchtst`：项目内从零训练、channel-independent 的 PatchTST；
 - `transformer`：时间点作为 token 的 Transformer encoder；
-- `itransformer` / `itransformer_simple`：变量作为 token 的简化 iTransformer。
+- `itransformer`：变量作为 token 的简化 iTransformer。
 
 当前 `patchtst` 不是 pretrained Hugging Face PatchTST。
 
@@ -334,11 +333,37 @@ Panda、TimesFM 和 Chronos 的 pretrained 权重由 Hugging Face cache 管理�
 
 ### 8.4 Pretrained adapters
 
-- `timesfm_adapter`：TimesFM inference bridge 后训练 post-adapter；
-- `chronos_adapter`：默认冻结 Chronos 和 pre-adapter，训练 post-adapter；
 - `panda_adapter`：Panda 前后加入 temporal adapters，默认冻结 Panda backbone。
 
-TimesFM 的公开 forecast 路径会 detach 到 NumPy，因此梯度不能穿过 backbone；当前 TimesFM adapter 更准确地说是对固定 forecast 的 supervised calibration。
+### 8.5 固定 prefix=64、预测 window=32 的 horizon 误差实验
+
+使用 `orbital15`、`context_len=64`、`pred_len=32`。将 `--adapter_decoder` 设为
+`gru` 时，Panda forecast 后使用 GRU decoder；它不把输出长度写死在最后一层，
+因此同一个模型可以通过 `forward(..., output_len=k)` 请求其他预测长度。
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --representation orbital15 \
+  --model panda_adapter \
+  --context_len 64 \
+  --pred_len 32 \
+  --stride 20 \
+  --max_variations_per_system 2 \
+  --max_windows_per_trajectory 2 \
+  --window_sampling sequential \
+  --adapter_decoder gru \
+  --adapter_gru_layers 2 \
+  --num_train_windows_for_adapter 0 \
+  --output_dir runs/task_e_orbital15_ctx64_pred32_panda_gru
+```
+
+把 `--adapter_decoder gru` 改为 `mlp` 并使用另一个输出目录，即可得到同设置的
+MLP 对照实验。当前 completion-aware 过滤后，实际窗口数可能少于理论上的
+10000 条 trajectory / 20000 个窗口；测试集的 `horizon_metrics.csv` 保存第 1 到第 32 步的逐步误差；
+`test_horizon_trend.json` 统计每个误差指标的 `is_nondecreasing`、
+`overall_increased`、相邻步非下降比例、horizon-error Spearman 相关和线性斜率。
+
 
 ## 9. 训练流程
 

@@ -77,6 +77,77 @@ def compute_forecast_metrics(
     return metrics, horizon_rows, channel_rows
 
 
+
+def summarize_horizon_trends(horizon_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize whether per-step forecast error increases with horizon."""
+    if not horizon_rows:
+        return {"num_horizons": 0, "horizon_steps": [], "metrics": {}}
+
+    ordered = sorted(horizon_rows, key=lambda row: int(row["horizon_step"]))
+    steps = np.asarray([int(row["horizon_step"]) for row in ordered], dtype=np.float64)
+    result: dict[str, Any] = {
+        "num_horizons": int(steps.size),
+        "horizon_steps": steps.astype(np.int64).tolist(),
+        "adjacent_tolerance_factor": 1e-8,
+        "metrics": {},
+    }
+    metric_names = ("mse_z", "mae_z", "rmse_z", "mse_raw", "mae_raw", "rmse_raw")
+    for metric_name in metric_names:
+        values = np.asarray([row.get(metric_name, np.nan) for row in ordered], dtype=np.float64)
+        finite = np.isfinite(values) & np.isfinite(steps)
+        if int(finite.sum()) < 2:
+            result["metrics"][metric_name] = {
+                "finite_horizons": int(finite.sum()),
+                "is_nondecreasing": None,
+                "overall_increased": None,
+                "nondecreasing_adjacent_fraction": None,
+                "strictly_increasing_adjacent_fraction": None,
+                "spearman_horizon_error": None,
+                "ols_slope_per_step": None,
+                "first_error": None,
+                "last_error": None,
+                "last_minus_first": None,
+                "last_over_first": None,
+            }
+            continue
+
+        x = steps[finite]
+        y = values[finite]
+        order = np.argsort(x)
+        x = x[order]
+        y = y[order]
+        differences = np.diff(y)
+        tolerance = 1e-8 * max(1.0, float(np.max(np.abs(y))))
+        adjacent_count = int(differences.size)
+        nondecreasing_count = int(np.count_nonzero(differences >= -tolerance))
+        strictly_increasing_count = int(np.count_nonzero(differences > tolerance))
+        centered_x = x - float(np.mean(x))
+        centered_y = y - float(np.mean(y))
+        denominator = float(np.sum(np.square(centered_x), dtype=np.float64))
+        slope = float(np.sum(centered_x * centered_y, dtype=np.float64) / denominator) if denominator else 0.0
+        correlation = spearmanr(x, y).statistic
+        correlation = float(correlation) if np.isfinite(correlation) else None
+        first_error = float(y[0])
+        last_error = float(y[-1])
+        last_over_first = last_error / first_error if abs(first_error) > tolerance else None
+        result["metrics"][metric_name] = {
+            "finite_horizons": int(y.size),
+            "is_nondecreasing": bool(np.all(differences >= -tolerance)),
+            "overall_increased": bool(last_error > first_error + tolerance),
+            "nondecreasing_adjacent_fraction": float(nondecreasing_count / max(adjacent_count, 1)),
+            "strictly_increasing_adjacent_fraction": float(strictly_increasing_count / max(adjacent_count, 1)),
+            "nondecreasing_adjacent_count": nondecreasing_count,
+            "adjacent_pair_count": adjacent_count,
+            "spearman_horizon_error": correlation,
+            "ols_slope_per_step": slope,
+            "first_error": first_error,
+            "last_error": last_error,
+            "last_minus_first": float(last_error - first_error),
+            "last_over_first": float(last_over_first) if last_over_first is not None else None,
+        }
+    return result
+
+
 def _metric_row(
     pred_z: np.ndarray,
     target_z: np.ndarray,

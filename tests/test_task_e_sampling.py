@@ -4,10 +4,25 @@ import unittest
 
 import numpy as np
 
-from tasks.task_e.data import cap_train_variations_per_system
+from tasks.task_e.data import cap_train_variations_per_system, cap_variations_per_system
 
 
 class TaskESamplingTest(unittest.TestCase):
+    def test_global_variation_cap_selects_two_per_system_reproducibly(self) -> None:
+        indices = np.concatenate(
+            [np.arange(system * 32, system * 32 + 32, dtype=np.int64) for system in range(4)]
+        )
+        sampled = cap_variations_per_system(
+            indices, max_variations_per_system=2, group_size=32, seed=42
+        )
+        repeated = cap_variations_per_system(
+            indices, max_variations_per_system=2, group_size=32, seed=42
+        )
+
+        self.assertEqual(len(sampled), 8)
+        self.assertTrue(all(np.count_nonzero(sampled // 32 == system) == 2 for system in range(4)))
+        np.testing.assert_array_equal(sampled, repeated)
+
     def test_one_variation_per_system_is_reproducible(self) -> None:
         splits = {
             "train": np.array([0, 1, 2, 3, 32, 33, 34, 64, 65], dtype=np.int64),

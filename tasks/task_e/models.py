@@ -167,7 +167,7 @@ def build_supervised_model(
             num_features, context_len, pred_len, patch_len, patch_stride,
             d_model, n_heads, num_layers, dropout,
         )
-    if model_name in {"itransformer", "itransformer_simple"}:
+    if model_name == "itransformer":
         return ITransformerSimple(
             num_features, context_len, pred_len, d_model, n_heads, num_layers, dropout
         )

@@ -78,6 +78,70 @@ def linear_resample_weight(in_len: int, out_len: int) -> torch.Tensor:
     return weight
 
 
+class GRUForecastDecoder(nn.Module):
+    """Encode a foundation forecast and decode an arbitrary output horizon."""
+
+    def __init__(
+        self,
+        num_features: int,
+        hidden_len: int,
+        num_layers: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.num_features = int(num_features)
+        self.hidden_len = int(hidden_len)
+        self.num_layers = int(num_layers)
+        if self.num_features <= 0:
+            raise ValueError(f"num_features must be positive, got {self.num_features}.")
+        if self.hidden_len <= 0:
+            raise ValueError(f"hidden_len must be positive, got {self.hidden_len}.")
+        if self.num_layers <= 0:
+            raise ValueError(f"num_layers must be positive, got {self.num_layers}.")
+        gru_dropout = float(dropout) if self.num_layers > 1 else 0.0
+        self.encoder = nn.GRU(
+            input_size=self.num_features,
+            hidden_size=self.hidden_len,
+            num_layers=self.num_layers,
+            dropout=gru_dropout,
+            batch_first=True,
+        )
+        self.decoder = nn.GRU(
+            input_size=self.num_features + 1,
+            hidden_size=self.hidden_len,
+            num_layers=self.num_layers,
+            dropout=gru_dropout,
+            batch_first=True,
+        )
+        self.output = nn.Linear(self.hidden_len, self.num_features)
+
+    def forward(self, foundation_prediction: torch.Tensor, output_len: int) -> torch.Tensor:
+        if foundation_prediction.ndim != 3:
+            raise ValueError(
+                f"Expected foundation prediction [B, T, C], got {tuple(foundation_prediction.shape)}."
+            )
+        output_len = int(output_len)
+        if output_len <= 0:
+            raise ValueError(f"output_len must be positive, got {output_len}.")
+        batch, _, channels = foundation_prediction.shape
+        if channels != self.num_features:
+            raise ValueError(
+                f"GRU decoder expected {self.num_features} channels, got {channels}."
+            )
+        _, hidden = self.encoder(foundation_prediction)
+        last_value = foundation_prediction[:, -1:, :].expand(-1, output_len, -1)
+        time_query = torch.linspace(
+            0.0,
+            1.0,
+            output_len,
+            device=foundation_prediction.device,
+            dtype=foundation_prediction.dtype,
+        ).view(1, output_len, 1).expand(batch, -1, -1)
+        decoder_input = torch.cat([last_value, time_query], dim=-1)
+        decoded, _ = self.decoder(decoder_input, hidden)
+        return self.output(decoded)
+
+
 class PandaTemporalAdapter(nn.Module):
     def __init__(
         self,
@@ -89,13 +153,41 @@ class PandaTemporalAdapter(nn.Module):
         hidden_len: int | None,
         dropout: float,
         freeze_panda: bool,
+        decoder: str = "mlp",
+        num_features: int | None = None,
+        gru_layers: int = 1,
     ) -> None:
         super().__init__()
         self.pre = TemporalMLPAdapter(input_len, panda_context_len, hidden_len=hidden_len, dropout=dropout)
         self.panda = panda
-        self.post = TemporalMLPAdapter(panda_pred_len, output_len, hidden_len=hidden_len, dropout=dropout)
+        self.decoder_type = str(decoder).lower()
+        if self.decoder_type not in {"mlp", "gru"}:
+            raise ValueError(f"decoder must be 'mlp' or 'gru', got {decoder!r}.")
+        self.output_len = int(output_len)
+        if self.output_len <= 0:
+            raise ValueError(f"output_len must be positive, got {self.output_len}.")
         self.panda_pred_len = int(panda_pred_len)
         self.freeze_panda = bool(freeze_panda)
+        self.num_features = int(
+            num_features or getattr(getattr(panda, "config", None), "num_input_channels", 0)
+        )
+        self.gru_layers = int(gru_layers)
+        if self.decoder_type == "mlp":
+            self.post: nn.Module | None = TemporalMLPAdapter(
+                panda_pred_len, self.output_len, hidden_len=hidden_len, dropout=dropout
+            )
+            self.gru_decoder: GRUForecastDecoder | None = None
+        else:
+            if self.num_features <= 0:
+                raise ValueError("GRU decoder requires a positive num_features value.")
+            gru_hidden_len = int(hidden_len or max(32, panda_pred_len, self.output_len))
+            self.post = None
+            self.gru_decoder = GRUForecastDecoder(
+                num_features=self.num_features,
+                hidden_len=gru_hidden_len,
+                num_layers=self.gru_layers,
+                dropout=dropout,
+            )
 
         if freeze_panda:
             for parameter in self.panda.parameters():
@@ -108,7 +200,10 @@ class PandaTemporalAdapter(nn.Module):
             self.panda.eval()
         return self
 
-    def forward(self, context: torch.Tensor) -> torch.Tensor:
+    def forward(self, context: torch.Tensor, output_len: int | None = None) -> torch.Tensor:
+        requested_len = self.output_len if output_len is None else int(output_len)
+        if requested_len <= 0:
+            raise ValueError(f"output_len must be positive, got {requested_len}.")
         adapted_context = self.pre(context)
         panda_context = adapted_context.float()
         observed = torch.ones_like(panda_context, dtype=torch.bool)
@@ -121,11 +216,26 @@ class PandaTemporalAdapter(nn.Module):
                 future_values=None,
             )
         panda_prediction = outputs.prediction_outputs.to(dtype=adapted_context.dtype)
+        if panda_prediction.ndim != 3:
+            raise ValueError(
+                f"Panda returned shape {tuple(panda_prediction.shape)}, expected [B, T, C]."
+            )
         if panda_prediction.shape[1] != self.panda_pred_len:
             raise ValueError(
                 f"Panda returned prediction length {panda_prediction.shape[1]}, expected {self.panda_pred_len}."
             )
-        return self.post(panda_prediction)
+        if self.decoder_type == "mlp":
+            if requested_len != self.output_len:
+                raise ValueError(
+                    "The MLP adapter decoder has a fixed output length; use decoder='gru' "
+                    "to request arbitrary output_len values."
+                )
+            if self.post is None:
+                raise RuntimeError("MLP adapter decoder was not initialized.")
+            return self.post(panda_prediction)
+        if self.gru_decoder is None:
+            raise RuntimeError("GRU adapter decoder was not initialized.")
+        return self.gru_decoder(panda_prediction, requested_len)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -154,6 +264,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--adapter-hidden-len", type=int, default=None)
     parser.add_argument("--adapter-dropout", type=float, default=0.0)
+    parser.add_argument(
+        "--adapter-decoder",
+        "--adapter_decoder",
+        dest="adapter_decoder",
+        choices=["mlp", "gru"],
+        default="mlp",
+        help="Temporal adapter decoder. GRU supports requesting arbitrary output lengths at inference.",
+    )
+    parser.add_argument("--adapter-gru-layers", "--adapter_gru_layers", dest="adapter_gru_layers", type=int, default=1)
     parser.add_argument("--freeze-panda", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
@@ -214,6 +333,9 @@ def main() -> None:
         hidden_len=args.adapter_hidden_len,
         dropout=args.adapter_dropout,
         freeze_panda=args.freeze_panda,
+        decoder=args.adapter_decoder,
+        num_features=len(data.channel_names),
+        gru_layers=args.adapter_gru_layers,
     ).to(device)
 
     train_loader, val_loader, test_loader, split_counts = build_loaders(
@@ -249,6 +371,8 @@ def main() -> None:
         "weight_decay": args.weight_decay,
         "adapter_hidden_len": args.adapter_hidden_len,
         "adapter_dropout": args.adapter_dropout,
+        "adapter_decoder": args.adapter_decoder,
+        "adapter_gru_layers": args.adapter_gru_layers,
         "freeze_panda": args.freeze_panda,
         "amp": args.amp,
         "amp_enabled": amp_enabled,

@@ -30,20 +30,17 @@ from tasks.task_e.foundation import (  # noqa: E402
     build_panda_predictor,
     build_timesfm_predictor,
     is_chronos2_model,
-    patch_timesfm_2p5_init,
-    resolve_torch_dtype,
 )
 from tasks.task_e.data import PreparedForecastData, prepare_forecasting_data  # noqa: E402
-from tasks.task_e.metrics import compute_forecast_metrics, save_rows  # noqa: E402
+from tasks.task_e.metrics import compute_forecast_metrics, save_rows, summarize_horizon_trends  # noqa: E402
 from tasks.task_e.models import build_supervised_model  # noqa: E402
 from tasks.task_e.panda_dependency import panda_dependency_metadata  # noqa: E402
 
 
-SUPERVISED_MODELS = {"tcn", "patchtst", "transformer", "itransformer", "itransformer_simple"}
+SUPERVISED_MODELS = {"tcn", "patchtst", "transformer", "itransformer"}
 FOUNDATION_MODELS = {"timesfm", "chronos", "panda_zero_shot"}
-ADAPTER_MODELS = {"panda_adapter", "chronos_adapter", "timesfm_adapter"}
+ADAPTER_MODELS = {"panda_adapter"}
 ALL_MODELS = {
-    "persistence",
     "ridge",
     *SUPERVISED_MODELS,
     *FOUNDATION_MODELS,
@@ -59,7 +56,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=["orbital15", "raw_state18", "trajectory"],
         default="orbital15",
     )
-    parser.add_argument("--model", choices=sorted(ALL_MODELS), default="persistence")
+    parser.add_argument("--model", choices=sorted(ALL_MODELS), default="ridge")
     parser.add_argument("--context_len", type=int, default=200)
     parser.add_argument("--pred_len", type=int, default=50)
     parser.add_argument("--stride", type=int, default=20)
@@ -82,13 +79,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--val_frac", type=float, default=0.15)
     parser.add_argument("--max_trajectories", type=int, default=0)
     parser.add_argument(
+        "--max_variations_per_system",
+        type=int,
+        default=0,
+        help=(
+            "Randomly keep at most this many eligible trajectories from every grouped "
+            "system before train/validation/test splitting (0 keeps all eligible variations)."
+        ),
+    )
+    parser.add_argument(
         "--max_train_variations_per_system",
         type=int,
         default=0,
         help=(
             "Randomly keep at most this many training trajectories from each grouped "
-            "system (0 keeps all training variations). Use 1 for one variation per "
-            "32-variation system; validation/test variations are unchanged."
+            "system after splitting (0 keeps all training variations)."
         ),
     )
     parser.add_argument("--max_windows_per_trajectory", type=int, default=0)
@@ -119,7 +124,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_eval_windows", type=int, default=256)
     parser.add_argument("--foundation_batch_size", type=int, default=64)
     parser.add_argument("--timesfm_model_id", type=str, default="google/timesfm-2.5-200m-pytorch")
-    parser.add_argument("--timesfm_backend", type=str, default="auto")
     parser.add_argument("--chronos_model_id", type=str, default="amazon/chronos-bolt-small")
     parser.add_argument("--chronos_variant", choices=["bolt", "chronos2"], default="bolt")
     parser.add_argument("--chronos_num_samples", type=int, default=20)
@@ -128,13 +132,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapter_hidden_dim", type=int, default=None)
     parser.add_argument("--adapter_dropout", type=float, default=0.0)
     parser.add_argument("--adapter_lr", type=float, default=1e-4)
-    parser.add_argument("--adapter_chunk_size", type=int, default=4096)
-    parser.add_argument("--adapter_backbone_input_clip", type=float, default=20.0)
-    parser.add_argument("--chronos_adapter_train_pre", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--chronos_adapter_context_len", type=int, default=512)
-    parser.add_argument("--chronos_adapter_pred_len", type=int, default=0)
-    parser.add_argument("--timesfm_adapter_context_len", type=int, default=512)
-    parser.add_argument("--timesfm_adapter_pred_len", type=int, default=64)
+    parser.add_argument(
+        "--adapter_decoder",
+        "--adapter-decoder",
+        dest="adapter_decoder",
+        choices=["mlp", "gru"],
+        default="mlp",
+        help="Panda adapter decoder; GRU supports arbitrary output_len at model inference.",
+    )
+    parser.add_argument("--adapter_gru_layers", "--adapter-gru-layers", dest="adapter_gru_layers", type=int, default=1)
     parser.add_argument("--num_train_windows_for_adapter", type=int, default=4096)
     parser.add_argument(
         "--hf-local-files-only",
@@ -200,6 +206,7 @@ def main() -> None:
         train_frac=args.train_frac,
         val_frac=args.val_frac,
         max_trajectories=args.max_trajectories,
+        max_variations_per_system=args.max_variations_per_system,
         max_train_variations_per_system=args.max_train_variations_per_system,
         max_windows_per_trajectory=args.max_windows_per_trajectory,
         window_sampling=args.window_sampling,
@@ -257,12 +264,7 @@ def main() -> None:
         for name, dataset in datasets.items()
     }
 
-    if args.model == "persistence":
-        print("[task_e] running persistence validation/test prediction", flush=True)
-        predictor = lambda context: context[:, -1:, :].repeat(1, args.pred_len, 1)
-        val_pred, val_target, _ = predict_torch_callable(predictor, loaders["val"], device)
-        test_pred, test_target, sample_context = predict_torch_callable(predictor, loaders["test"], device)
-    elif args.model == "ridge":
+    if args.model == "ridge":
         print("[task_e] materializing train windows for ridge", flush=True)
         ridge = Ridge(alpha=args.ridge_alpha)
         train_context, train_target = materialize_dataset(loaders["train"])
@@ -310,17 +312,6 @@ def main() -> None:
             print(f"[task_e] evaluating checkpoint {checkpoint_path}", flush=True)
         else:
             train_model(model, loaders, args, config, prepared, device, amp_enabled, lr=args.adapter_lr)
-        val_pred, val_target, _ = predict_model(
-            model, loaders["val"], device, amp_enabled, args.log_every_batches, "val"
-        )
-        test_pred, test_target, sample_context = predict_model(
-            model, loaders["test"], device, amp_enabled, args.log_every_batches, "test"
-        )
-    elif args.model in {"chronos_adapter", "timesfm_adapter"}:
-        print(f"[task_e] loading {args.model} model", flush=True)
-        model = build_univariate_foundation_adapter(args, num_features, device)
-        save_model_config(args.output_dir, config, model)
-        train_model(model, loaders, args, config, prepared, device, amp_enabled, lr=args.adapter_lr)
         val_pred, val_target, _ = predict_model(
             model, loaders["val"], device, amp_enabled, args.log_every_batches, "val"
         )
@@ -397,13 +388,6 @@ def build_config(
     elif args.model in ADAPTER_MODELS:
         model_family, training_mode = "foundation_adapter", "adapter_supervised"
     adapter_gradient_note = None
-    if args.model == "timesfm_adapter":
-        adapter_gradient_note = "TimesFM 2.5 forecast API is a frozen inference bridge; only post adapter is trainable."
-    if args.model == "chronos_adapter" and not args.chronos_adapter_train_pre:
-        adapter_gradient_note = (
-            "Chronos-Bolt differentiable path produced non-finite gradients on this task; "
-            "only post adapter is trainable by default."
-        )
     config = {
         **vars(args),
         "output_dir": str(args.output_dir),
@@ -661,8 +645,6 @@ def checkpoint_state_dict(model: nn.Module) -> tuple[dict[str, torch.Tensor], li
     backbone = str(metadata.get("backbone", ""))
     prefix_map = {
         "panda": ["panda."],
-        "chronos_bolt": ["chronos."],
-        "timesfm_2p5": ["timesfm."],
     }
     excluded = prefix_map.get(backbone, [])
     state = {
@@ -716,21 +698,6 @@ def predict_model(
                 f"elapsed={elapsed:.1f}s eta={format_duration(eta)}",
                 flush=True,
             )
-    return concatenate_predictions(predictions, targets, contexts)
-
-
-@torch.no_grad()
-def predict_torch_callable(
-    predictor: Callable[[torch.Tensor], torch.Tensor],
-    loader: DataLoader,
-    device: torch.device,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    predictions, targets, contexts = [], [], []
-    for batch in loader:
-        context = batch["context"].to(device)
-        predictions.append(predictor(context).detach().cpu().numpy())
-        targets.append(batch["target"].numpy())
-        contexts.append(batch["context"].numpy())
     return concatenate_predictions(predictions, targets, contexts)
 
 
@@ -829,48 +796,6 @@ def predict_foundation(
     return concatenate_predictions(predictions, targets, contexts)
 
 
-def assert_context_shape(
-    context: torch.Tensor,
-    expected_context_len: int,
-    expected_channels: int,
-    label: str,
-) -> tuple[int, int, int]:
-    if context.ndim != 3:
-        raise ValueError(f"{label} expected context [B, T, C], got {tuple(context.shape)}.")
-    batch, context_len, channels = context.shape
-    if context_len != expected_context_len:
-        raise ValueError(
-            f"{label} expected context_len={expected_context_len}, got {context_len}."
-        )
-    if channels != expected_channels:
-        raise ValueError(f"{label} expected channels={expected_channels}, got {channels}.")
-    return int(batch), int(context_len), int(channels)
-
-
-def assert_flat_backbone_shape(
-    prediction: torch.Tensor,
-    expected_batch: int,
-    expected_pred_len: int,
-    label: str,
-) -> None:
-    expected = (expected_batch, expected_pred_len, 1)
-    if tuple(prediction.shape) != expected:
-        raise ValueError(f"{label} backbone returned {tuple(prediction.shape)}, expected {expected}.")
-
-
-def assert_prediction_shape(
-    prediction: torch.Tensor,
-    batch: int,
-    pred_len: int,
-    channels: int,
-    label: str,
-) -> torch.Tensor:
-    expected = (batch, pred_len, channels)
-    if tuple(prediction.shape) != expected:
-        raise ValueError(f"{label} returned {tuple(prediction.shape)}, expected {expected}.")
-    return prediction
-
-
 def log_parameter_counts(model: nn.Module) -> None:
     total = sum(parameter.numel() for parameter in model.parameters())
     trainable = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
@@ -880,311 +805,6 @@ def log_parameter_counts(model: nn.Module) -> None:
         flush=True,
     )
 
-
-class ChronosAdapterForecaster(nn.Module):
-    def __init__(
-        self,
-        pipeline: Any,
-        input_len: int,
-        output_len: int,
-        channels: int,
-        backbone_context_len: int,
-        backbone_pred_len: int,
-        hidden_len: int | None,
-        dropout: float,
-        chunk_size: int,
-        input_clip: float,
-        train_pre: bool,
-    ) -> None:
-        super().__init__()
-        from tasks.task_e.panda_adapter import TemporalMLPAdapter
-
-        if not hasattr(pipeline, "model") or not hasattr(pipeline.model, "chronos_config"):
-            raise ValueError("chronos_adapter requires a Chronos-Bolt pipeline with a torch model.")
-        self.pre = TemporalMLPAdapter(input_len, backbone_context_len, hidden_len=hidden_len, dropout=dropout)
-        self.pipeline = pipeline
-        self.chronos = pipeline.model
-        self.post = TemporalMLPAdapter(backbone_pred_len, output_len, hidden_len=hidden_len, dropout=dropout)
-        self.input_len = int(input_len)
-        self.output_len = int(output_len)
-        self.channels = int(channels)
-        self.backbone_context_len = int(backbone_context_len)
-        self.backbone_pred_len = int(backbone_pred_len)
-        self.chunk_size = int(max(chunk_size, 1))
-        self.input_clip = float(input_clip)
-        self.train_pre = bool(train_pre)
-        self.median_index = self._resolve_median_index()
-        self._warned_nonfinite_backbone = False
-        self.adapter_metadata = {
-            "backbone": "chronos_bolt",
-            "input_len": self.input_len,
-            "output_len": self.output_len,
-            "channels": self.channels,
-            "backbone_context_len": self.backbone_context_len,
-            "backbone_pred_len": self.backbone_pred_len,
-            "adapter_chunk_size": self.chunk_size,
-            "backbone_input_clip": self.input_clip,
-            "pre_adapter_trainable": self.train_pre,
-            "post_adapter_trainable": True,
-            "backbone_trainable": False,
-            "gradient_limitation": None
-            if self.train_pre
-            else (
-                "Chronos-Bolt differentiable path produced non-finite gradients on this task; "
-                "pre adapter is frozen linear resampling and only post adapter is trained."
-            ),
-        }
-
-        model_pred_len = int(getattr(self.pipeline, "model_prediction_length", self.backbone_pred_len))
-        if self.backbone_pred_len > model_pred_len:
-            raise ValueError(
-                f"chronos_adapter_pred_len={self.backbone_pred_len} exceeds Chronos-Bolt "
-                f"single-pass prediction length {model_pred_len}."
-            )
-        for parameter in self.chronos.parameters():
-            parameter.requires_grad = False
-        if not self.train_pre:
-            for parameter in self.pre.parameters():
-                parameter.requires_grad = False
-        self.chronos.eval()
-
-    def train(self, mode: bool = True) -> "ChronosAdapterForecaster":
-        super().train(mode)
-        self.chronos.eval()
-        return self
-
-    def forward(self, context: torch.Tensor) -> torch.Tensor:
-        batch, context_len, channels = assert_context_shape(
-            context, self.input_len, self.channels, "chronos_adapter"
-        )
-        if self.train_pre:
-            flat = context.transpose(1, 2).reshape(batch * channels, context_len, 1)
-            adapted = self.pre(flat).squeeze(-1)
-        else:
-            with torch.no_grad():
-                flat = context.transpose(1, 2).reshape(batch * channels, context_len, 1)
-                adapted = self.pre(flat).squeeze(-1)
-        if self.input_clip > 0:
-            adapted = adapted.clamp(-self.input_clip, self.input_clip)
-        chunks = []
-        for start in range(0, adapted.shape[0], self.chunk_size):
-            chunk = adapted[start : start + self.chunk_size].float()
-            if self.train_pre:
-                outputs = self.chronos(context=chunk)
-            else:
-                with torch.no_grad():
-                    outputs = self.chronos(context=chunk)
-            quantiles = outputs.quantile_preds
-            if quantiles.ndim != 3:
-                raise ValueError(f"Chronos returned shape {tuple(quantiles.shape)}, expected [N, Q, T].")
-            point = quantiles[:, self.median_index, : self.backbone_pred_len]
-            if not torch.isfinite(point).all():
-                if not self._warned_nonfinite_backbone:
-                    print(
-                        "Chronos backbone returned non-finite values; replacing NaN/Inf with finite values.",
-                        flush=True,
-                    )
-                    self._warned_nonfinite_backbone = True
-                finite_bound = self.input_clip if self.input_clip > 0 else 1e6
-                point = torch.nan_to_num(point, nan=0.0, posinf=finite_bound, neginf=-finite_bound)
-            chunks.append(point.to(dtype=adapted.dtype, device=adapted.device))
-        backbone_prediction = torch.cat(chunks, dim=0).unsqueeze(-1)
-        assert_flat_backbone_shape(
-            backbone_prediction, batch * channels, self.backbone_pred_len, "chronos_adapter"
-        )
-        prediction = self.post(backbone_prediction)
-        prediction = prediction.squeeze(-1).reshape(batch, channels, self.output_len).transpose(1, 2)
-        return assert_prediction_shape(prediction, batch, self.output_len, channels, "chronos_adapter")
-
-    def _resolve_median_index(self) -> int:
-        quantiles = list(getattr(self.pipeline, "quantiles", []))
-        if 0.5 in quantiles:
-            return int(quantiles.index(0.5))
-        if quantiles:
-            return len(quantiles) // 2
-        return 0
-
-
-class TimesFMAdapterForecaster(nn.Module):
-    def __init__(
-        self,
-        model: Any,
-        input_len: int,
-        output_len: int,
-        channels: int,
-        backbone_context_len: int,
-        backbone_pred_len: int,
-        hidden_len: int | None,
-        dropout: float,
-        chunk_size: int,
-    ) -> None:
-        super().__init__()
-        from tasks.task_e.panda_adapter import TemporalMLPAdapter
-
-        self.pre = TemporalMLPAdapter(input_len, backbone_context_len, hidden_len=hidden_len, dropout=dropout)
-        self.timesfm = model
-        self.post = TemporalMLPAdapter(backbone_pred_len, output_len, hidden_len=hidden_len, dropout=dropout)
-        self.input_len = int(input_len)
-        self.output_len = int(output_len)
-        self.channels = int(channels)
-        self.backbone_context_len = int(backbone_context_len)
-        self.backbone_pred_len = int(backbone_pred_len)
-        self.chunk_size = int(max(chunk_size, 1))
-        self.adapter_metadata = {
-            "backbone": "timesfm_2p5",
-            "input_len": self.input_len,
-            "output_len": self.output_len,
-            "channels": self.channels,
-            "backbone_context_len": self.backbone_context_len,
-            "backbone_pred_len": self.backbone_pred_len,
-            "adapter_chunk_size": self.chunk_size,
-            "pre_adapter_trainable": False,
-            "post_adapter_trainable": True,
-            "backbone_trainable": False,
-            "gradient_limitation": (
-                "TimesFM 2.5 forecast uses detached NumPy/no_grad inference; "
-                "pre adapter remains frozen linear resampling."
-            ),
-        }
-
-        # TimesFM 2.5's public forecast path converts tensors to detached NumPy,
-        # so the pre adapter is a frozen learned-initialized resampler and only
-        # the post adapter receives gradients in this baseline.
-        for parameter in self.pre.parameters():
-            parameter.requires_grad = False
-        inner_model = getattr(self.timesfm, "model", None)
-        if isinstance(inner_model, nn.Module):
-            for parameter in inner_model.parameters():
-                parameter.requires_grad = False
-            inner_model.eval()
-
-    def train(self, mode: bool = True) -> "TimesFMAdapterForecaster":
-        super().train(mode)
-        inner_model = getattr(self.timesfm, "model", None)
-        if isinstance(inner_model, nn.Module):
-            inner_model.eval()
-        return self
-
-    def forward(self, context: torch.Tensor) -> torch.Tensor:
-        batch, context_len, channels = assert_context_shape(
-            context, self.input_len, self.channels, "timesfm_adapter"
-        )
-        flat = context.transpose(1, 2).reshape(batch * channels, context_len, 1)
-        with torch.no_grad():
-            adapted = self.pre(flat).squeeze(-1)
-            chunks = []
-            for start in range(0, adapted.shape[0], self.chunk_size):
-                chunk = adapted[start : start + self.chunk_size].detach().cpu().float().numpy()
-                point_forecast, _ = self.timesfm.forecast(
-                    horizon=self.backbone_pred_len,
-                    inputs=[row.astype(np.float32) for row in chunk],
-                )
-                point = np.asarray(point_forecast, dtype=np.float32)[:, : self.backbone_pred_len]
-                chunks.append(torch.as_tensor(point, dtype=context.dtype, device=context.device))
-            backbone_prediction = torch.cat(chunks, dim=0).unsqueeze(-1)
-        assert_flat_backbone_shape(
-            backbone_prediction, batch * channels, self.backbone_pred_len, "timesfm_adapter"
-        )
-        prediction = self.post(backbone_prediction)
-        prediction = prediction.squeeze(-1).reshape(batch, channels, self.output_len).transpose(1, 2)
-        return assert_prediction_shape(prediction, batch, self.output_len, channels, "timesfm_adapter")
-
-
-def build_univariate_foundation_adapter(
-    args: argparse.Namespace,
-    num_features: int,
-    device: torch.device,
-) -> nn.Module:
-    if args.model == "chronos_adapter":
-        return build_chronos_adapter(args, num_features, device)
-    if args.model == "timesfm_adapter":
-        return build_timesfm_adapter(args, num_features, device)
-    raise ValueError(args.model)
-
-
-def build_chronos_adapter(args: argparse.Namespace, num_features: int, device: torch.device) -> nn.Module:
-    try:
-        from chronos import ChronosBoltPipeline
-    except ImportError as exc:
-        raise ImportError(
-            "Chronos is not installed. Install it with: "
-            "pip install git+https://github.com/amazon-science/chronos-forecasting.git"
-        ) from exc
-
-    pipeline_kwargs: dict[str, Any] = {"device_map": str(device)}
-    dtype = torch.float32 if args.torch_dtype == "auto" else resolve_torch_dtype(args.torch_dtype, str(device))
-    if dtype is not None:
-        pipeline_kwargs["dtype"] = dtype
-    pipeline = ChronosBoltPipeline.from_pretrained(
-        args.chronos_model_id,
-        local_files_only=args.hf_local_files_only,
-        **pipeline_kwargs,
-    )
-    model_pred_len = int(getattr(pipeline, "model_prediction_length", 64))
-    backbone_pred_len = int(args.chronos_adapter_pred_len or model_pred_len)
-    model = ChronosAdapterForecaster(
-        pipeline=pipeline,
-        input_len=args.context_len,
-        output_len=args.pred_len,
-        channels=num_features,
-        backbone_context_len=args.chronos_adapter_context_len,
-        backbone_pred_len=backbone_pred_len,
-        hidden_len=args.adapter_hidden_dim,
-        dropout=args.adapter_dropout,
-        chunk_size=args.adapter_chunk_size,
-        input_clip=args.adapter_backbone_input_clip,
-        train_pre=args.chronos_adapter_train_pre,
-    ).to(device)
-    print(
-        f"chronos_adapter shapes: [B,{args.context_len},{num_features}] -> "
-        f"[B*{num_features},{args.chronos_adapter_context_len}] -> "
-        f"[B*{num_features},{backbone_pred_len}] -> [B,{args.pred_len},{num_features}]",
-        flush=True,
-    )
-    return model
-
-
-def build_timesfm_adapter(args: argparse.Namespace, num_features: int, device: torch.device) -> nn.Module:
-    try:
-        import timesfm  # type: ignore
-    except ImportError as exc:
-        raise ImportError(
-            "TimesFM is not installed. Install the official package, for example: "
-            "pip install git+https://github.com/google-research/timesfm.git"
-        ) from exc
-    if not hasattr(timesfm, "TimesFM_2p5_200M_torch"):
-        raise RuntimeError("timesfm_adapter requires the TimesFM 2.5 PyTorch API.")
-
-    model_cls = timesfm.TimesFM_2p5_200M_torch
-    patch_timesfm_2p5_init(model_cls)
-    model = model_cls.from_pretrained(args.timesfm_model_id, local_files_only=args.hf_local_files_only)
-    if hasattr(model, "to"):
-        model = model.to(str(device))
-    model.compile(
-        timesfm.ForecastConfig(
-            max_context=args.timesfm_adapter_context_len,
-            max_horizon=args.timesfm_adapter_pred_len,
-            per_core_batch_size=max(1, min(args.adapter_chunk_size, args.batch_size * num_features)),
-        )
-    )
-    adapter = TimesFMAdapterForecaster(
-        model=model,
-        input_len=args.context_len,
-        output_len=args.pred_len,
-        channels=num_features,
-        backbone_context_len=args.timesfm_adapter_context_len,
-        backbone_pred_len=args.timesfm_adapter_pred_len,
-        hidden_len=args.adapter_hidden_dim,
-        dropout=args.adapter_dropout,
-        chunk_size=args.adapter_chunk_size,
-    ).to(device)
-    print(
-        f"timesfm_adapter shapes: [B,{args.context_len},{num_features}] -> "
-        f"[B*{num_features},{args.timesfm_adapter_context_len}] -> "
-        f"[B*{num_features},{args.timesfm_adapter_pred_len}] -> [B,{args.pred_len},{num_features}]",
-        flush=True,
-    )
-    return adapter
 
 
 def build_panda_adapter(args: argparse.Namespace, num_features: int, device: torch.device) -> nn.Module:
@@ -1220,6 +840,9 @@ def build_panda_adapter(args: argparse.Namespace, num_features: int, device: tor
         hidden_len=args.adapter_hidden_dim,
         dropout=args.adapter_dropout,
         freeze_panda=args.freeze_panda,
+        decoder=getattr(args, "adapter_decoder", "mlp"),
+        num_features=num_features,
+        gru_layers=int(getattr(args, "adapter_gru_layers", 1)),
     ).to(device)
     adapter.adapter_metadata = {
         "backbone": "panda",
@@ -1227,6 +850,10 @@ def build_panda_adapter(args: argparse.Namespace, num_features: int, device: tor
         "backbone_trainable": not args.freeze_panda,
         "pre_adapter_trainable": True,
         "post_adapter_trainable": True,
+        "decoder": getattr(args, "adapter_decoder", "mlp"),
+        "output_len": args.pred_len,
+        "num_features": num_features,
+        "gru_layers": int(getattr(args, "adapter_gru_layers", 1)),
     }
     return adapter
 
@@ -1250,7 +877,10 @@ def save_evaluation(
         distribution_bins=distribution_bins,
         distribution_epsilon=distribution_epsilon,
     )
+    horizon_trend = summarize_horizon_trends(horizon_rows)
+    metrics["horizon_trend"] = horizon_trend
     save_json(output_dir / f"{split}_metrics.json", metrics)
+    save_json(output_dir / f"{split}_horizon_trend.json", horizon_trend)
     if save_detail:
         save_rows(output_dir / "horizon_metrics.csv", horizon_rows)
         save_rows(output_dir / "channel_metrics.csv", channel_rows)
