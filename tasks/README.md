@@ -171,10 +171,14 @@ variations before applying the same direct curve model and loss.
 
 All Task C neural models use a discrete-time hazard head. The network predicts
 conditional failure hazards for the future intervals, and the survival curve is
-the cumulative product of one minus those hazards. `traj` and `dual` optimize a
-variation-level masked hazard negative log-likelihood. `direct` and
-`direct_mean_std` optimize the corresponding interval-count binomial hazard
-negative log-likelihood from the aggregated 32-variation survival fractions.
+the cumulative product of one minus those hazards. `traj` and `dual` now have
+two heads: a variation-level head and a direct system-level head. Their joint
+objective combines the variation-level masked hazard negative log-likelihood,
+the system-level binomial hazard negative log-likelihood, and a consistency
+penalty between the system head and the mean variation-head survival curve.
+`direct` and `direct_mean_std` continue to optimize the interval-count binomial
+hazard negative log-likelihood from the aggregated 32-variation survival
+fractions.
 
 For the initial-condition control experiment, use `--input-mode initial
 --models baseline,ic_mlp`. It reads one `orbital15` vector at `t=0` per system
@@ -188,6 +192,31 @@ The run saves five result figures:
 - `figure_3_per_horizon_mae.png`: model comparison at each horizon
 - `figure_4_q_pred_vs_true.png`: predicted versus true `q` at `t=10000`
 - `figure_5_survival_heatmaps.png`: true, predicted, and absolute-error heatmaps
+
+For the prefix/variation-count ablation, run the reproducible grid driver:
+
+```bash
+conda run -n stellar python -m tasks.task_c.ablation \
+  --output-dir results/task_c_ablation \
+  --prefix-lens 10,20,50,100 \
+  --variation-counts 2,4,8,16,32 \
+  --models baseline,direct,traj,dual \
+  --prefix-representation orbital15 \
+  --variation-target full32 \
+  --device cuda
+```
+
+The ablation uses balanced nested variation subsets and predicts the full
+32-variation system fraction (`q_32`) from each subset. The default
+`orbital15` representation keeps the grid comparable to the earlier Task C
+notebook and avoids loading the large geometry/full-stack arrays. Each cell is saved
+under `prefix_<T>/variations_<N>/`, with the grid
+summary in `summary.csv`. Existing cells with `metrics.json` are skipped so the
+grid can be resumed; pass `--force` to rerun them. The runner first builds a
+shared prefix cache under `results/task_c_ablation/_cache`; use `--cache-dir`
+to put this cache on a faster local disk and `--rebuild-cache` to recreate it.
+The horizons stay on the original `time_unbound` absolute time axis; the
+trajectory sampling clock uses different units and is not added to the horizons.
 
 ## Task D
 

@@ -358,7 +358,9 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 
 - 输出每个未来区间的条件失稳 hazard
 - survival curve 通过 `cumprod(1 - sigmoid(hazard_logits))` 构造，因此严格单调不增
-- `traj` / `dual` 使用逐 variation、仅在 at-risk 区间计算的 hazard NLL
+- `traj` / `dual` 同时输出逐 variation survival curve 和 system-level survival curve
+- `traj` / `dual` 的 variation head 使用逐 variation、仅在 at-risk 区间计算的 hazard NLL；system head 使用 binomial hazard NLL
+- 训练时额外使用 system head 与 variation survival 均值之间的一致性损失
 - `direct` / `direct_mean_std` 使用由 32 条 variation 的区间存活数和失稳数得到的 binomial hazard NLL
 
 运行后会生成平均 survival curve、代表性 case、per-horizon MAE、`q_pred` vs `q_true` scatter，以及 true/pred/error heatmap 五张结果图。
@@ -366,6 +368,8 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 这是最强调 perturbation-set 结构的任务。
 
 **实验结果**
+
+下面的 prefix 表格来自双头改造之前的 single-head 运行；代码结构更新后需要重新运行，不能直接把这些数值当作双头模型结果。
 
 总体 MAE 对所有预测时间点取平均；Final MAE 对应 \(t=10000\)。
 Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
@@ -849,7 +853,30 @@ future horizons、system split、hazard head 和评估指标。
 - `--future-times`: 修改 survival curve 的评估 horizons
 - `--models baseline,direct,direct_mean_std,traj,dual`: 选择要跑的模型
 - `--encoder-type cnn|gru|attention`: 神经网络 encoder
+- `--system-loss-weight`, `--consistency-weight`: 控制 `traj`/`dual` 双头 loss 中 system head 和一致性项的权重
 - `--no-geom --no-time`: 移除 geometry / normalized time features
+
+Prefix 长度与 variation 数量的二维 ablation 可使用：
+
+```bash
+conda run -n stellar python -m tasks.task_c.ablation \
+  --output-dir results/task_c_ablation \
+  --prefix-lens 10,20,50,100 \
+  --variation-counts 2,4,8,16,32 \
+  --models baseline,direct,traj,dual \
+  --prefix-representation orbital15 \
+  --variation-target full32 \
+  --device cuda
+```
+
+该 runner 使用平衡、嵌套的 variation 子集；减少输入 variation 时仍预测完整
+32 条 variation 的 system-level survival fraction，并在 `summary.csv` 中汇总每个 cell。
+future horizons 沿用 Task C 原始的 `time_unbound` absolute 时间轴；不要用轨迹
+采样时间去平移它，因为两者单位不同。
+它会自动跳过已有 `metrics.json` 的 cell，适合中断后继续；需要重跑时加
+`--force`。runner 默认先在 `results/task_c_ablation/_cache` 构建一次共享 prefix
+cache；如果缓存放在更快的本地磁盘，可用 `--cache-dir PATH` 指定，并用
+`--rebuild-cache` 强制重建。
 
 ### Task D
 

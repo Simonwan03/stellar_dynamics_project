@@ -25,13 +25,14 @@ from tasks.task_b.main import (
     load_aligned_labels,
     load_result_prefixes,
 )
+from tasks.task_c.cache import load_cached_prefixes
 
 
 class TrajectorySurvivalDataset(Dataset):
-    def __init__(self, X: np.ndarray, y: np.ndarray):
+    def __init__(self, X: np.ndarray, y: np.ndarray, q: np.ndarray | None = None):
         self.X = torch.from_numpy(X).float()
         self.y = torch.from_numpy(y).float()
-        self.q = self.y.mean(dim=1)
+        self.q = torch.from_numpy(q).float() if q is not None else self.y.mean(dim=1)
 
     def __len__(self) -> int:
         return self.X.size(0)
@@ -86,29 +87,23 @@ def build_case_tensors(
     labels["case_id"] = labels["index"] // group_size
     labels["variation_id"] = labels["index"] % group_size
     labels["_row"] = np.arange(len(labels), dtype=np.int64)
-    complete_ids = []
+    complete_ids: list[int] = []
+    expected_variations = np.arange(group_size, dtype=np.int64)
     for case_id, group in labels.groupby("case_id", sort=True):
-        if len(group) != group_size:
-            continue
-        if set(group["variation_id"].to_numpy(dtype=int)) != set(range(group_size)):
-            continue
-        complete_ids.append(int(case_id))
-        if max_cases is not None and len(complete_ids) >= max_cases:
-            break
+        variations = np.sort(group["variation_id"].to_numpy(dtype=np.int64))
+        if len(group) == group_size and np.array_equal(variations, expected_variations):
+            complete_ids.append(int(case_id))
+    if max_cases is not None:
+        complete_ids = complete_ids[:max_cases]
     if not complete_ids:
         raise ValueError("No complete case groups survived filtering.")
 
-    X_cases: list[np.ndarray] = []
-    y_cases: list[np.ndarray] = []
-    for case_id in complete_ids:
-        group = labels[labels["case_id"] == case_id].sort_values("variation_id")
-        rows = group["_row"].to_numpy(dtype=np.int64)
-        times = group["time_unbound"].to_numpy(dtype=np.float32)
-        X_cases.append(X_traj[rows])
-        y_cases.append((times[:, None] >= future_times[None, :]).astype(np.float32))
+    selected = labels[labels["case_id"].isin(complete_ids)].sort_values(["case_id", "variation_id"])
+    rows = selected["_row"].to_numpy(dtype=np.int64).reshape(len(complete_ids), group_size)
+    times = selected["time_unbound"].to_numpy(dtype=np.float32).reshape(len(complete_ids), group_size)
     return (
-        np.stack(X_cases).astype(np.float32),
-        np.stack(y_cases).astype(np.float32),
+        X_traj[rows].astype(np.float32),
+        (times[:, :, None] >= future_times[None, None, :]).astype(np.float32),
         np.asarray(complete_ids, dtype=np.int64),
     )
 
@@ -172,6 +167,48 @@ def aggregate_case_trajectories(X: np.ndarray, mode: str) -> np.ndarray:
         ]
         return np.concatenate(stats, axis=-1).astype(np.float32)
     raise ValueError(f"Unknown case aggregation mode: {mode}")
+
+
+def build_variation_subset_indices(
+    group_size: int,
+    variation_count: int,
+    mode: str = "balanced",
+    seed: int = 42,
+) -> np.ndarray:
+    """Return deterministic variation indices for a reduced perturbation set.
+
+    For the dataset's 32-variation layout, the balanced schedule samples both
+    16-variation halves and is nested across 1, 2, 4, 8, 16, and 32 members:
+    [0] -> [0,16] -> [0,8,16,24] -> ... -> [0..15,16..31].
+    """
+    if variation_count < 1 or variation_count > group_size:
+        raise ValueError(f"variation_count must be in [1, {group_size}], got {variation_count}.")
+    if mode not in {"balanced", "random"}:
+        raise ValueError(f"Unknown variation subset mode: {mode}")
+    if variation_count == group_size:
+        return np.arange(group_size, dtype=np.int64)
+
+    if mode == "random":
+        rng = np.random.default_rng(seed)
+        return np.sort(rng.choice(group_size, size=variation_count, replace=False).astype(np.int64))
+
+    if group_size != 32 or variation_count not in {1, 2, 4, 8, 16}:
+        raise ValueError(
+            "balanced variation subsets currently support group_size=32 and "
+            "variation_count in {1,2,4,8,16,32}."
+        )
+    if variation_count == 1:
+        return np.asarray([0], dtype=np.int64)
+    local_schedules = {
+        1: [0],
+        2: [0, 8],
+        4: [0, 4, 8, 12],
+        8: list(range(0, 16, 2)),
+        16: list(range(16)),
+    }
+    per_half = variation_count // 2
+    local = np.asarray(local_schedules[per_half], dtype=np.int64)
+    return np.concatenate([local, local + group_size // 2])
 
 
 class ConvTrajectoryEncoder(nn.Module):
@@ -262,13 +299,16 @@ class TrajectoryContextSurvivalModel(nn.Module):
             self.encoder = TemporalAttentionEncoder(input_dim, hidden_dim, heads=4, layers=1, dropout=dropout)
         else:
             self.encoder = ConvTrajectoryEncoder(input_dim, hidden_dim, dropout)
-        self.head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
+        self.variation_head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
+        self.system_head = HazardHead(hidden_dim, horizon, hidden_dim, dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bsz, group, time, dim = x.shape
         emb = self.encoder(x.reshape(bsz * group, time, dim)).reshape(bsz, group, -1)
         context = emb.mean(dim=1, keepdim=True).expand(-1, group, -1)
-        return self.head(torch.cat([emb, context], dim=-1))
+        variation_logits = self.variation_head(torch.cat([emb, context], dim=-1))
+        system_logits = self.system_head(emb.mean(dim=1))
+        return variation_logits, system_logits
 
 
 class DirectCurveModel(nn.Module):
@@ -318,14 +358,17 @@ class DualAttentionSurvivalModel(nn.Module):
             batch_first=True,
         )
         self.ensemble = nn.TransformerEncoder(layer, num_layers=1)
-        self.head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
+        self.variation_head = HazardHead(hidden_dim * 2, horizon, hidden_dim, dropout)
+        self.system_head = HazardHead(hidden_dim, horizon, hidden_dim, dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         bsz, group, time, dim = x.shape
         emb = self.temporal(x.reshape(bsz * group, time, dim)).reshape(bsz, group, -1)
         contextual = self.ensemble(emb)
         context = contextual.mean(dim=1, keepdim=True).expand(-1, group, -1)
-        return self.head(torch.cat([contextual, context], dim=-1))
+        variation_logits = self.variation_head(torch.cat([contextual, context], dim=-1))
+        system_logits = self.system_head(contextual.mean(dim=1))
+        return variation_logits, system_logits
 
 
 class VariationHazardNLL(nn.Module):
@@ -345,30 +388,107 @@ class BinomialHazardNLL(nn.Module):
         return (interval_nll * previous_survival).sum() / previous_survival.sum().clamp_min(1e-8)
 
 
+class DualHeadSurvivalLoss(nn.Module):
+    """Joint variation-level and system-level survival objective.
+
+    The system head is trained directly against the observed 32-variation
+    survival fraction.  A small consistency term keeps it close to the mean
+    of the variation-head survival curves without forcing the two heads to be
+    identical.
+    """
+
+    def __init__(self, system_weight: float = 1.0, consistency_weight: float = 0.1):
+        super().__init__()
+        if system_weight < 0.0 or consistency_weight < 0.0:
+            raise ValueError("Dual-head loss weights must be non-negative.")
+        self.system_weight = float(system_weight)
+        self.consistency_weight = float(consistency_weight)
+        self.variation_criterion = VariationHazardNLL()
+        self.system_criterion = BinomialHazardNLL()
+
+    def components(
+        self,
+        variation_logits: torch.Tensor,
+        system_logits: torch.Tensor,
+        y: torch.Tensor,
+        q: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        variation_loss = self.variation_criterion(variation_logits, y)
+        system_loss = self.system_criterion(system_logits, q)
+        variation_survival = hazard_logits_to_survival(variation_logits)
+        system_survival = hazard_logits_to_survival(system_logits)
+        mean_variation_survival = variation_survival.mean(dim=1)
+        consistency_loss = torch.nn.functional.smooth_l1_loss(system_survival, mean_variation_survival)
+        total = variation_loss + self.system_weight * system_loss + self.consistency_weight * consistency_loss
+        return {
+            "loss": total,
+            "variation_loss": variation_loss,
+            "system_loss": system_loss,
+            "consistency_loss": consistency_loss,
+        }
+
+    def forward(
+        self,
+        variation_logits: torch.Tensor,
+        system_logits: torch.Tensor,
+        y: torch.Tensor,
+        q: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.components(variation_logits, system_logits, y, q)["loss"]
+
+
 @torch.no_grad()
-def evaluate_trajectory_model(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict[str, Any]:
+def evaluate_trajectory_model(
+    model: nn.Module,
+    loader: DataLoader,
+    criterion: DualHeadSurvivalLoss,
+    device: torch.device,
+) -> dict[str, Any]:
     model.eval()
-    losses: list[float] = []
-    preds: list[np.ndarray] = []
-    targets: list[np.ndarray] = []
-    for xb, yb, _ in loader:
+    loss_sums = {"loss": 0.0, "variation_loss": 0.0, "system_loss": 0.0, "consistency_loss": 0.0}
+    system_preds: list[np.ndarray] = []
+    mean_variation_preds: list[np.ndarray] = []
+    system_targets: list[np.ndarray] = []
+    variation_preds: list[np.ndarray] = []
+    variation_targets: list[np.ndarray] = []
+    for xb, yb, qb in loader:
         xb = xb.to(device)
         yb = yb.to(device)
-        logits = model(xb)
-        loss = criterion(logits, yb)
-        losses.append(float(loss.item()) * xb.size(0))
-        preds.append(hazard_logits_to_survival(logits).mean(dim=1).cpu().numpy())
-        targets.append(yb.mean(dim=1).cpu().numpy())
-    pred = np.concatenate(preds, axis=0)
-    target = np.concatenate(targets, axis=0)
-    abs_err = np.abs(pred - target)
+        qb = qb.to(device)
+        variation_logits, system_logits = model(xb)
+        components = criterion.components(variation_logits, system_logits, yb, qb)
+        for name in loss_sums:
+            loss_sums[name] += float(components[name].item()) * xb.size(0)
+        variation_survival = hazard_logits_to_survival(variation_logits)
+        system_survival = hazard_logits_to_survival(system_logits)
+        variation_preds.append(variation_survival.cpu().numpy())
+        mean_variation_preds.append(variation_survival.mean(dim=1).cpu().numpy())
+        system_preds.append(system_survival.cpu().numpy())
+        variation_targets.append(yb.cpu().numpy())
+        system_targets.append(qb.cpu().numpy())
+    system_pred = np.concatenate(system_preds, axis=0)
+    mean_variation_pred = np.concatenate(mean_variation_preds, axis=0)
+    system_target = np.concatenate(system_targets, axis=0)
+    variation_pred = np.concatenate(variation_preds, axis=0)
+    variation_target = np.concatenate(variation_targets, axis=0)
+    system_abs_err = np.abs(system_pred - system_target)
+    mean_variation_abs_err = np.abs(mean_variation_pred - system_target)
+    variation_abs_err = np.abs(variation_pred - variation_target)
+    dataset_size = len(loader.dataset)
     return {
-        "loss": float(np.sum(losses) / len(loader.dataset)),
-        "overall_mae": float(abs_err.mean()),
-        "final_mae": float(abs_err[:, -1].mean()),
-        "horizon_mae": abs_err.mean(axis=0),
-        "preds": pred,
-        "targets": target,
+        **{name: float(value / dataset_size) for name, value in loss_sums.items()},
+        "overall_mae": float(system_abs_err.mean()),
+        "final_mae": float(system_abs_err[:, -1].mean()),
+        "horizon_mae": system_abs_err.mean(axis=0),
+        "variation_overall_mae": float(variation_abs_err.mean()),
+        "variation_final_mae": float(variation_abs_err[:, :, -1].mean()),
+        "mean_variation_overall_mae": float(mean_variation_abs_err.mean()),
+        "mean_variation_final_mae": float(mean_variation_abs_err[:, -1].mean()),
+        "preds": system_pred,
+        "targets": system_target,
+        "variation_preds": variation_pred,
+        "variation_targets": variation_target,
+        "mean_variation_preds": mean_variation_pred,
     }
 
 
@@ -403,7 +523,7 @@ def train_trajectory_model(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    criterion: nn.Module,
+    criterion: DualHeadSurvivalLoss,
     epochs: int,
     lr: float,
     weight_decay: float,
@@ -417,22 +537,45 @@ def train_trajectory_model(
     for epoch in range(1, epochs + 1):
         model.train()
         loss_sum = 0.0
-        for xb, yb, _ in train_loader:
+        train_loss_sums = {"variation_loss": 0.0, "system_loss": 0.0, "consistency_loss": 0.0}
+        for xb, yb, qb in train_loader:
             xb = xb.to(device)
             yb = yb.to(device)
+            qb = qb.to(device)
             optimizer.zero_grad(set_to_none=True)
-            loss = criterion(model(xb), yb)
+            variation_logits, system_logits = model(xb)
+            components = criterion.components(variation_logits, system_logits, yb, qb)
+            loss = components["loss"]
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             loss_sum += float(loss.item()) * xb.size(0)
+            for name in train_loss_sums:
+                train_loss_sums[name] += float(components[name].item()) * xb.size(0)
         val = evaluate_trajectory_model(model, val_loader, criterion, device)
-        row = {"epoch": epoch, "train_loss": loss_sum / len(train_loader.dataset), "val_loss": val["loss"], "val_mae": val["overall_mae"]}
+        train_size = len(train_loader.dataset)
+        row = {
+            "epoch": epoch,
+            "train_loss": loss_sum / train_size,
+            "train_variation_loss": train_loss_sums["variation_loss"] / train_size,
+            "train_system_loss": train_loss_sums["system_loss"] / train_size,
+            "train_consistency_loss": train_loss_sums["consistency_loss"] / train_size,
+            "val_loss": val["loss"],
+            "val_variation_loss": val["variation_loss"],
+            "val_system_loss": val["system_loss"],
+            "val_consistency_loss": val["consistency_loss"],
+            "val_mae": val["overall_mae"],
+            "val_mean_variation_mae": val["mean_variation_overall_mae"],
+        }
         history.append(row)
         if row["val_loss"] < best_val:
             best_val = row["val_loss"]
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-        print(f"epoch={epoch:03d} train_loss={row['train_loss']:.5f} val_mae={row['val_mae']:.5f}")
+        print(
+            f"epoch={epoch:03d} train_loss={row['train_loss']:.5f} "
+            f"val_loss={row['val_loss']:.5f} val_system_mae={row['val_mae']:.5f} "
+            f"val_mean_variation_mae={row['val_mean_variation_mae']:.5f}"
+        )
     if best_state is not None:
         model.load_state_dict(best_state)
     return model, history
@@ -678,7 +821,11 @@ def save_survival_plots(output_dir: Path, future_times: np.ndarray, metrics: dic
 
 
 def compact_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in metrics.items() if k not in {"preds", "targets"}}
+    return {
+        k: v
+        for k, v in metrics.items()
+        if k not in {"preds", "targets", "variation_preds", "variation_targets", "mean_variation_preds"}
+    }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -691,14 +838,51 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-cases", type=int, default=None)
     parser.add_argument("--group-size", type=int, default=32)
     parser.add_argument(
+        "--variation-count",
+        type=int,
+        default=None,
+        help="Use a subset of each complete variation group; defaults to all group_size variations.",
+    )
+    parser.add_argument(
+        "--variation-target",
+        choices=["subset", "full32"],
+        default="subset",
+        help="Target the selected variation fraction or the full 32-variation system fraction.",
+    )
+    parser.add_argument(
+        "--variation-subset-mode",
+        choices=["balanced", "random"],
+        default="balanced",
+        help="How to select a reduced variation set.",
+    )
+    parser.add_argument("--variation-subset-seed", type=int, default=42)
+    parser.add_argument(
         "--input-mode",
         choices=["prefix", "initial"],
         default="prefix",
         help="Use trajectory prefixes (prefix) or one t=0 orbital15 IC per system (initial).",
     )
+    parser.add_argument(
+        "--prefix-representation",
+        choices=["full", "orbital15"],
+        default="full",
+        help="Prefix feature representation; orbital15 avoids loading geometry and auxiliary full-stack channels.",
+    )
+    parser.add_argument(
+        "--prefix-cache",
+        type=Path,
+        default=None,
+        help="Load prefix features and labels from a shared cache instead of reading HDF5 shards.",
+    )
     parser.add_argument("--prefix-len", type=int, default=200)
     parser.add_argument("--time-stride", type=int, default=1)
     parser.add_argument("--future-times", type=str, default="500,800,1500,2500,4000,6500,10000")
+    parser.add_argument(
+        "--future-time-mode",
+        choices=["absolute"],
+        default="absolute",
+        help="Interpret future-times as absolute time_unbound thresholds.",
+    )
     parser.add_argument("--models", type=str, default="baseline,direct,direct_mean_std,traj,dual")
     parser.add_argument("--encoder-type", choices=["cnn", "gru", "attention"], default="cnn")
     parser.add_argument("--test-ratio", type=float, default=0.2)
@@ -708,6 +892,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--system-loss-weight",
+        type=float,
+        default=1.0,
+        help="Weight for the direct system-level survival head in traj/dual models.",
+    )
+    parser.add_argument(
+        "--consistency-weight",
+        type=float,
+        default=0.1,
+        help="Weight for matching the system head to the mean variation-head survival curve.",
+    )
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -722,10 +918,12 @@ def main() -> None:
     output_dir = ensure_dir(args.output_dir)
     set_random_seed(args.seed)
     device = select_device(args.device)
-    future_times = parse_future_times(args.future_times)
+    requested_future_times = parse_future_times(args.future_times)
     requested_models = set(parse_name_list(args.models))
 
     if args.input_mode == "initial":
+        if args.variation_count is not None or args.variation_target != "subset" or args.future_time_mode != "absolute":
+            raise ValueError("Variation-count ablations are only supported in prefix mode.")
         allowed_models = {"baseline", "ic_mlp"}
         unsupported = sorted(requested_models - allowed_models)
         if unsupported:
@@ -739,28 +937,51 @@ def main() -> None:
         include_geom = False
         add_time = False
     else:
-        result_keys = FULL_RESULT_KEYS
+        if args.prefix_representation == "orbital15":
+            result_keys = ORBITAL15_RESULT_KEYS
+            include_geom = False
+            add_time = False
+        else:
+            result_keys = FULL_RESULT_KEYS
+            include_geom = not args.no_geom
+            add_time = not args.no_time
         effective_prefix_len = args.prefix_len
-        include_geom = not args.no_geom
-        add_time = not args.no_time
 
-    result_paths = discover_result_paths(args.dataset_dir, args.sampling_id, args.max_shards)
-    data, batch_ids, rows_loaded = load_result_prefixes(
-        result_paths,
-        result_keys=result_keys,
-        prefix_len=effective_prefix_len,
-        time_stride=args.time_stride,
-        rows_per_shard=args.rows_per_shard,
-        include_geom=include_geom,
-        add_time=add_time,
-    )
-    labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
-    X_traj, feature_names = build_prefix_features(
-        data,
-        result_keys=result_keys,
-        add_time=add_time,
-        include_geom=include_geom,
-    )
+    if args.prefix_cache is not None:
+        data, labels, result_paths, X_traj, feature_names = load_cached_prefixes(
+            args.prefix_cache,
+            prefix_len=effective_prefix_len,
+            time_stride=args.time_stride,
+            add_time=add_time,
+            result_keys=result_keys,
+            include_geom=include_geom,
+        )
+    else:
+        load_time_metadata = add_time
+        result_paths = discover_result_paths(args.dataset_dir, args.sampling_id, args.max_shards)
+        data, batch_ids, rows_loaded = load_result_prefixes(
+            result_paths,
+            result_keys=result_keys,
+            prefix_len=effective_prefix_len,
+            time_stride=args.time_stride,
+            rows_per_shard=args.rows_per_shard,
+            include_geom=include_geom,
+            add_time=load_time_metadata,
+        )
+        labels = load_aligned_labels(
+            args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt",
+            batch_ids,
+            rows_loaded,
+        )
+        X_traj, feature_names = build_prefix_features(
+            data,
+            result_keys=result_keys,
+            add_time=add_time,
+            include_geom=include_geom,
+        )
+
+    observed_time_end = None
+    future_times = requested_future_times
     X_traj, _, labels, _ = filter_valid_samples(X_traj, labels, data, time_horizon=None)
     X_cases, y_cases, case_ids = build_case_tensors(X_traj, labels, args.group_size, future_times, max_cases=args.max_cases)
     initial_condition_max_abs_diff = None
@@ -769,7 +990,23 @@ def main() -> None:
             raise ValueError(f"Expected one-step IC case tensor, got shape {X_cases.shape}.")
         initial_condition_max_abs_diff = float(np.max(np.abs(X_cases - X_cases[:, :1, :, :])))
         X_cases = X_cases[:, 0, 0, :]
-    q_cases = y_cases.mean(axis=1)
+    full_y_cases = y_cases
+    full_q_cases = full_y_cases.mean(axis=1)
+    variation_indices = np.arange(args.group_size, dtype=np.int64)
+    variation_count = args.variation_count if args.variation_count is not None else args.group_size
+    if args.input_mode == "prefix" and variation_count != args.group_size:
+        variation_indices = build_variation_subset_indices(
+            group_size=args.group_size,
+            variation_count=variation_count,
+            mode=args.variation_subset_mode,
+            seed=args.variation_subset_seed,
+        )
+        X_cases = X_cases[:, variation_indices]
+        y_cases = y_cases[:, variation_indices]
+    if args.variation_target == "full32":
+        q_cases = full_q_cases
+    else:
+        q_cases = y_cases.mean(axis=1)
 
     train_idx, val_idx, test_idx = stratified_case_split(q_cases, args.test_ratio, args.val_ratio, args.seed)
     X_train, X_val, X_test = X_cases[train_idx], X_cases[val_idx], X_cases[test_idx]
@@ -786,6 +1023,9 @@ def main() -> None:
             "device": str(device),
             "effective_prefix_len": effective_prefix_len,
             "future_times": future_times,
+            "future_time_mode": args.future_time_mode,
+            "future_time_offsets": requested_future_times if args.future_time_mode == "after_prefix" else None,
+            "prefix_representation": args.prefix_representation,
             "result_paths": result_paths,
             "num_cases": int(X_cases.shape[0]),
             "input_shape": tuple(X_cases.shape[1:]),
@@ -794,6 +1034,12 @@ def main() -> None:
             "val_cases": int(val_idx.size),
             "test_cases": int(test_idx.size),
             "initial_condition_max_abs_diff": initial_condition_max_abs_diff,
+            "variation_count": int(variation_count),
+            "variation_target": args.variation_target,
+            "variation_subset_mode": args.variation_subset_mode,
+            "variation_subset_seed": int(args.variation_subset_seed),
+            "variation_indices": variation_indices,
+            "observed_time_end": observed_time_end,
         },
     )
 
@@ -802,9 +1048,9 @@ def main() -> None:
         val_loader = DataLoader(InitialConditionCurveDataset(X_val, q_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
         test_loader = DataLoader(InitialConditionCurveDataset(X_test, q_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     else:
-        train_loader = DataLoader(TrajectorySurvivalDataset(X_train, y_train), batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-        val_loader = DataLoader(TrajectorySurvivalDataset(X_val, y_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-        test_loader = DataLoader(TrajectorySurvivalDataset(X_test, y_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        train_loader = DataLoader(TrajectorySurvivalDataset(X_train, y_train, q_train), batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+        val_loader = DataLoader(TrajectorySurvivalDataset(X_val, y_val, q_val), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+        test_loader = DataLoader(TrajectorySurvivalDataset(X_test, y_test, q_test), batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     metrics: dict[str, dict[str, Any]] = {}
     if "baseline" in requested_models:
@@ -872,7 +1118,10 @@ def main() -> None:
         save_csv(output_dir / "direct_mean_std_train_log.csv", history)
         torch.save({"model_state_dict": model.state_dict()}, output_dir / "direct_mean_std_model.pt")
 
-    criterion = VariationHazardNLL()
+    criterion = DualHeadSurvivalLoss(
+        system_weight=args.system_loss_weight,
+        consistency_weight=args.consistency_weight,
+    )
 
     if "traj" in requested_models:
         model = TrajectoryContextSurvivalModel(
@@ -900,10 +1149,19 @@ def main() -> None:
         torch.save({"model_state_dict": model.state_dict()}, output_dir / "dual_model.pt")
 
     save_survival_plots(output_dir, future_times, metrics)
+    prediction_arrays: dict[str, np.ndarray] = {}
+    for name, payload in metrics.items():
+        if "preds" in payload:
+            prediction_arrays[f"{name}_preds"] = payload["preds"]
+        if "variation_preds" in payload:
+            prediction_arrays[f"{name}_variation_preds"] = payload["variation_preds"]
+        if "mean_variation_preds" in payload:
+            prediction_arrays[f"{name}_mean_variation_preds"] = payload["mean_variation_preds"]
     np.savez(
         output_dir / "test_predictions.npz",
-        **{f"{name}_preds": payload["preds"] for name, payload in metrics.items() if "preds" in payload},
+        **prediction_arrays,
         targets=q_test,
+        variation_targets=y_test,
         future_times=future_times,
     )
     save_json(output_dir / "metrics.json", {name: compact_metrics(payload) for name, payload in metrics.items()})

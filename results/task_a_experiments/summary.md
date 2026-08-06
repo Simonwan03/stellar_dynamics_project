@@ -4,6 +4,8 @@
 [`metrics_augmented/summary.md`](metrics_augmented/summary.md)；本文件保留此前主实验汇总。
 新增的细粒度 horizon 网格见
 [`metrics_augmented/horizon_grid/summary.md`](metrics_augmented/horizon_grid/summary.md)。
+新增的短 horizon stable-fraction 网格见
+[`metrics_augmented/horizon_grid_short/summary.md`](metrics_augmented/horizon_grid_short/summary.md)。
 
 ## 实验口径
 
@@ -37,27 +39,34 @@ MCC、TN/FP/FN/TP、Brier、log loss、ECE/MCE。旧字段保持不变，因此�
 
 | Model | Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| MLP-small | 0.855 | 0.562 | **0.373** | **0.449** | 0.836 | 0.481 |
+| MLP-small | **0.855** | 0.562 | **0.373** | **0.449** | 0.836 | 0.481 |
 | MLP-base | 0.852 | 0.550 | 0.348 | 0.426 | 0.825 | 0.481 |
 | MLP-large | 0.851 | 0.545 | 0.342 | 0.420 | 0.823 | 0.467 |
 | XGBoost-small | 0.850 | **0.625** | 0.127 | 0.211 | 0.824 | 0.461 |
 | XGBoost-base | 0.849 | 0.564 | 0.196 | 0.291 | 0.848 | 0.489 |
-| XGBoost-strong | **0.853** | 0.580 | 0.253 | 0.352 | **0.853** | **0.508** |
+| XGBoost-strong | 0.853 | 0.580 | 0.253 | 0.352 | **0.853** | **0.508** |
 
 GPU 顺序主实验也已完成，输出在 `main_binary_cuda/`：MLP-base 的
 `F1=0.459`、`AUROC=0.827`、`AUPRC=0.475`；XGBoost 结果与 CPU 版本一致。
 
 ## Horizon ablation
 
-| Target | Horizon | MLP-base | XGBoost-base |
-| --- | ---: | --- | --- |
-| stable_fraction | 5000 | MSE 0.08933, R² 0.44595 | MSE 0.08906, R² 0.44758 |
-| stable_fraction | 10000 | MSE 0.09184, R² 0.38579 | MSE 0.08624, R² 0.42327 |
-| binary_any | 5000 | F1 0.465, AUROC 0.854, AUPRC 0.571 | F1 0.388, AUROC 0.869, AUPRC 0.604 |
-| binary_any | 10000 | F1 0.426, AUROC 0.825, AUPRC 0.481 | F1 0.291, AUROC 0.848, AUPRC 0.489 |
+以下结果使用相同的 `seed=42`、`70/10/20` system split 和 `orbital15` 输入；
+100–2000 的 stable-fraction 行是本批 CPU 重新运行的结果。
 
-当前 completion table 的 `time_unbound` 最大值为 `10000`，所以正式 horizon ablation
-只比较 `5000` 和 `10000`。代码现在会拒绝超过记录范围的 horizon；此前生成的
+| Target | Horizon | Stable-fraction mean | MLP-base | XGBoost-base |
+| --- | ---: | ---: | --- | --- |
+| stable_fraction | 100 | 0.745861 | MSE 0.051570, MAE 0.146435, R² 0.599556 | MSE 0.049802, MAE 0.155947, R² 0.613285 |
+| stable_fraction | 200 | 0.682454 | MSE 0.063825, MAE 0.179518, R² 0.562286 | MSE 0.059510, MAE 0.178483, R² 0.591881 |
+| stable_fraction | 500 | 0.587529 | MSE 0.076093, MAE 0.201114, R² 0.536037 | MSE 0.074599, MAE 0.211459, R² 0.545143 |
+| stable_fraction | 1000 | 0.513718 | MSE 0.088373, MAE 0.216604, R² 0.482520 | MSE 0.086658, MAE 0.234104, R² 0.492558 |
+| stable_fraction | 2000 | 0.445616 | MSE 0.090029, MAE 0.224702, R² 0.469801 | MSE 0.089360, MAE 0.237237, R² 0.473743 |
+| stable_fraction | 5000 | — | MSE 0.08933, R² 0.44595 | MSE 0.08906, R² 0.44758 |
+| stable_fraction | 10000 | — | MSE 0.09184, R² 0.38579 | MSE 0.08624, R² 0.42327 |
+| binary_any | 5000 | — | F1 0.465, AUROC 0.854, AUPRC 0.571 | F1 0.388, AUROC 0.869, AUPRC 0.604 |
+| binary_any | 10000 | — | F1 0.426, AUROC 0.825, AUPRC 0.481 | F1 0.291, AUROC 0.848, AUPRC 0.489 |
+
+当前 completion table 的 `time_unbound` 最大值为 `10000`，代码会拒绝超过记录范围的 horizon；此前生成的
 `fraction_h20000_*` 目录仅是边界检查产物，不纳入正式结果。
 
 ## Feature ablation（MLP-base，horizon=10000）
