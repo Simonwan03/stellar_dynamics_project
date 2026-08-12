@@ -1,0 +1,33 @@
+{
+  "input_table": "/mnt/d/stellar_dynamics_data/sampling_2/completed_systems_sampling_2.txt",
+  "censor_time": 10000.0,
+  "group_size": 32,
+  "group_representative": "minimum time_unbound among variations",
+  "percentiles_use_divergent_samples_only": true,
+  "raw_rows": 160000,
+  "invalid_rows": 47,
+  "raw_groups": 5000,
+  "groups_excluded_as_invalid_or_incomplete": 2,
+  "trajectory": {
+    "total": 159953,
+    "divergent": 109553,
+    "non_divergent_at_censor_time": 50400,
+    "divergent_fraction": 0.6849074415609585,
+    "divergence_time_percentiles": {
+      "p50": 255.0,
+      "p90": 4050.0,
+      "p99": 9062.39999999998
+    }
+  },
+  "group": {
+    "total": 4998,
+    "divergent": 4208,
+    "non_divergent_at_censor_time": 790,
+    "divergent_fraction": 0.8419367747098839,
+    "divergence_time_percentiles": {
+      "p50": 70.0,
+      "p90": 2048.000000000002,
+      "p99": 8255.450000000019
+    }
+  }
+}

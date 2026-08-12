@@ -1,0 +1,61 @@
+{
+  "input_hdf5": "/mnt/d/stellar_dynamics_data/sampling_2/ICs_sampling_2.hdf5",
+  "completion_table": "/mnt/d/stellar_dynamics_data/sampling_2/completed_systems_sampling_2.txt",
+  "criterion": "paper Equation (2)",
+  "formula": "Rp_crit/a_in = 2.8 * ((1+q_out)*(1+e_out)/sqrt(1-e_out))^(2/5) * (1-0.3*i_mut/pi)",
+  "decision": "stable iff Rp/a_in > Rp_crit/a_in",
+  "inner_eccentricity_correction": false,
+  "group_size": 32,
+  "group_prediction": "minimum stability margin across variations",
+  "censor_time": 10000.0,
+  "individual": {
+    "total": 160000,
+    "predicted_stable": 80224,
+    "predicted_unstable": 79776,
+    "predicted_stable_fraction": 0.5014,
+    "margin_percentiles": {
+      "p01": -0.8313628460139122,
+      "p10": -0.3449052846478269,
+      "p50": 0.0006754418873218002,
+      "p90": 0.21810841992618132,
+      "p99": 0.4019470202244764
+    }
+  },
+  "group": {
+    "total": 5000,
+    "predicted_stable": 2507,
+    "predicted_unstable": 2493,
+    "predicted_stable_fraction": 0.5014,
+    "margin_percentiles": {
+      "p01": -0.8313628460289215,
+      "p10": -0.34490530630829325,
+      "p50": 0.0006754390819501074,
+      "p90": 0.2181084139489218,
+      "p99": 0.40194701646014425
+    }
+  },
+  "evaluation": {
+    "individual": {
+      "samples": 159953,
+      "accuracy": 0.6806186817377605,
+      "balanced_accuracy": 0.7098970702772116,
+      "sensitivity": 0.7890674603174603,
+      "specificity": 0.6307266802369629,
+      "true_positive": 39769,
+      "true_negative": 69098,
+      "false_positive": 40455,
+      "false_negative": 10631
+    },
+    "group": {
+      "samples": 4998,
+      "accuracy": 0.623249299719888,
+      "balanced_accuracy": 0.733590027434182,
+      "sensitivity": 0.8949367088607595,
+      "specificity": 0.5722433460076045,
+      "true_positive": 707,
+      "true_negative": 2408,
+      "false_positive": 1800,
+      "false_negative": 83
+    }
+  }
+}

@@ -152,6 +152,42 @@ def choose_default_dataset(preferred_sampling_ids: list[int] | None = None) -> D
     return sorted(choices, key=lambda c: (-len(c.result_paths), -c.sampling_id))[0]
 
 
+def choose_dataset_from_root(root: str | Path, sampling_id: int) -> DatasetChoice:
+    """Resolve one dataset explicitly, including when ``root`` is a symlink."""
+    root = Path(root).resolve()
+    result_paths = sorted(root.glob(f"results_batch_*_sampling_{sampling_id}.hdf5"))
+    if not result_paths:
+        raise FileNotFoundError(f"No result shards for sampling_id={sampling_id} under {root}.")
+    batch_ids = []
+    for path in result_paths:
+        match = RESULT_RE.fullmatch(path.name)
+        if match is None:
+            raise ValueError(f"Unexpected result shard name: {path.name}")
+        batch_ids.append(int(match.group(1)))
+    label_path = root / f"completed_systems_sampling_{sampling_id}.txt"
+    ics_path = root / f"ICs_sampling_{sampling_id}.hdf5"
+    label_df = _read_label_file(label_path if label_path.exists() else None)
+    first_info = inspect_result_file(result_paths[0])
+    first_target = first_info.get("positions_complete") or first_info.get("aratios_complete")
+    return DatasetChoice(
+        root=root,
+        sampling_id=int(sampling_id),
+        result_paths=result_paths,
+        label_path=label_path if label_path.exists() else None,
+        ics_path=ics_path if ics_path.exists() else None,
+        local_batch_ids=batch_ids,
+        label_batch_ids=[] if label_df is None else sorted(label_df["num_batch"].unique().tolist()),
+        label_row_count=0 if label_df is None else int(len(label_df)),
+        local_result_row_count=0 if first_target is None else len(result_paths) * int(first_target[0]),
+        time_unbound_max=None if label_df is None else float(label_df["time_unbound"].max()),
+        invalid_label_count=0
+        if label_df is None
+        else int(((label_df["time_unbound"] < 0) | (label_df["diagnosis"] != 0)).sum()),
+        time_length=None if "times_complete" not in first_info else int(first_info["times_complete"][1]),
+        feature_shapes=first_info,
+    )
+
+
 def inspect_result_file(path: Path) -> dict[str, list[int]]:
     info: dict[str, list[int]] = {}
     with h5py.File(path, "r") as f:
@@ -181,14 +217,20 @@ def _read_label_file(path: Path | None) -> pd.DataFrame | None:
     )
 
 
-def load_labels(choice: DatasetChoice, max_rows: int | None = None) -> pd.DataFrame:
+def load_labels(
+    choice: DatasetChoice,
+    max_rows: int | None = None,
+    group_size: int = DEFAULT_GROUP_SIZE,
+) -> pd.DataFrame:
     if choice.label_path is None:
         raise FileNotFoundError(f"No label file found for sampling_id={choice.sampling_id} under {choice.root}")
     labels = _read_label_file(choice.label_path)
     assert labels is not None
     labels = labels[labels["num_batch"].isin(choice.local_batch_ids)].copy()
     labels = labels.sort_values(["num_batch", "index"], ascending=True).reset_index(drop=True)
-    labels["raw_case_id"] = np.arange(len(labels)) // DEFAULT_GROUP_SIZE
+    if group_size <= 0:
+        raise ValueError(f"group_size must be positive, got {group_size}.")
+    labels["raw_case_id"] = labels["index"] // group_size
     if max_rows is not None:
         labels = labels.iloc[:max_rows].copy().reset_index(drop=True)
     return labels

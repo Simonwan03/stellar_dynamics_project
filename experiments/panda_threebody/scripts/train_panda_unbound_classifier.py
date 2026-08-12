@@ -15,12 +15,15 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+EXPERIMENT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(EXPERIMENT_ROOT))
+sys.path.insert(0, str(EXPERIMENT_ROOT / "vendor" / "panda"))
 
 from adapters.project_data import (  # noqa: E402
     build_representation,
     case_summary,
     choose_default_dataset,
+    choose_dataset_from_root,
     clean_and_group_trajectories,
     ensure_dir,
     load_labels,
@@ -46,12 +49,35 @@ class SequenceDataset(Dataset):
         return self.x[idx], self.y[idx]
 
 
+POOLING_MODES = ("global_mean", "patch_mean_keep_channels")
+
+
+def pool_encoder_features(encoded: torch.Tensor, pooling: str) -> torch.Tensor:
+    """Pool Panda output [B, C, patches, d_model] into classifier features."""
+    if encoded.ndim != 4:
+        raise ValueError(f"Expected encoded features [B, C, patches, d_model], got {tuple(encoded.shape)}.")
+    if pooling == "global_mean":
+        return encoded.mean(dim=(1, 2))
+    if pooling == "patch_mean_keep_channels":
+        # Average only the patch axis: [B, C, patches, D] -> [B, C, D].
+        # Flattening preserves a separate D-dimensional block for every channel.
+        return encoded.mean(dim=2).flatten(start_dim=1)
+    raise ValueError(f"Unknown pooling mode {pooling!r}; choose one of {POOLING_MODES}.")
+
+
 class PandaUnboundClassifier(nn.Module):
-    def __init__(self, checkpoint: str, freeze_backbone: bool):
+    def __init__(self, checkpoint: str, freeze_backbone: bool, num_channels: int, pooling: str):
         super().__init__()
         self.backbone = PatchTSTForPrediction.from_pretrained(checkpoint)
         hidden_dim = int(self.backbone.config.d_model)
-        self.classifier = nn.Linear(hidden_dim, 1)
+        self.num_channels = int(num_channels)
+        self.pooling = str(pooling)
+        if self.num_channels <= 0:
+            raise ValueError(f"num_channels must be positive, got {self.num_channels}.")
+        if self.pooling not in POOLING_MODES:
+            raise ValueError(f"Unknown pooling mode {self.pooling!r}; choose one of {POOLING_MODES}.")
+        classifier_dim = hidden_dim if self.pooling == "global_mean" else self.num_channels * hidden_dim
+        self.classifier = nn.Linear(classifier_dim, 1)
         if freeze_backbone:
             for param in self.backbone.parameters():
                 param.requires_grad = False
@@ -65,7 +91,11 @@ class PandaUnboundClassifier(nn.Module):
                 past_observed_mask=observed,
                 return_dict=True,
             ).last_hidden_state
-        pooled = encoded.mean(dim=(1, 2))
+        if encoded.shape[1] != self.num_channels:
+            raise ValueError(
+                f"Expected {self.num_channels} encoded channels, got shape {tuple(encoded.shape)}."
+            )
+        pooled = pool_encoder_features(encoded, self.pooling)
         return self.classifier(pooled).squeeze(-1)
 
 
@@ -182,10 +212,18 @@ def format_seconds(seconds: float) -> str:
 
 
 def build_dataset(cfg: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, Any, dict[str, np.ndarray], float, dict[str, Any]]:
-    choice = choose_default_dataset(cfg.get("sampling_id_preference", [0]))
+    preferred_sampling_ids = cfg.get("sampling_id_preference", [0])
+    if cfg.get("dataset_root"):
+        dataset_root = Path(str(cfg["dataset_root"]))
+        if not dataset_root.is_absolute():
+            dataset_root = (EXPERIMENT_ROOT / dataset_root).resolve()
+        choice = choose_dataset_from_root(dataset_root, int(preferred_sampling_ids[0]))
+    else:
+        choice = choose_default_dataset(preferred_sampling_ids)
     representation = str(cfg.get("representation", "orbital15"))
+    group_size = int(cfg.get("group_size", 8))
     max_cases = cfg.get("max_cases")
-    max_rows = None if max_cases is None else int(max_cases) * 8
+    max_rows = None if max_cases is None else int(max_cases) * group_size
     prefix_steps = int(cfg["prefix_steps"])
     keys = required_keys_for_representation(representation)
 
@@ -193,15 +231,15 @@ def build_dataset(cfg: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, Any, dic
     print("Representation:", representation)
     print("Prefix steps:", prefix_steps)
 
-    labels = load_labels(choice, max_rows=max_rows)
+    labels = load_labels(choice, max_rows=max_rows, group_size=group_size)
     data = load_result_arrays(choice, keys=keys, time_steps=prefix_steps, max_rows=max_rows)
     x = build_representation(data, representation=representation)
-    x, labels = clean_and_group_trajectories(x, labels)
+    x, labels = clean_and_group_trajectories(x, labels, group_size=group_size)
 
     final_time = float(labels["time_unbound"].max())
     labels = labels.copy()
     labels["final_unbound"] = (labels["time_unbound"] < final_time).astype(int)
-    case_df = case_summary(labels)
+    case_df = case_summary(labels, group_size=group_size)
     case_df = stratified_case_split(
         case_df,
         train_ratio=float(cfg["train_ratio"]),
@@ -216,12 +254,16 @@ def build_dataset(cfg: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, Any, dic
         "source_dataset": summarize_audit(choice),
         "representation": representation,
         "prefix_steps": prefix_steps,
+        "group_size": group_size,
         "feature_shape": list(x.shape),
         "final_time": final_time,
         "label_definition": "final_unbound = time_unbound < max(time_unbound among retained valid dataset rows)",
         "split_counts": {split: int(mask.sum()) for split, mask in split_masks.items()},
         "positive_counts": {split: int(y[mask].sum()) for split, mask in split_masks.items()},
-        "positive_rates": {split: float(y[mask].mean()) for split, mask in split_masks.items()},
+        "positive_rates": {
+            split: (float(y[mask].mean()) if mask.any() else None)
+            for split, mask in split_masks.items()
+        },
     }
     return x.astype(np.float32), y, labels, split_masks, final_time, metadata
 
@@ -269,10 +311,21 @@ def main() -> None:
         for split, mask in split_masks.items()
     }
 
-    model = PandaUnboundClassifier(str(cfg["checkpoint"]), bool(cfg.get("freeze_backbone", True))).to(device)
+    pooling = str(cfg.get("pooling", "global_mean"))
+    num_channels = int(x.shape[-1])
+    model = PandaUnboundClassifier(
+        str(cfg["checkpoint"]),
+        bool(cfg.get("freeze_backbone", True)),
+        num_channels=num_channels,
+        pooling=pooling,
+    ).to(device)
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"Panda checkpoint: {cfg['checkpoint']}")
+    print(
+        f"Encoder pooling: {pooling}; [B, {num_channels}, patches, {model.backbone.config.d_model}] "
+        f"-> classifier input {model.classifier.in_features}"
+    )
     print(f"Total params: {total:,}; trainable params: {trainable:,}")
 
     pos = float(y[split_masks["train"]].sum())

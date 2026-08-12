@@ -1,0 +1,32 @@
+run_name: panda_unbound_orbital15_patch_mean_keep_channels
+seed: 42
+
+dataset_choice: dataset
+dataset_root: ../../dataset_v3
+sampling_id_preference:
+  - 2
+group_size: 32
+
+representation: orbital15
+prefix_steps: 512
+max_cases: null
+
+train_ratio: 0.7
+val_ratio: 0.1
+test_ratio: 0.2
+
+checkpoint: GilpinLab/panda-72M
+device: cuda
+allow_cpu_fallback: false
+
+freeze_backbone: true
+pooling: patch_mean_keep_channels
+batch_size: 1024
+epochs: 3
+learning_rate: 1.0e-3
+weight_decay: 1.0e-4
+num_workers: 0
+threshold: 0.5
+log_every_batches: 20
+
+output_root: outputs/panda_unbound_dataset
