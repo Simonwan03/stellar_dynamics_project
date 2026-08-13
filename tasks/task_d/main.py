@@ -21,15 +21,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--target-mode",
-        choices=["min_instability", "lambda_fast", "lyapunov_proxy", "crossing_upper"],
-        default="min_instability",
-        help="Regression target: minimum instability time, log(lambda_fast), median proxy, or crossing upper bound.",
+        choices=[
+            "lyapunov_proxy",
+            "fitted_lyapunov_time",
+            "min_instability",
+            "lambda_fast",
+            "crossing_upper",
+        ],
+        default="lyapunov_proxy",
+        help=(
+            "Regression target. lyapunov_proxy is the first sampled time at which "
+            "the normalized semimajor-axis difference reaches the threshold; "
+            "crossing_upper is a backward-compatible alias."
+        ),
     )
     parser.add_argument(
         "--label-observable",
-        choices=["aratio", "phase_space"],
-        default="aratio",
-        help="Observable used to construct the label; aratio uses aratios_complete only.",
+        choices=["smax", "aratio", "phase_space"],
+        default="smax",
+        help=(
+            "Observable used to construct the label; smax uses the inner orbit in "
+            "smaxes_complete and matches the semimajor-axis proxy definition."
+        ),
     )
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "dataset_v3")
     parser.add_argument("--sampling-id", type=int, default=2)
@@ -49,33 +62,43 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--lambda-r2-min",
         type=float,
         default=None,
-        help="Minimum pair-fit R^2; defaults to 0 for aratio and 0.8 for phase_space.",
+        help="Minimum pair-fit R^2; defaults to 0 for aratio and 0.8 otherwise.",
     )
     parser.add_argument(
         "--min-valid-lambda-pairs",
         type=int,
         default=None,
-        help="Minimum valid pair count; defaults to 1 for min_instability and 8 otherwise.",
+        help="Minimum valid slope-fit pair count; only used by slope-based target modes.",
     )
     parser.add_argument(
         "--max-pair-log-mad",
         type=float,
         default=None,
-        help="Maximum pair log-slope MAD; defaults to 2 for aratio and 0.75 for phase_space.",
+        help="Maximum pair log-slope MAD; defaults to 2 for aratio and 0.75 otherwise.",
     )
     parser.add_argument(
         "--lyapunov-aggregation",
         choices=["median", "mean", "max"],
         default=None,
-        help="How to aggregate valid pair growth rates; defaults to max for min_instability, otherwise median.",
+        help="How to aggregate valid pair growth rates for slope-based target modes.",
     )
     parser.add_argument(
         "--require-pair-consistency",
         action="store_true",
-        help="Require pair log-slope consistency; enabled by default for lyapunov_proxy only.",
+        help="Require pair log-slope consistency; enabled by default for fitted_lyapunov_time only.",
     )
-    parser.add_argument("--aggregation", choices=["median", "mean", "min"], default="median")
-    parser.add_argument("--censoring-rule", choices=["median_pair", "all_pairs"], default="median_pair")
+    parser.add_argument(
+        "--aggregation",
+        choices=["median", "mean", "min"],
+        default="min",
+        help="Aggregate pair proxy times; min gives the first diverging perturbation pair.",
+    )
+    parser.add_argument(
+        "--censoring-rule",
+        choices=["median_pair", "all_pairs"],
+        default="all_pairs",
+        help="A min-aggregated system is censored only when all perturbation pairs are censored.",
+    )
     parser.add_argument(
         "--initial-representation",
         choices=["orbital15", "full"],
@@ -148,7 +171,7 @@ def main() -> None:
         else (1 if args.target_mode in {"min_instability", "lambda_fast"} else 8)
     )
     require_pair_consistency = (
-        args.require_pair_consistency or args.target_mode == "lyapunov_proxy"
+        args.require_pair_consistency or args.target_mode == "fitted_lyapunov_time"
     )
     config = PipelineConfig(
         task_setting=args.task_setting,

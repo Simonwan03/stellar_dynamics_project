@@ -10,6 +10,7 @@ from tasks.task_d.pipeline import (
     _aggregate_tau,
     _compute_group_divergence_label,
     compute_pair_aratio_divergence,
+    compute_pair_divergence_time,
 )
 
 
@@ -81,7 +82,7 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertEqual(label["valid_lambda_pair_count"], 1)
         self.assertTrue(label["lyapunov_label_valid"])
 
-    def test_crossing_upper_cli_options_are_available(self) -> None:
+    def test_crossing_upper_alias_is_available(self) -> None:
         args = build_arg_parser().parse_args(
             ["--target-mode", "crossing_upper", "--aggregation", "min"]
         )
@@ -109,10 +110,53 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertFalse(result["censored"])
         self.assertEqual(result["tau"], times[12 - 1])
 
-    def test_aratio_is_the_default_label_observable(self) -> None:
+    def test_threshold_equality_counts_as_proxy_crossing(self) -> None:
+        times = np.arange(3, dtype=np.float64)
+        aratios = np.array(
+            [
+                [[0.0], [0.0], [0.0]],
+                [[1.0], [1000.0], [2000.0]],
+            ],
+            dtype=np.float64,
+        )
+        result = compute_pair_aratio_divergence(
+            aratios=aratios,
+            times=np.stack([times, times]),
+            idx_i=0,
+            idx_j=1,
+            threshold=1000.0,
+            min_growth_points=2,
+        )
+        self.assertFalse(result["censored"])
+        self.assertEqual(result["tau"], 1.0)
+
+    def test_smax_proxy_uses_inner_semimajor_axis(self) -> None:
+        times = np.stack([np.arange(3, dtype=np.float64)] * 2)
+        smaxes = np.ones((2, 3, 2), dtype=np.float64)
+        smaxes[1, :, 0] = [2.0, 1001.0, 2001.0]
+        # The outer orbit differs strongly but must not affect inner_index=0.
+        smaxes[1, :, 1] = [10.0, 10.0, 10.0]
+        tau, censored, ratio, _ = compute_pair_divergence_time(
+            smaxes=smaxes,
+            times=times,
+            idx_i=0,
+            idx_j=1,
+            threshold=1000.0,
+        )
+        self.assertFalse(censored)
+        self.assertEqual(tau, 1.0)
+        self.assertEqual(ratio[1], 1000.0)
+
+    def test_proxy_is_the_default_task(self) -> None:
         args = build_arg_parser().parse_args([])
-        self.assertEqual(args.label_observable, "aratio")
-        self.assertEqual(args.target_mode, "min_instability")
+        self.assertEqual(args.label_observable, "smax")
+        self.assertEqual(args.target_mode, "lyapunov_proxy")
+        self.assertEqual(args.aggregation, "min")
+        self.assertEqual(args.censoring_rule, "all_pairs")
+
+    def test_fitted_lyapunov_time_compatibility_mode_is_available(self) -> None:
+        args = build_arg_parser().parse_args(["--target-mode", "fitted_lyapunov_time"])
+        self.assertEqual(args.target_mode, "fitted_lyapunov_time")
 
     def test_lambda_fast_target_is_available(self) -> None:
         args = build_arg_parser().parse_args(["--target-mode", "lambda_fast"])

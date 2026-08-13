@@ -21,8 +21,12 @@ allow_cpu_fallback: false
 
 freeze_backbone: true
 pooling: patch_mean_keep_channels
-batch_size: 1024
-epochs: 3
+cache_backbone_features: true
+force_feature_cache: false
+feature_cache_batch_size: 256
+
+batch_size: 2048
+epochs: 20
 learning_rate: 1.0e-3
 weight_decay: 1.0e-4
 num_workers: 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import random
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -39,8 +41,8 @@ from panda.patchtst.patchtst import PatchTSTForPrediction  # noqa: E402
 
 class SequenceDataset(Dataset):
     def __init__(self, x: np.ndarray, y: np.ndarray):
-        self.x = torch.from_numpy(x.astype(np.float32))
-        self.y = torch.from_numpy(y.astype(np.float32))
+        self.x = torch.from_numpy(np.asarray(x, dtype=np.float32))
+        self.y = torch.from_numpy(np.asarray(y, dtype=np.float32))
 
     def __len__(self) -> int:
         return int(len(self.y))
@@ -82,7 +84,7 @@ class PandaUnboundClassifier(nn.Module):
             for param in self.backbone.parameters():
                 param.requires_grad = False
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
         # Use Panda's encoder representation directly. Shape: [B, C, patches, d_model].
         observed = torch.ones_like(x)
         with torch.set_grad_enabled(any(p.requires_grad for p in self.backbone.parameters())):
@@ -95,8 +97,36 @@ class PandaUnboundClassifier(nn.Module):
             raise ValueError(
                 f"Expected {self.num_channels} encoded channels, got shape {tuple(encoded.shape)}."
             )
-        pooled = pool_encoder_features(encoded, self.pooling)
-        return self.classifier(pooled).squeeze(-1)
+        return pool_encoder_features(encoded, self.pooling)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(self.encode(x)).squeeze(-1)
+
+
+class CachedFeatureDataset(Dataset):
+    """Read selected rows from a memory-mapped frozen-backbone feature file."""
+
+    def __init__(self, features: np.ndarray, y: np.ndarray, indices: np.ndarray):
+        self.features = features
+        self.y = np.asarray(y, dtype=np.float32)
+        self.indices = np.asarray(indices, dtype=np.int64)
+
+    def __len__(self) -> int:
+        return int(self.indices.size)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        row = int(self.indices[idx])
+        feature = torch.from_numpy(np.asarray(self.features[row], dtype=np.float32))
+        return feature, torch.tensor(self.y[row], dtype=torch.float32)
+
+
+class CachedLinearProbe(nn.Module):
+    def __init__(self, feature_dim: int):
+        super().__init__()
+        self.classifier = nn.Linear(int(feature_dim), 1)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.classifier(features).squeeze(-1)
 
 
 @dataclass
@@ -211,6 +241,177 @@ def format_seconds(seconds: float) -> str:
     return f"{secs:d}s"
 
 
+def read_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        value = json.load(handle)
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a JSON object in {path}.")
+    return value
+
+
+def load_cached_features_if_valid(
+    cache_path: Path,
+    metadata_path: Path,
+    *,
+    rows: int,
+    input_shape: tuple[int, int],
+    checkpoint: str,
+    pooling: str,
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    """Return a read-only feature memmap only when file and metadata agree."""
+    if not cache_path.exists() or not metadata_path.exists():
+        return None, None
+    try:
+        metadata = read_json(metadata_path)
+        expected = {
+            "rows": int(rows),
+            "input_shape": [int(input_shape[0]), int(input_shape[1])],
+            "checkpoint": str(checkpoint),
+            "pooling": str(pooling),
+            "dtype": "float16",
+        }
+        mismatches = {
+            key: (metadata.get(key), value)
+            for key, value in expected.items()
+            if metadata.get(key) != value
+        }
+        if mismatches:
+            print(f"Ignoring incompatible Panda feature cache metadata: {mismatches}")
+            return None, None
+        feature_dim = int(metadata["feature_dim"])
+        features = np.load(cache_path, mmap_mode="r")
+        if features.shape != (rows, feature_dim) or features.dtype != np.float16:
+            print(
+                "Ignoring incompatible Panda feature cache array: "
+                f"shape={features.shape}, dtype={features.dtype}"
+            )
+            return None, None
+        return features, metadata
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"Ignoring unreadable Panda feature cache: {exc}")
+        return None, None
+
+
+def extract_or_load_cached_features(
+    model: PandaUnboundClassifier,
+    x: np.ndarray,
+    cache_path: Path,
+    metadata_path: Path,
+    *,
+    checkpoint: str,
+    pooling: str,
+    batch_size: int,
+    device: torch.device,
+    force: bool = False,
+    log_every: int = 20,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Run the frozen Panda backbone once and atomically cache float16 features."""
+    if any(parameter.requires_grad for parameter in model.backbone.parameters()):
+        raise ValueError("Backbone feature caching requires freeze_backbone=true.")
+
+    rows = int(x.shape[0])
+    input_shape = (int(x.shape[1]), int(x.shape[2]))
+    if not force:
+        cached, metadata = load_cached_features_if_valid(
+            cache_path,
+            metadata_path,
+            rows=rows,
+            input_shape=input_shape,
+            checkpoint=checkpoint,
+            pooling=pooling,
+        )
+        if cached is not None and metadata is not None:
+            print(f"Reusing cached Panda features: {cache_path}")
+            return cached, metadata
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = cache_path.with_name(f"{cache_path.stem}.tmp.npy")
+    feature_dim = int(model.classifier.in_features)
+    output = np.lib.format.open_memmap(
+        temp_path,
+        mode="w+",
+        dtype=np.float16,
+        shape=(rows, feature_dim),
+    )
+    loader = DataLoader(
+        SequenceDataset(x, np.zeros(rows, dtype=np.float32)),
+        batch_size=int(batch_size),
+        shuffle=False,
+        num_workers=0,
+        pin_memory=(device.type == "cuda"),
+    )
+    started = time.monotonic()
+    cursor = 0
+    model.eval()
+    try:
+        with torch.no_grad():
+            for batch_idx, (xb, _) in enumerate(loader, start=1):
+                xb = xb.to(device, non_blocking=(device.type == "cuda"))
+                features = model.encode(xb).cpu().numpy().astype(np.float16, copy=False)
+                next_cursor = cursor + len(features)
+                output[cursor:next_cursor] = features
+                cursor = next_cursor
+                if batch_idx == 1 or batch_idx % log_every == 0 or batch_idx == len(loader):
+                    elapsed = time.monotonic() - started
+                    eta = elapsed / batch_idx * max(0, len(loader) - batch_idx)
+                    print(
+                        f"feature_cache batch={batch_idx}/{len(loader)} rows={cursor}/{rows} "
+                        f"elapsed={format_seconds(elapsed)} eta={format_seconds(eta)}",
+                        flush=True,
+                    )
+    except BaseException:
+        output.flush()
+        raise
+    output.flush()
+    del output
+    os.replace(temp_path, cache_path)
+
+    metadata = {
+        "rows": rows,
+        "input_shape": list(input_shape),
+        "feature_dim": feature_dim,
+        "checkpoint": str(checkpoint),
+        "pooling": str(pooling),
+        "dtype": "float16",
+        "batch_size": int(batch_size),
+        "seconds": float(time.monotonic() - started),
+    }
+    write_json(metadata_path, metadata)
+    features = np.load(cache_path, mmap_mode="r")
+    print(f"Cached Panda features: {cache_path}")
+    return features, metadata
+
+
+def cached_run_inputs_match(
+    cfg: dict[str, Any],
+    run_config: dict[str, Any],
+    dataset_summary: dict[str, Any],
+) -> bool:
+    """Check the fields that determine labels, splits, and encoder inputs."""
+    keys = (
+        "dataset_root",
+        "sampling_id_preference",
+        "group_size",
+        "representation",
+        "prefix_steps",
+        "max_cases",
+        "train_ratio",
+        "val_ratio",
+        "test_ratio",
+        "seed",
+        "checkpoint",
+        "pooling",
+    )
+    if any(run_config.get(key) != cfg.get(key) for key in keys):
+        return False
+    feature_shape = dataset_summary.get("feature_shape")
+    return (
+        isinstance(feature_shape, list)
+        and len(feature_shape) == 3
+        and int(feature_shape[1]) == int(cfg["prefix_steps"])
+    )
+
+
 def build_dataset(cfg: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, Any, dict[str, np.ndarray], float, dict[str, Any]]:
     preferred_sampling_ids = cfg.get("sampling_id_preference", [0])
     if cfg.get("dataset_root"):
@@ -292,40 +493,135 @@ def main() -> None:
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(device)}")
 
-    dataset_start = time.monotonic()
-    x, y, labels, split_masks, _, metadata = build_dataset(cfg)
-    print(f"Dataset built in {format_seconds(time.monotonic() - dataset_start)}; X={x.shape}", flush=True)
     output_root = exp_root / str(cfg["output_root"]) / str(cfg["run_name"])
     ensure_dir(output_root)
-    write_json(output_root / "dataset_summary.json", metadata)
-    labels.to_csv(output_root / "manifest_with_labels.csv", index=False)
-
-    loaders = {
-        split: DataLoader(
-            SequenceDataset(x[mask], y[mask]),
-            batch_size=int(cfg["batch_size"]),
-            shuffle=(split == "train"),
-            num_workers=int(cfg.get("num_workers", 0)),
-            pin_memory=(device.type == "cuda"),
-        )
-        for split, mask in split_masks.items()
-    }
-
     pooling = str(cfg.get("pooling", "global_mean"))
-    num_channels = int(x.shape[-1])
-    model = PandaUnboundClassifier(
-        str(cfg["checkpoint"]),
-        bool(cfg.get("freeze_backbone", True)),
-        num_channels=num_channels,
-        pooling=pooling,
-    ).to(device)
+    cache_enabled = bool(cfg.get("cache_backbone_features", False))
+    force_cache = bool(cfg.get("force_feature_cache", False))
+    if cache_enabled and not bool(cfg.get("freeze_backbone", True)):
+        raise ValueError("cache_backbone_features=true requires freeze_backbone=true.")
+
+    cache_path = output_root / "panda_patch_mean_features.float16.npy"
+    cache_metadata_path = cache_path.with_suffix(".json")
+    dataset_summary_path = output_root / "dataset_summary.json"
+    manifest_path = output_root / "manifest_with_labels.csv"
+    run_config_path = output_root / "run_config.json"
+
+    x: np.ndarray | None = None
+    features: np.ndarray | None = None
+    metadata: dict[str, Any]
+    labels: pd.DataFrame
+    y: np.ndarray
+    split_masks: dict[str, np.ndarray]
+
+    # Fast path: reuse both the frozen features and the exact labels/splits that
+    # produced them. This avoids loading the raw HDF5 trajectories or PANDA.
+    artifacts_exist = all(
+        path.exists()
+        for path in (cache_path, cache_metadata_path, dataset_summary_path, manifest_path, run_config_path)
+    )
+    if cache_enabled and not force_cache and artifacts_exist:
+        saved_run_config = read_json(run_config_path)
+        saved_dataset_summary = read_json(dataset_summary_path)
+        if cached_run_inputs_match(cfg, saved_run_config, saved_dataset_summary):
+            labels = pd.read_csv(manifest_path)
+            y = labels["final_unbound"].to_numpy(dtype=np.float32)
+            split_masks = {
+                split: labels["split"].to_numpy() == split
+                for split in ("train", "val", "test")
+            }
+            feature_shape = saved_dataset_summary["feature_shape"]
+            features, _ = load_cached_features_if_valid(
+                cache_path,
+                cache_metadata_path,
+                rows=len(labels),
+                input_shape=(int(feature_shape[1]), int(feature_shape[2])),
+                checkpoint=str(cfg["checkpoint"]),
+                pooling=pooling,
+            )
+            if features is not None:
+                metadata = saved_dataset_summary
+                print(f"Reusing cached dataset manifest and Panda features: {cache_path}", flush=True)
+
+    if features is None:
+        dataset_start = time.monotonic()
+        x, y, labels, split_masks, _, metadata = build_dataset(cfg)
+        print(f"Dataset built in {format_seconds(time.monotonic() - dataset_start)}; X={x.shape}", flush=True)
+        write_json(dataset_summary_path, metadata)
+        labels.to_csv(manifest_path, index=False)
+
+    num_channels = int(metadata["feature_shape"][-1])
+    if cache_enabled:
+        if features is None:
+            assert x is not None
+            backbone_model = PandaUnboundClassifier(
+                str(cfg["checkpoint"]),
+                True,
+                num_channels=num_channels,
+                pooling=pooling,
+            ).to(device)
+            print(f"Panda checkpoint: {cfg['checkpoint']}")
+            print(
+                f"Encoder pooling: {pooling}; [B, {num_channels}, patches, "
+                f"{backbone_model.backbone.config.d_model}] -> classifier input "
+                f"{backbone_model.classifier.in_features}"
+            )
+            features, _ = extract_or_load_cached_features(
+                backbone_model,
+                x,
+                cache_path,
+                cache_metadata_path,
+                checkpoint=str(cfg["checkpoint"]),
+                pooling=pooling,
+                batch_size=int(cfg.get("feature_cache_batch_size", cfg["batch_size"])),
+                device=device,
+                force=force_cache,
+                log_every=int(cfg.get("log_every_batches", 20)),
+            )
+            del backbone_model
+            del x
+            x = None
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+        model = CachedLinearProbe(int(features.shape[1])).to(device)
+        loaders = {
+            split: DataLoader(
+                CachedFeatureDataset(features, y, np.flatnonzero(mask)),
+                batch_size=int(cfg["batch_size"]),
+                shuffle=(split == "train"),
+                num_workers=int(cfg.get("num_workers", 0)),
+                pin_memory=(device.type == "cuda"),
+            )
+            for split, mask in split_masks.items()
+        }
+        print("Training input: cached Panda features")
+    else:
+        assert x is not None
+        model = PandaUnboundClassifier(
+            str(cfg["checkpoint"]),
+            bool(cfg.get("freeze_backbone", True)),
+            num_channels=num_channels,
+            pooling=pooling,
+        ).to(device)
+        loaders = {
+            split: DataLoader(
+                SequenceDataset(x[mask], y[mask]),
+                batch_size=int(cfg["batch_size"]),
+                shuffle=(split == "train"),
+                num_workers=int(cfg.get("num_workers", 0)),
+                pin_memory=(device.type == "cuda"),
+            )
+            for split, mask in split_masks.items()
+        }
+        print(f"Panda checkpoint: {cfg['checkpoint']}")
+        print(
+            f"Encoder pooling: {pooling}; [B, {num_channels}, patches, {model.backbone.config.d_model}] "
+            f"-> classifier input {model.classifier.in_features}"
+        )
+
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
-    print(f"Panda checkpoint: {cfg['checkpoint']}")
-    print(
-        f"Encoder pooling: {pooling}; [B, {num_channels}, patches, {model.backbone.config.d_model}] "
-        f"-> classifier input {model.classifier.in_features}"
-    )
     print(f"Total params: {total:,}; trainable params: {trainable:,}")
 
     pos = float(y[split_masks["train"]].sum())
@@ -390,6 +686,8 @@ def main() -> None:
                     "epoch": epoch,
                     "best_val_score": best_val,
                     "panda_checkpoint": cfg["checkpoint"],
+                    "pooling": pooling,
+                    "cached_backbone_features": cache_enabled,
                 },
                 output_root / "checkpoint_best.pt",
             )

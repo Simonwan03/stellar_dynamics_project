@@ -220,48 +220,38 @@ trajectory sampling clock uses different units and is not added to the horizons.
 
 ## Task D
 
-Task D now predicts the same-group minimum instability time by default.
-For each of the 16 `(i, i+16)` perturbation pairs, it reads only the scalar
-`aratios_complete` trajectory, forms
-`R_a(t) = |a_ratio_i(t) - a_ratio_j(t)| / |a_ratio_i(0) - a_ratio_j(0)|`,
-fits the slope of `log R_a(t)` in the configured growth interval, takes the
-largest valid pair slope, and uses
-`log_min_instability_time = log(1 / max(lambda_pair))` as the training target.
-This is an observable-based finite-time label, not a variational-equation
-maximum Lyapunov exponent. Use `--label-observable phase_space` to restore the
-legacy position+velocity construction.
+Task D now predicts a semimajor-axis Lyapunov proxy by default. For each of the
+16 `(i, i+16)` perturbation pairs, it reads the inner-orbit semimajor axis from
+`smaxes_complete[..., 0]` and computes
+`R_ij(t) = |a_i(t)-a_j(t)| / max(|a_i(0)-a_j(0)|, eps)`.
+The pair proxy is the first sampled time satisfying `R_ij(t) >= threshold`
+(default `1000`). The system target is the earliest proxy among the 16 pairs,
+`tau_proxy = min_ij tau_ij`, and the regression target is `log(tau_proxy)`.
 
-Use `--target-mode lyapunov_proxy --lyapunov-aggregation median` for the older
-typical-system median proxy.
-
-Because the scalar aratio is not guaranteed to have a clean single-exponential
-growth segment, the aratio run uses relaxed fit-quality settings in the example
-below (`--lambda-r2-min 0 --min-valid-lambda-pairs 1`). The minimum-instability
-mode does not require pair-to-pair MAD consistency; add
-`--require-pair-consistency` only for the older conservative filter.
-
-For an observed crossing-time upper bound instead of a Lyapunov-time proxy, use:
+The first sampled crossing is an upper bound on the continuous crossing time.
+Systems for which no pair crosses are right-censored and excluded from point
+regression, while their fraction is retained in diagnostics. This proxy is not
+a variational-equation maximum Lyapunov time.
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
-  --label-observable aratio \
-  --lambda-r2-min 0 \
-  --max-pair-log-mad 2 \
-  --target-mode crossing_upper \
+  --label-observable smax \
+  --target-mode lyapunov_proxy \
   --aggregation min \
-  --output-dir results/task_d_initial_crossing_upper \
+  --censoring-rule all_pairs \
+  --output-dir results/task_d_initial_lyapunov_proxy \
   --mlp-epochs 80
 ```
 
-This predicts the earliest sampled time with `R(t) > threshold` among the 16
-valid pairs. Systems with no observed crossing are right-censored and excluded
-from point-regression training; their fraction is retained in diagnostics.
+`crossing_upper` remains as a backward-compatible alias for `lyapunov_proxy`.
+The former slope-fit target is available explicitly as
+`--target-mode fitted_lyapunov_time --lyapunov-aggregation median`.
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
-  --label-observable aratio \
+  --label-observable smax \
   --target-mode min_instability \
   --lyapunov-aggregation max \
   --output-dir results/task_d_initial \
@@ -273,14 +263,11 @@ conda run -n stellar python -m tasks.task_d \
   --mlp-epochs 80
 ```
 
-The prefix setting predicts the same minimum-instability target using `cnn_orbital`,
-`cnn_phase_space`, and `set_cnn`. Its current label fit uses the stored full
-trajectory, including the prefix interval, so a future-only non-overlapping fit
-is required before interpreting it as strict forecasting.
+The prefix setting predicts the same proxy using `cnn_orbital`,
+`cnn_phase_space`, and `set_cnn`. A strict forecasting interpretation requires
+the proxy crossing to occur after the observation prefix.
 
-The minimum-instability mode is limited by coarse sampling in the early growth ranges.
-The crossing-upper mode avoids fitting those slopes, but its time precision is
-still limited by the first sampled crossing point.
+The proxy's time precision is limited by the stored trajectory sampling grid.
 
 ## Task E
 

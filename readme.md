@@ -395,7 +395,7 @@ Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
 32 条扰动 variation 的集合结构最有效。各模型误差总体随预测 horizon
 增长，符合混沌系统长期可预测性逐渐下降的预期。
 
-### Task D: Minimum-Instability-Time Regression
+### Task D: Lyapunov-Proxy Regression
 
 入口脚本：[tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 
@@ -403,61 +403,46 @@ Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
 
 **任务定义**
 
-`Task D` 默认只用 `aratios_complete` 构造同组最小失稳时间 label：
+`Task D` 默认读取 `smaxes_complete[..., 0]` 的内轨道半长轴，构造发散 proxy：
 
-- 对 16 个 `(i, i+16)` perturbation pairs，读取标量 `aratios_complete`
-- 计算 `R_a(t) = |a_ratio_i(t)-a_ratio_j(t)| / |a_ratio_i(0)-a_ratio_j(0)|`
-- 在 `log R_a(t)` 的配置增长段拟合 slope `lambda_aratio`
-- 对合格 pair 的 slope 取最大值 `lambda_fast = max(lambda_pair)`
-- 定义 `min_instability_time = 1 / lambda_fast`
-- 主训练目标为 `log_min_instability_time = log(1 / max(lambda_pair))`
+- 对 16 个 `(i, i+16)` perturbation pairs，读取两条轨迹的内轨道半长轴
+- 计算 `R_ij(t) = |a_i(t)-a_j(t)| / max(|a_i(0)-a_j(0)|, eps)`
+- 定义 pair-level proxy：`tau_ij = min{t: R_ij(t) >= 1000}`
+- 对 16 个 pair 取最早 crossing：`tau_proxy = min_ij tau_ij`
+- 主训练目标为 `log(tau_proxy)`
 
-这表示同组 16 个扰动方向中，只要最快的一个方向开始失稳，就把该 system
-视为进入失稳状态。若想恢复典型 system Lyapunov-time proxy，可使用
-`--target-mode lyapunov_proxy --lyapunov-aggregation median`。
+这表示同组 16 个扰动方向中，只要一个方向达到初始差异的 1000 倍，就把首次
+采样到的 crossing time 作为 system-level proxy。无 crossing 的 system 是
+right-censored 样本，不进入 point-regression 训练，但会保留在诊断统计中。
 
-这里的 label 是由 aratio 观测量得到的有限时间增长标签，不是通过变分方程
-计算的严格最大 Lyapunov 指数。若需要旧的相空间构造，可显式设置
-`--label-observable phase_space`。
-
-由于 aratio 是单一标量观测量，增长段不一定满足严格单指数形式；aratio 主实验
-在最小失稳模式下只要求至少一个有效正 slope，不要求 pair 间一致性；建议显式记录
-`--lambda-r2-min 0 --min-valid-lambda-pairs 1`。若要恢复旧的一致性筛选，加入
-`--require-pair-consistency`。
-
-脚本同时计算 `1 < R < 10`、`1 < R < 30`、`1 < R < 100` 三个区间的
-slope sensitivity，并保留 `R > 1000` 的首次 crossing time `tau_cross` 作为辅助诊断，
-不再将 `tau_cross` 作为训练 target。
+这是易计算的观测量 proxy，并不是由变分方程得到的严格最大 Lyapunov time。
+首次离散采样 crossing 还是连续 crossing time 的上界，其时间精度受存储采样网格限制。
 
 主实验命令：
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
-  --target-mode min_instability \
-  --label-observable aratio \
-  --lyapunov-aggregation max \
-  --lambda-r2-min 0 \
-  --min-valid-lambda-pairs 1 \
+  --target-mode lyapunov_proxy \
+  --label-observable smax \
+  --threshold 1000 \
+  --aggregation min \
+  --censoring-rule all_pairs \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --group-size 32 \
-  --output-dir results/task_d_initial_min_instability \
+  --output-dir results/task_d_initial_lyapunov_proxy \
   --device cuda
 ```
 
-如果只需要首次 crossing 的观测上界，可使用
-`--target-mode crossing_upper --aggregation min`。此时 target 是 16 个有效
-pair 中最早出现 `R(t) > threshold` 的采样时间；未 crossing 的 system 属于
-right-censored 样本，会被排除出 point-regression 训练，但其比例会写入诊断结果。
+`crossing_upper` 保留为 `lyapunov_proxy` 的兼容别名。原先通过增长段 slope 倒数
+构造的 target 改名为 `--target-mode fitted_lyapunov_time`。
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
-  --label-observable aratio \
-  --lambda-r2-min 0 \
-  --max-pair-log-mad 2 \
-  --target-mode crossing_upper \
+  --label-observable smax \
+  --target-mode lyapunov_proxy \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --group-size 32 \
@@ -465,7 +450,7 @@ conda run -n stellar python -m tasks.task_d \
   --aggregation min \
   --test-size 0.2 \
   --seed 42 \
-  --output-dir results/task_d_initial_crossing_upper \
+  --output-dir results/task_d_initial_lyapunov_proxy \
   --completion-table-name completed_systems_sampling_2.txt \
   --mlp-epochs 80 \
   --batch-size 128 \
@@ -476,26 +461,24 @@ conda run -n stellar python -m tasks.task_d \
 
 - 默认主实验：`--task-setting initial`
 - 输入只使用 `t=0` 的 masses、质量比、轨道尺度、偏心率、倾角、能量、角动量和周期等初始条件
-- 目标：`log(min_instability_time)`
+- 目标：`log(tau_proxy)`
 - 模型：`constant_median`、`random_forest`、`mlp`
 
 **Task D-Prefix：early-window prediction**
 
 - 显式使用：`--task-setting prefix`
-- 目标与 initial setting 相同，仍为 `log(min_instability_time)`
+- 目标与 initial setting 相同，仍为 `log(tau_proxy)`
 - 模型：`cnn_orbital`、`cnn_phase_space`、`set_cnn`
-- 当前 proxy 使用整条保存轨迹拟合，包含 prefix 区间；若要把 prefix 版本解释为严格的未来预测，
-  应改为只在 `t > t_obs` 的非重叠未来窗口拟合 label
+- prefix 版本应确保 crossing 发生在 `t_obs` 之后，才能解释为严格的未来预测
 
 神经网络默认使用 `SmoothL1Loss(beta=0.5)`。评价报告 log-time MAE/RMSE、
-原始 Lyapunov-time proxy MAE、Spearman、Pearson、factor-2/factor-3 accuracy。
+原始 proxy-time MAE、Spearman、Pearson、factor-2/factor-3 accuracy。
 
 **数据分辨率限制**
 
-当前最小失稳时间模式的 pair slope 拟合受 `dataset_v3` 时间采样间隔约为 `50000` 的限制。抽样检查中，不少 pair 从
-`R(0)=1` 在第一个非零采样点直接跳到 `R≈400–1500`，使 `1–10`、`1–30`
-甚至 `1–100` 区间没有足够的观测点。crossing-upper 模式不拟合这些 slope，
-但时间精度仍由首次 crossing 的采样网格决定。
+`dataset_v3` 的时间采样间隔约为 `50000`。不少 pair 从 `R(0)=1` 在第一个
+非零采样点直接跳到 `R≈400–1500`，因此 proxy 的时间精度由首次 crossing 的
+采样网格决定。
 
 当前这套高质量筛选口径下尚无可用于正式横向比较的完整模型指标表；Task D
 结果应在提高早期时间采样分辨率或改用 variational equations 后重新评估。
@@ -880,7 +863,7 @@ cache；如果缓存放在更快的本地磁盘，可用 `--cache-dir PATH` 指�
 
 ### Task D
 
-当前 Task D 的 initial-condition 主实验预测同组最小失稳时间：
+当前 Task D 的 initial-condition 主实验预测半长轴 Lyapunov proxy：
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
@@ -889,18 +872,10 @@ conda run -n stellar python -m tasks.task_d \
   --sampling-id 2 \
   --group-size 32 \
   --threshold 1000 \
-  --target-mode min_instability \
-  --label-observable aratio \
-  --lyapunov-aggregation max \
-  --growth-lower 1 \
-  --growth-upper 100 \
-  --growth-sensitivity-uppers 10 30 100 \
-  --min-growth-points 5 \
-  --lambda-r2-min 0 \
-  --min-valid-lambda-pairs 1 \
-  --max-pair-log-mad 2 \
-  --aggregation median \
-  --censoring-rule median_pair \
+  --target-mode lyapunov_proxy \
+  --label-observable smax \
+  --aggregation min \
+  --censoring-rule all_pairs \
   --feature-aggregation first \
   --test-size 0.2 \
   --seed 42 \
@@ -926,17 +901,14 @@ Prefix setting：
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --task-setting prefix \
-  --target-mode min_instability \
-  --lyapunov-aggregation max \
+  --target-mode lyapunov_proxy \
+  --label-observable smax \
   --dataset-dir dataset_v3 \
   --sampling-id 2 \
   --group-size 32 \
   --threshold 1000 \
-  --growth-lower 1 \
-  --growth-upper 100 \
-  --growth-sensitivity-uppers 10 30 100 \
-  --lambda-r2-min 0 \
-  --min-valid-lambda-pairs 1 \
+  --aggregation min \
+  --censoring-rule all_pairs \
   --prefix-len 200 \
   --prefix-time-stride 1 \
   --sequence-aggregation mean_std \
@@ -950,8 +922,10 @@ conda run -n stellar python -m tasks.task_d \
 
 常用参数：
 
-- `--force-recompute`: 忽略缓存标签，重新计算 slope、minimum-instability label 和 crossing-time 诊断
-- `--target-mode min_instability`: 使用有效 pair 中最大 `lambda` 的倒数作为最小失稳时间；默认只需 1 个有效 pair
+- `--force-recompute`: 忽略缓存标签并重新计算 proxy
+- `--target-mode lyapunov_proxy`: 预测 `R_ij(t) >= threshold` 的首次采样时间；这是默认模式
+- `--aggregation min|median|mean`: 聚合 16 个 pair 的 proxy time；默认 `min`
+- `--target-mode fitted_lyapunov_time`: 使用增长 slope 倒数的旧目标
 - `--lyapunov-aggregation max|median|mean`: 控制 Lyapunov pair slope 的聚合方式
 - `--require-pair-consistency`: 恢复 pair 间 MAD 一致性筛选
 - `--lambda-r2-min`, `--min-valid-lambda-pairs`, `--max-pair-log-mad`: 调整 slope 与 pair consistency 质量筛选
