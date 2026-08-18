@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from tasks.task_d.main import build_arg_parser
+from tasks.task_d.sensitivity import build_arg_parser as build_sensitivity_arg_parser
 from tasks.task_d.pipeline import (
     DEFAULT_VALID_PAIRS,
     _aggregate_tau,
@@ -153,6 +154,12 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertEqual(args.target_mode, "lyapunov_proxy")
         self.assertEqual(args.aggregation, "min")
         self.assertEqual(args.censoring_rule, "all_pairs")
+        self.assertEqual(args.threshold, 1.0e4)
+
+    def test_sensitivity_grid_defaults_cover_requested_comparison(self) -> None:
+        args = build_sensitivity_arg_parser().parse_args([])
+        self.assertEqual(args.thresholds, (1.0e3, 3.0e3, 1.0e4, 3.0e4))
+        self.assertEqual(args.aggregations, ("min", "median"))
 
     def test_fitted_lyapunov_time_compatibility_mode_is_available(self) -> None:
         args = build_arg_parser().parse_args(["--target-mode", "fitted_lyapunov_time"])

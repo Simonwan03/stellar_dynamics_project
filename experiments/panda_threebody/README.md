@@ -190,6 +190,52 @@ Current run status in this environment:
 - Outputs are under `outputs/unbound_dataset/unbound_orbital15_dataset/`.
 - Test metrics: accuracy `0.8844`, F1 `0.9040`, AUROC `0.9509`.
 
+## Chronos-2 Task B Classification (`prefix=96`)
+
+The full Task B split was encoded with the local Chronos-2 checkpoint and a
+frozen-backbone linear probe was trained on the resulting features.
+
+- Split: `125984 / 13984 / 19985` train/validation/test samples, identical to the Panda Task B split.
+- Input: `orbital15` with shape `(15, 96)`; Chronos-2 uses six 16-step context patches.
+- Feature: the penultimate `[REG]` token (token order is context patches, `[REG]`, masked-output patch), giving `15 x 768 = 11520` features per sample.
+- Cache: `159953 x 11520`, stored as `float16` in `outputs/panda_unbound_dataset/chronos2_task_b_prefix96_reg_features.float16.npy`.
+- Classifier: one linear layer with `11521` trainable parameters, trained for 20 epochs on CUDA.
+
+Reproduce the linear-probe run from this directory:
+
+```bash
+conda run -n stellar python scripts/train_chronos2_task_b_linear.py \
+  --feature-cache outputs/panda_unbound_dataset/chronos2_task_b_prefix96_reg_features.float16.npy \
+  --prefix-dir ../../results/task_b_prefix_ablation/prefix_512 \
+  --output-dir outputs/panda_unbound_dataset/chronos2_task_b_split_prefix96_reg \
+  --epochs 20 --batch-size 2048 --device cuda
+```
+
+### Test-set comparison
+
+The positive label is shown in the `target` column; both models use threshold
+`0.5` for the thresholded metrics. `n=19985` for every row below.
+
+| Target | Model | Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Unbound | Chronos-2 REG, prefix 96 | 0.86645 | 0.95000 | 0.84941 | 0.89689 | 0.95076 | 0.97745 |
+| Unbound | Panda, prefix 96 | 0.86715 | 0.94161 | 0.85899 | 0.89840 | 0.94545 | 0.97473 |
+| Stable | Chronos-2 REG, prefix 96 | 0.86645 | 0.73500 | 0.90331 | 0.81051 | 0.95076 | 0.89956 |
+| Stable | Panda, prefix 96 | 0.86715 | 0.74368 | 0.88479 | 0.80812 | 0.94545 | 0.88375 |
+
+Confusion matrices are ordered as `[[TN, FP], [FN, TP]]`:
+
+- Unbound: Chronos-2 `[[5708, 611], [2058, 11608]]`; Panda `[[5591, 728], [1927, 11739]]`.
+- Stable: Chronos-2 `[[11608, 2058], [611, 5708]]`; Panda `[[11739, 1927], [728, 5591]]`.
+
+Chronos-2 improves test AUROC by `+0.00531` and stable-target AUPRC by
+`+0.01581` over Panda at the same prefix. Panda with the longer `prefix=512`
+remains stronger overall (`test AUROC=0.97872`, stable-target `F1=0.89130`).
+
+Validation AUROC is `0.95718` for Chronos-2 and `0.94932` for Panda at
+`prefix=96`. Full metrics and predictions are saved under
+`outputs/panda_unbound_dataset/chronos2_task_b_split_prefix96_reg/`.
+
 ## Current Audit Snapshot
 
 - Local repo code is notebook-heavy; the reusable data logic comes primarily from `read_data.ipynb`, `task_b.ipynb`, and `task_c.ipynb`.

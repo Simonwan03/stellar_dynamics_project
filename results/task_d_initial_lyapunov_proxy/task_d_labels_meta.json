@@ -1,0 +1,201 @@
+{
+  "label_version": 6,
+  "target": "log_finite_time_lyapunov_time_proxy",
+  "label_observable": "smax",
+  "lyapunov_aggregation": "median",
+  "require_pair_consistency": false,
+  "label_start_index": 0,
+  "label_window": "full stored trajectory",
+  "num_systems": 4998,
+  "num_valid_lyapunov_labels": 0,
+  "num_rejected_lyapunov_labels": 4998,
+  "dropped_invalid_groups": 2,
+  "dropped_nan_labels": 0,
+  "pair_phase_distance0_summary": {
+    "count": 0.0,
+    "mean": NaN,
+    "median": NaN,
+    "min": NaN,
+    "max": NaN
+  },
+  "pair_label_distance0_summary": {
+    "count": 79968.0,
+    "mean": 9.99999900849804e-07,
+    "median": 9.999999974752427e-07,
+    "min": 9.984806190743711e-07,
+    "max": 1.0018543576961747e-06
+  },
+  "pair_lambda_summary": {
+    "count": 36205.0,
+    "mean": 2.5908166655665575e-06,
+    "median": 1.228055534444237e-06,
+    "min": -1.2413819156626067e-05,
+    "max": 2.3559987145122893e-05
+  },
+  "lambda_fast_summary": {
+    "count": 1158.0,
+    "mean": 1.0612042934931573e-05,
+    "median": 1.0353260620934453e-05,
+    "min": 6.034268383017502e-11,
+    "max": 2.3559987145122893e-05
+  },
+  "pair_lambda_r2_summary": {
+    "count": 36205.0,
+    "mean": 0.31433471005155716,
+    "median": 0.26224323380234627,
+    "min": 1.732488930095144e-09,
+    "max": 0.997464392938715
+  },
+  "valid_lambda_pair_count_summary": {
+    "count": 4998.0,
+    "mean": 0.36214485794317725,
+    "median": 0.0,
+    "min": 0.0,
+    "max": 6.0
+  },
+  "pair_lambda_log_mad_summary": {
+    "count": 438.0,
+    "mean": 0.20185466879815048,
+    "median": 0.15220494944787477,
+    "min": 0.000242688509927369,
+    "max": 2.0488868894954404
+  },
+  "growth_range_sensitivity": {
+    "1_10": {
+      "valid_system_count": 0,
+      "valid_system_fraction": 0.0,
+      "lambda_summary": {
+        "count": 354.0,
+        "mean": 4.268026717221404e-06,
+        "median": 4.085259298143043e-06,
+        "min": 6.034268383017502e-11,
+        "max": 1.2002756148032581e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 0.0,
+        "mean": NaN,
+        "median": NaN,
+        "min": NaN,
+        "max": NaN
+      }
+    },
+    "1_30": {
+      "valid_system_count": 0,
+      "valid_system_fraction": 0.0,
+      "lambda_summary": {
+        "count": 703.0,
+        "mean": 7.031391071657781e-06,
+        "median": 6.82269155610557e-06,
+        "min": 6.034268383017502e-11,
+        "max": 1.5447677640336252e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 0.0,
+        "mean": NaN,
+        "median": NaN,
+        "min": NaN,
+        "max": NaN
+      }
+    },
+    "1_100": {
+      "valid_system_count": 0,
+      "valid_system_fraction": 0.0,
+      "lambda_summary": {
+        "count": 1158.0,
+        "mean": 9.703974890695735e-06,
+        "median": 9.4873373308628e-06,
+        "min": 6.034268383017502e-11,
+        "max": 2.2075716097426333e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 0.0,
+        "mean": NaN,
+        "median": NaN,
+        "min": NaN,
+        "max": NaN
+      }
+    }
+  },
+  "valid_pairs": [
+    [
+      0,
+      16
+    ],
+    [
+      1,
+      17
+    ],
+    [
+      2,
+      18
+    ],
+    [
+      3,
+      19
+    ],
+    [
+      4,
+      20
+    ],
+    [
+      5,
+      21
+    ],
+    [
+      6,
+      22
+    ],
+    [
+      7,
+      23
+    ],
+    [
+      8,
+      24
+    ],
+    [
+      9,
+      25
+    ],
+    [
+      10,
+      26
+    ],
+    [
+      11,
+      27
+    ],
+    [
+      12,
+      28
+    ],
+    [
+      13,
+      29
+    ],
+    [
+      14,
+      30
+    ],
+    [
+      15,
+      31
+    ]
+  ],
+  "group_size": 32,
+  "threshold": 1000.0,
+  "growth_lower": 1.0,
+  "growth_upper": 100.0,
+  "growth_sensitivity_uppers": [
+    10.0,
+    30.0,
+    100.0
+  ],
+  "min_growth_points": 5,
+  "lambda_r2_min": 0.8,
+  "min_valid_lambda_pairs": 8,
+  "max_pair_log_mad": 0.75,
+  "divergence_observable": "center-of-mass position+velocity phase-space distance",
+  "aggregation": "min",
+  "censoring_rule": "all_pairs"
+}

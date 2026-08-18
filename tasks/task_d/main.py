@@ -47,7 +47,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-dir", type=Path, default=ROOT / "dataset_v3")
     parser.add_argument("--sampling-id", type=int, default=2)
     parser.add_argument("--group-size", type=int, default=32)
-    parser.add_argument("--threshold", type=float, default=1e3)
+    parser.add_argument("--threshold", type=float, default=1e4)
     parser.add_argument("--growth-lower", type=float, default=1.0)
     parser.add_argument("--growth-upper", type=float, default=100.0)
     parser.add_argument(

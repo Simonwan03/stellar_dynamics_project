@@ -88,7 +88,7 @@ class PipelineConfig:
     sampling_id: int = 2
     group_size: int = DEFAULT_GROUP_SIZE
     valid_pairs: tuple[tuple[int, int], ...] = DEFAULT_VALID_PAIRS
-    threshold: float = 1e3
+    threshold: float = 1e4
     growth_lower: float = 1.0
     growth_upper: float = 100.0
     growth_sensitivity_uppers: tuple[float, ...] = (10.0, 30.0, 100.0)
@@ -2171,6 +2171,14 @@ def _resolve_device(device_name: str | None = None) -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _seed_torch(seed: int) -> None:
+    """Reset neural initialization and minibatch order for comparable runs."""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 class MLPRegressor(nn.Module):
     def __init__(self, input_dim: int, dropout: float = 0.1) -> None:
         super().__init__()
@@ -2430,6 +2438,7 @@ def run_mlp_baseline(
     device_name: str | None = None,
 ) -> dict[str, Any]:
     device_name = _resolve_device(device_name)
+    _seed_torch(int(split["random_state"]))
     system_ids = labels_df["system_id"].to_numpy(dtype=np.int64)
     y = labels_df["log_tau_system"].to_numpy(dtype=np.float64)
     censored = labels_df["system_censored"].to_numpy(dtype=bool)
@@ -2503,6 +2512,7 @@ def run_cnn_baseline(
     device_name: str | None = None,
 ) -> dict[str, Any]:
     device_name = _resolve_device(device_name)
+    _seed_torch(int(split["random_state"]))
     system_ids = labels_df["system_id"].to_numpy(dtype=np.int64)
     y = labels_df["log_tau_system"].to_numpy(dtype=np.float64)
     censored = labels_df["system_censored"].to_numpy(dtype=bool)
@@ -2571,6 +2581,7 @@ def run_set_cnn_baseline(
     device_name: str | None = None,
 ) -> dict[str, Any]:
     device_name = _resolve_device(device_name)
+    _seed_torch(int(split["random_state"]))
     system_ids = labels_df["system_id"].to_numpy(dtype=np.int64)
     y = labels_df["log_tau_system"].to_numpy(dtype=np.float64)
     censored = labels_df["system_censored"].to_numpy(dtype=bool)

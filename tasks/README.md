@@ -225,7 +225,7 @@ Task D now predicts a semimajor-axis Lyapunov proxy by default. For each of the
 `smaxes_complete[..., 0]` and computes
 `R_ij(t) = |a_i(t)-a_j(t)| / max(|a_i(0)-a_j(0)|, eps)`.
 The pair proxy is the first sampled time satisfying `R_ij(t) >= threshold`
-(default `1000`). The system target is the earliest proxy among the 16 pairs,
+(main default `10000`). The system target is the earliest proxy among the 16 pairs,
 `tau_proxy = min_ij tau_ij`, and the regression target is `log(tau_proxy)`.
 
 The first sampled crossing is an upper bound on the continuous crossing time.
@@ -238,6 +238,7 @@ conda run -n stellar python -m tasks.task_d \
   --task-setting initial \
   --label-observable smax \
   --target-mode lyapunov_proxy \
+  --threshold 10000 \
   --aggregation min \
   --censoring-rule all_pairs \
   --output-dir results/task_d_initial_lyapunov_proxy \
@@ -247,6 +248,16 @@ conda run -n stellar python -m tasks.task_d \
 `crossing_upper` remains as a backward-compatible alias for `lyapunov_proxy`.
 The former slope-fit target is available explicitly as
 `--target-mode fitted_lyapunov_time --lyapunov-aggregation median`.
+
+Run the full threshold and aggregation sensitivity grid with:
+
+```bash
+conda run -n stellar python -m tasks.task_d.sensitivity \
+  --thresholds 1000 3000 10000 30000 \
+  --aggregations min median \
+  --output-dir results/task_d_proxy_sensitivity \
+  --device cuda
+```
 
 ```bash
 conda run -n stellar python -m tasks.task_d \

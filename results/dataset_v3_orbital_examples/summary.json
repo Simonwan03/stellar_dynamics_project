@@ -1,0 +1,238 @@
+{
+  "examples": [
+    {
+      "row": 0,
+      "run_id": 0,
+      "system_id": 0,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row0_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 1.0,
+        "tAnos_complete": 0.998003992015968,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    },
+    {
+      "row": 800,
+      "run_id": 800,
+      "system_id": 25,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row800_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 0.08782435129740519,
+        "tAnos_complete": 1.0,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    },
+    {
+      "row": 1600,
+      "run_id": 1600,
+      "system_id": 50,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row1600_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 0.0029940119760479044,
+        "tAnos_complete": 1.0,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    },
+    {
+      "row": 2400,
+      "run_id": 2400,
+      "system_id": 75,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row2400_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 0.2944111776447106,
+        "tAnos_complete": 1.0,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    },
+    {
+      "row": 3200,
+      "run_id": 3200,
+      "system_id": 100,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row3200_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 1.0,
+        "tAnos_complete": 1.0,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    },
+    {
+      "row": 4000,
+      "run_id": 4000,
+      "system_id": 125,
+      "variation_id": 0,
+      "source": "/home/wan/stellar_dynamics/dataset_v3/results_batch_00_sampling_2.hdf5",
+      "output": "results/dataset_v3_orbital_examples/sampling2_shard00_row4000_orbital_parameters.png",
+      "parameters": [
+        "aratios_complete",
+        "smaxes_complete",
+        "eccs_complete",
+        "incs_complete",
+        "APs_complete",
+        "LANs_complete",
+        "periods_complete",
+        "tAnos_complete",
+        "energy_complete",
+        "angMomentum_complete"
+      ],
+      "time_slice": [
+        0,
+        2001,
+        4
+      ],
+      "angle_unit": "degree",
+      "unwrap_angles": false,
+      "finite_fraction": {
+        "aratios_complete": 1.0,
+        "smaxes_complete": 1.0,
+        "eccs_complete": 1.0,
+        "incs_complete": 1.0,
+        "APs_complete": 1.0,
+        "LANs_complete": 1.0,
+        "periods_complete": 1.0,
+        "tAnos_complete": 0.999001996007984,
+        "energy_complete": 1.0,
+        "angMomentum_complete": 1.0
+      }
+    }
+  ]
+}

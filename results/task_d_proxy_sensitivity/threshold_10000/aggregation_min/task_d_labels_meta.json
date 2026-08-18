@@ -1,0 +1,201 @@
+{
+  "label_version": 6,
+  "target": "log_finite_time_lyapunov_time_proxy",
+  "label_observable": "smax",
+  "lyapunov_aggregation": "max",
+  "require_pair_consistency": false,
+  "label_start_index": 0,
+  "label_window": "full stored trajectory",
+  "num_systems": 4998,
+  "num_valid_lyapunov_labels": 3304,
+  "num_rejected_lyapunov_labels": 1694,
+  "dropped_invalid_groups": 2,
+  "dropped_nan_labels": 0,
+  "pair_phase_distance0_summary": {
+    "count": 0.0,
+    "mean": NaN,
+    "median": NaN,
+    "min": NaN,
+    "max": NaN
+  },
+  "pair_label_distance0_summary": {
+    "count": 79968.0,
+    "mean": 9.99999900849804e-07,
+    "median": 9.999999974752427e-07,
+    "min": 9.984806190743711e-07,
+    "max": 1.0018543576961747e-06
+  },
+  "pair_lambda_summary": {
+    "count": 36205.0,
+    "mean": 2.5908166655665575e-06,
+    "median": 1.228055534444237e-06,
+    "min": -1.2413819156626067e-05,
+    "max": 2.3559987145122893e-05
+  },
+  "lambda_fast_summary": {
+    "count": 3304.0,
+    "mean": 7.5900497306989275e-06,
+    "median": 7.203550473209231e-06,
+    "min": 1.4673328069370536e-12,
+    "max": 2.3559987145122893e-05
+  },
+  "pair_lambda_r2_summary": {
+    "count": 36205.0,
+    "mean": 0.31433471005155716,
+    "median": 0.26224323380234627,
+    "min": 1.732488930095144e-09,
+    "max": 0.997464392938715
+  },
+  "valid_lambda_pair_count_summary": {
+    "count": 4998.0,
+    "mean": 6.917567026810724,
+    "median": 5.0,
+    "min": 0.0,
+    "max": 16.0
+  },
+  "pair_lambda_log_mad_summary": {
+    "count": 2988.0,
+    "mean": 0.6666887746863105,
+    "median": 0.5268764971226778,
+    "min": 0.0070393579241194715,
+    "max": 4.0144451916089885
+  },
+  "growth_range_sensitivity": {
+    "1_10": {
+      "valid_system_count": 2756,
+      "valid_system_fraction": 0.5514205682272909,
+      "lambda_summary": {
+        "count": 2756.0,
+        "mean": 2.570847175253081e-06,
+        "median": 2.186211141642061e-06,
+        "min": 7.304152159008515e-12,
+        "max": 1.2452294388223636e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 2756.0,
+        "mean": 88363720.90389556,
+        "median": 457412.3622181779,
+        "min": 80306.48560202033,
+        "max": 136908429374.19621
+      }
+    },
+    "1_30": {
+      "valid_system_count": 3095,
+      "valid_system_fraction": 0.6192476990796318,
+      "lambda_summary": {
+        "count": 3095.0,
+        "mean": 4.97102194026779e-06,
+        "median": 4.632955306962762e-06,
+        "min": 1.7988308977337657e-12,
+        "max": 1.9141647628118903e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 3095.0,
+        "mean": 419915130.8578068,
+        "median": 215844.9485789606,
+        "min": 52242.106814828694,
+        "max": 555916624102.82
+      }
+    },
+    "1_100": {
+      "valid_system_count": 3304,
+      "valid_system_fraction": 0.6610644257703081,
+      "lambda_summary": {
+        "count": 3304.0,
+        "mean": 7.5900497306989275e-06,
+        "median": 7.203550473209231e-06,
+        "min": 1.4673328069370536e-12,
+        "max": 2.3559987145122893e-05
+      },
+      "lyapunov_time_summary": {
+        "count": 3304.0,
+        "mean": 836732559.9308665,
+        "median": 138820.44908211124,
+        "min": 42444.844890630935,
+        "max": 681508649757.1226
+      }
+    }
+  },
+  "valid_pairs": [
+    [
+      0,
+      16
+    ],
+    [
+      1,
+      17
+    ],
+    [
+      2,
+      18
+    ],
+    [
+      3,
+      19
+    ],
+    [
+      4,
+      20
+    ],
+    [
+      5,
+      21
+    ],
+    [
+      6,
+      22
+    ],
+    [
+      7,
+      23
+    ],
+    [
+      8,
+      24
+    ],
+    [
+      9,
+      25
+    ],
+    [
+      10,
+      26
+    ],
+    [
+      11,
+      27
+    ],
+    [
+      12,
+      28
+    ],
+    [
+      13,
+      29
+    ],
+    [
+      14,
+      30
+    ],
+    [
+      15,
+      31
+    ]
+  ],
+  "group_size": 32,
+  "threshold": 10000.0,
+  "growth_lower": 1.0,
+  "growth_upper": 100.0,
+  "growth_sensitivity_uppers": [
+    10.0,
+    30.0,
+    100.0
+  ],
+  "min_growth_points": 5,
+  "lambda_r2_min": 0.0,
+  "min_valid_lambda_pairs": 1,
+  "max_pair_log_mad": 2.0,
+  "divergence_observable": "center-of-mass position+velocity phase-space distance",
+  "aggregation": "min",
+  "censoring_rule": "all_pairs"
+}
