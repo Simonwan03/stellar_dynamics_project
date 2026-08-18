@@ -386,6 +386,10 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 - `direct_mean_std`: 对 32 条 variation 分别计算逐时间点的 `mean / std / min / max`，拼接后直接回归 survival curve
 - `traj`: 每条 variation 先做 temporal encoding，再与 group context 融合
 - `dual`: 同时建模时间维和 variation 集合结构的 dual-attention 模型
+- `stats`: 对每个 `orbital15` 通道提取 Task-B 对齐的八统计量，再预测逐 variation hazard
+- `embedding_direct`: 直接使用冻结 Panda/Chronos 的 `15×768=11520` 维 embedding
+- `embedding_meanstd`: 对 15 个通道做 mean/std pooling 后使用 1536 维表示
+- `embedding_attention`: 对 15 个通道 embedding 学习 softmax attention 权重后池化
 
 所有 Task C 神经网络统一使用 discrete-time hazard head：
 
@@ -395,6 +399,172 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 - `traj` / `dual` 的 variation head 使用逐 variation、仅在 at-risk 区间计算的 hazard NLL；system head 使用 binomial hazard NLL
 - 训练时额外使用 system head 与 variation survival 均值之间的一致性损失
 - `direct` / `direct_mean_std` 使用由 32 条 variation 的区间存活数和失稳数得到的 binomial hazard NLL
+
+#### Event-time/censoring 版本（20 个 log-spaced bins）
+
+为避免把 7 个 survival fraction 反推成伪 hazard，新增了独立入口
+[`tasks/task_c/survival.py`](/home/wan/stellar_dynamics/tasks/task_c/survival.py)：
+
+```bash
+conda run -n stellar python -m tasks.task_c.survival \
+  --prefix-cache results/task_c_ablation/_cache \
+  --prefix-len 100 \
+  --prefix-representation orbital15 \
+  --models baseline,stats,cnn \
+  --hazard-bins 20 \
+  --hazard-t-max 10000 \
+  --variation-target full32 \
+  --epochs 40 \
+  --device cuda
+```
+
+它直接使用每条 variation 的 `time_unbound` 构造事件时间标签：事件 bin 之前
+target 为 0、事件 bin 为 1，之后由 at-risk mask 屏蔽；`time_unbound == 10000`
+按观测上限处理为 right-censored（所有 bin target=0、mask=1）。模型为每条
+variation 输出 20 个 conditional hazards，再用 `cumprod(1-hazard)` 得到严格
+单调的 survival curve；训练目标为 variation masked hazard NLL 加上权重
+`0.2` 的 system curve MAE（32 条 variation survival 的均值对真实 system curve）。
+默认 `t_min` 从有效数据最早正事件时间推断（sampling_2 为 5），也可通过
+`--hazard-t-min` 显式指定。输出同时保存 20-bin 的 MAE/RMSE、variation NLL、
+Brier/IBS、删失比例和 monotonicity 检查，并把曲线插值到原有 7 个 horizons，
+对应指标位于 `old_*` 字段。原 `python -m tasks.task_c` 入口仍保留，便于和旧
+的 7-horizon fraction 训练结果直接对比。
+
+在相同的 4998-system case split、orbital15 prefix=100 上，Stats 和 7/20 bins
+均训练 20 epochs；Stats 编码器现在与 Task B 类 SPoCK baseline 对齐，按每个
+orbital15 通道提取 `initial, final, mean, std, slope, min, max, delta` 八个
+统计量（共 120 维/variation），TCN 为 5-epoch pilot：
+
+| event model | bins | 20-bin MAE | final-bin MAE | old 7-horizon MAE | IBS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| mean baseline | 20 | 0.3093 | 0.3478 | 0.3720 | 0.1309 |
+| Stats | 7 | 0.0723 | 0.1493 | 0.1057 | 0.0669 |
+| Stats | 20 | **0.0671** | **0.1499** | **0.1029** | **0.0636** |
+| TCN (pilot) | 20 | 0.1160 | 0.2072 | 0.1625 | 0.0915 |
+
+八统计量重跑结果分别保存在
+`results/task_c_survival7_stats_full_taskb8/` 和
+`results/task_c_survival20_stats_full_taskb8/`；旧的 `stats_full` 目录保留作
+7-stat 历史结果参考。
+
+这组数字是正确 event-time/censoring 目标的第一版参考，不应直接与旧脚本中
+由 7 个 fraction 反推 pseudo-hazard 的 dual 数字混为同一实验；后续 Panda、
+Chronos 和 LoRA 也会复用这套 target、mask、head 和评估协议。
+
+已有的 prefix=96 frozen embedding 也可以直接接入同一套 hazard head：
+
+```bash
+conda run -n stellar python -m tasks.task_c.survival \
+  --embedding-cache experiments/panda_threebody/outputs/panda_unbound_dataset/panda_task_b_prefix_96_features_aligned.float16.npy \
+  --embedding-labels results/task_b_prefix_ablation/prefix_100/labels_filtered.csv \
+  --prefix-len 96 \
+  --models baseline,embedding_direct,embedding_meanstd,embedding_attention \
+  --hazard-bins 20 --epochs 10 --device cuda \
+  --output-dir results/task_c_survival20_panda
+```
+
+`embedding_direct` 不增加额外 projection，直接让 HazardHead 的第一层处理
+`15×768=11520` 维；`embedding_meanstd` 先变为 1536 维。相同 split、20 bins、
+10 epochs 的结果为（Stats 使用上述八统计量）：
+
+| encoder | pooling | 20-bin MAE | final-bin MAE | old 7-horizon MAE | IBS |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Stats (prefix=96, 10 epochs) | Task-B eight statistics | 0.0747 | 0.1605 | 0.1138 | 0.0670 |
+| Panda | direct | **0.0449** | 0.0923 | 0.0658 | 0.0473 |
+| Panda | mean+std | 0.0784 | 0.1272 | 0.0980 | 0.0651 |
+| Panda | attention pooling | 0.0527 | 0.1057 | 0.0760 | 0.0523 |
+| Chronos-2 | direct | **0.0388** | 0.0887 | **0.0616** | **0.0426** |
+| Chronos-2 | mean+std | 0.0582 | 0.1079 | 0.0787 | 0.0542 |
+| Chronos-2 | attention pooling | 0.0512 | 0.1068 | 0.0749 | 0.0501 |
+
+prefix=96 的八统计量重跑结果位于
+`results/task_c_survival20_stats_prefix96_taskb8/`。
+
+结果目录分别为
+`results/task_c_survival20_panda_direct/`、
+`results/task_c_survival20_panda_meanstd/` 和
+`results/task_c_survival20_panda_attention/`、
+`results/task_c_survival20_chronos_direct/`、
+`results/task_c_survival20_chronos_attention/`。attention pooling 在现有
+`[15,768]` 通道 embedding 上学习 softmax 权重并加权求和，不重新运行
+Panda/Chronos-2 backbone；这些 embedding cache 已先通过
+label fingerprint 检查，再按完整 system 重组为 `[4998,32,embedding_dim]`。
+Chronos-2 的 direct 和 mean+std 指标共同保存在
+`results/task_c_survival20_chronos_direct/metrics.json` 中。
+
+#### 20-bin 逐时间区间 MAE
+
+下面是同一 prefix=96、同一 case split、20-bin、10-epoch 协议下的
+`horizon_mae`。每个数表示该时间 bin 上的 system-level 平均绝对误差，时间边界
+为从 `5` 到 `10000` 的 log-spaced edges：
+
+| Bin | 上界时间 | Stats | Panda direct | Panda mean+std | Panda attention | Chronos direct | Chronos mean+std | Chronos attention |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 7.31 | 0.04197 | 0.03507 | 0.04858 | 0.04196 | 0.02962 | 0.04688 | 0.04452 |
+| 2 | 10.69 | 0.05077 | 0.04093 | 0.06731 | 0.04862 | 0.03117 | 0.05503 | 0.04885 |
+| 3 | 15.64 | 0.05426 | 0.04262 | 0.07390 | 0.05039 | 0.03060 | 0.05765 | 0.04887 |
+| 4 | 22.87 | 0.05428 | 0.04069 | 0.07605 | 0.04698 | 0.02760 | 0.05568 | 0.04477 |
+| 5 | 33.44 | 0.05168 | 0.03515 | 0.07667 | 0.04218 | 0.02374 | 0.05203 | 0.03892 |
+| 6 | 48.90 | 0.04805 | 0.02889 | 0.07377 | 0.03620 | 0.02001 | 0.04814 | 0.03273 |
+| 7 | 71.50 | 0.04255 | 0.02163 | 0.06483 | 0.02793 | 0.01542 | 0.03985 | 0.02523 |
+| 8 | 104.56 | 0.03973 | 0.02108 | 0.06043 | 0.02529 | 0.01593 | 0.03395 | 0.02182 |
+| 9 | 152.91 | 0.03620 | 0.01805 | 0.05699 | 0.02209 | 0.01480 | 0.02824 | 0.01938 |
+| 10 | 223.61 | 0.03544 | 0.01637 | 0.05140 | 0.02036 | 0.01217 | 0.02495 | 0.01882 |
+| 11 | 326.99 | 0.03451 | 0.01537 | 0.04850 | 0.01933 | 0.01319 | 0.02470 | 0.01998 |
+| 12 | 478.18 | 0.03429 | 0.01614 | 0.04830 | 0.02125 | 0.01340 | 0.02479 | 0.01930 |
+| 13 | 699.26 | 0.05861 | 0.03262 | 0.06274 | 0.03937 | 0.02954 | 0.04327 | 0.03539 |
+| 14 | 1022.57 | 0.08302 | 0.04844 | 0.07774 | 0.05599 | 0.04388 | 0.05879 | 0.05305 |
+| 15 | 1495.35 | 0.10538 | 0.06193 | 0.09334 | 0.07151 | 0.05728 | 0.07468 | 0.06940 |
+| 16 | 2186.72 | 0.12301 | 0.07222 | 0.10369 | 0.08356 | 0.06665 | 0.08519 | 0.08184 |
+| 17 | 3197.76 | 0.13642 | 0.08081 | 0.11264 | 0.09196 | 0.07459 | 0.09412 | 0.09071 |
+| 18 | 4676.24 | 0.14747 | 0.08704 | 0.12012 | 0.09957 | 0.08149 | 0.10228 | 0.09965 |
+| 19 | 6838.31 | 0.15547 | 0.08979 | 0.12444 | 0.10282 | 0.08620 | 0.10506 | 0.10386 |
+| 20 | 10000 | 0.16053 | 0.09229 | 0.12715 | 0.10567 | 0.08866 | 0.10795 | 0.10682 |
+
+逐 bin MAE 的均值、极小值和极大值如下：
+
+| Model | Mean over 20 bins | Minimum (bin) | Maximum (bin) |
+| --- | ---: | ---: | ---: |
+| Stats | 0.07468 | 0.03429 (12) | 0.16053 (20) |
+| Panda direct | 0.04486 | 0.01537 (11) | 0.09229 (20) |
+| Panda mean+std | 0.07843 | 0.04830 (12) | 0.12715 (20) |
+| Panda attention | 0.05265 | 0.01933 (11) | 0.10567 (20) |
+| Chronos direct | **0.03880** | **0.01217 (10)** | **0.08866 (20)** |
+| Chronos mean+std | 0.05816 | 0.02470 (11) | 0.10795 (20) |
+| Chronos attention | 0.05120 | 0.01882 (10) | 0.10682 (20) |
+
+共同趋势是 Bin 1–12 的误差逐渐下降，Bin 13 之后快速上升，说明长期 survival
+预测明显更困难。当前结果中 direct 在 Panda 和 Chronos-2 中都优于对应的
+mean+std 与 attention pooling；attention pooling 又稳定优于 mean+std。
+
+#### IBS 定义
+
+IBS（Integrated Brier Score）是所有时间 bin 上 Brier score 的平均。当前实现为：
+
+```python
+variation_error = variation_survival - variation_survival_target
+brier_by_bin = np.mean(variation_error**2, axis=(0, 1))
+ibs = brier_by_bin.mean()
+```
+
+它衡量完整 survival curve 的平方误差，越低越好；当前是离散 20-bin IBS，并且
+对 system、32 个 variation 和时间 bin 做等权平均。相同协议下的总体 IBS 为：
+这里采用当前 event-time target 的离散评估实现，不是额外使用 IPCW 的连续时间 IBS。
+
+| Model | IBS |
+| --- | ---: |
+| Stats | 0.0670 |
+| Panda direct | 0.0473 |
+| Panda mean+std | 0.0651 |
+| Panda attention | 0.0523 |
+| Chronos direct | **0.0426** |
+| Chronos mean+std | 0.0542 |
+| Chronos attention | 0.0501 |
+
+因此，在 Task C 当前的完整 survival-curve 任务上，预训练 Panda/Chronos 表示整体
+优于手工 Stats 表示；而 Task B 是单一稳定性分类，类 SPoCK + XGBoost 仍然可以
+凭借直接的轨道趋势特征取得更高 AUROC/F1。两类任务的指标和目标不同，不能直接
+把 AUROC/F1 与 survival MAE/IBS 混为一个排名。
 
 运行后会生成平均 survival curve、代表性 case、per-horizon MAE、`q_pred` vs `q_true` scatter，以及 true/pred/error heatmap 五张结果图。
 
@@ -864,6 +1034,23 @@ group split、测试集不稳定比例约 31.6%。以下是
 
 上表与本文前面 Task B 的旧版 100/200 摘要存在小数点末位差异，原因是历史运行的
 训练/保存时点不同；这里以当前 prefix 目录中的指标文件为准。
+
+#### Task B：类 SPoCK 统计特征与 frozen encoder 对比
+
+为了复现“类 SPoCK”思路，prefix=96 的 `orbital15` 每个通道提取
+`initial, final, mean, std, slope, min, max, delta` 八个统计量，共 `15×8=120`
+维，再使用 XGBoost 分类。它是 prefix-only 的 SPoCK-inspired baseline，不运行额外
+N-body integration，也不直接计算原始 SPoCK 的 MEGNO 特征。
+
+| Representation / head | AUROC | Unbound F1 | Stable F1 |
+| --- | ---: | ---: | ---: |
+| Panda frozen embedding + linear head | 0.94545 | 0.89840 | 0.80812 |
+| Chronos-2 frozen embedding + linear head | 0.95076 | 0.89689 | 0.81051 |
+| SPoCK-inspired statistics + XGBoost | **0.96253** | **0.92525** | **0.83479** |
+
+这说明类 SPoCK 的手工统计特征在 Task B 的单一稳定性分类目标上很有竞争力；它与
+Task C 的完整 survival-curve 预测不是同一个目标，不能直接用 AUROC/F1 与
+20-bin MAE/IBS 做数值比较。
 
 ### 3. Task C：multi-horizon survival 与 ablation
 

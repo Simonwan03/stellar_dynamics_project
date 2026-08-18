@@ -180,6 +180,71 @@ penalty between the system head and the mean variation-head survival curve.
 hazard negative log-likelihood from the aggregated 32-variation survival
 fractions.
 
+### Event-time/censoring upgrade (20 bins)
+
+For the event-time formulation use the separate entry point:
+
+```bash
+conda run -n stellar python -m tasks.task_c.survival \
+  --prefix-cache results/task_c_ablation/_cache \
+  --prefix-len 100 \
+  --prefix-representation orbital15 \
+  --models baseline,stats,cnn \
+  --hazard-bins 20 \
+  --hazard-t-max 10000 \
+  --variation-target full32 \
+  --epochs 40 \
+  --device cuda
+```
+
+This path constructs logarithmic time edges and uses each raw
+`time_unbound` as an event time. `time_unbound == 10000` (and values beyond
+the selected upper edge) are right-censored: the target is zero and the
+at-risk mask remains one in every bin. For an observed event, the masked BCE
+target is zero before the event bin, one in the event bin, and masked after
+it. The model predicts 20 conditional hazards per variation, obtains
+survival by `cumprod(1 - sigmoid(logits))`, and trains with
+`L_variation_NLL + 0.2 * MAE(mean_variation_survival, system_survival_target)`.
+The default `--hazard-t-min` is inferred from the earliest positive event in
+the valid data (5 for sampling_2); pass it explicitly when the prefix defines
+a stricter observation boundary. Outputs contain 20-bin MAE/RMSE,
+variation NLL, Brier/IBS, monotonicity checks, and a readout at the historical
+seven horizons under `old_*` metrics. The original `python -m tasks.task_c`
+entry point remains unchanged for direct comparison with the old seven-
+fraction training objective.
+
+The raw-trajectory `stats` encoder reuses the Task B SPoCK-inspired summary
+definition for every `orbital15` channel: `initial`, `final`, `mean`, `std`,
+`slope`, `min`, `max`, and `delta`. This gives `15 x 8 = 120` features per
+variation in Task C, with the same channel-major ordering as the Task B
+XGBoost baseline. Task C still applies train-only trajectory standardisation
+before the summaries are computed.
+
+Precomputed frozen Panda/Chronos embeddings can use the same target, loss, and
+hazard head without running the backbone again. In addition to `embedding_direct`
+and `embedding_meanstd`, `embedding_attention` learns a softmax weight over the
+15 channel embeddings (`[15,768]`) and feeds their weighted sum to the hazard
+head:
+
+```bash
+conda run -n stellar python -m tasks.task_c.survival \
+  --embedding-cache experiments/panda_threebody/outputs/panda_unbound_dataset/panda_task_b_prefix_96_features_aligned.float16.npy \
+  --embedding-labels results/task_b_prefix_ablation/prefix_100/labels_filtered.csv \
+  --prefix-len 96 \
+  --models baseline,embedding_direct,embedding_meanstd,embedding_attention \
+  --hazard-bins 20 --epochs 10 --device cuda \
+  --output-dir results/task_c_survival20_panda
+```
+
+Use `--models baseline,embedding_attention` to run this pooling variant. It
+does not unfreeze or rerun either frozen backbone.
+
+`embedding_direct` feeds the flattened `15 x 768 = 11520` representation
+directly into the first linear layer of `HazardHead`; `embedding_meanstd`
+reshapes it to `[15,768]`, pools mean and standard deviation, and uses 1536
+input features. The cache loader verifies the label fingerprint before grouping
+rows into complete `[system,32,embedding]` tensors.
+
 For the initial-condition control experiment, use `--input-mode initial
 --models baseline,ic_mlp`. It reads one `orbital15` vector at `t=0` per system
 and predicts the same seven-horizon survival curve with a `15 -> 128 -> 128 ->
