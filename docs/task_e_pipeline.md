@@ -33,19 +33,24 @@ X_{\mathrm{context}}\in\mathbb{R}^{L\times C},
 默认配置为：
 
 ```text
-context_len = 200
-pred_len    = 50
+context_len = 512
+pred_len    = 128
 stride      = 20
 ```
 
 对于 `orbital15`，模型输入和输出 shape 分别为：
 
 ```text
-input  [B, 200, 15]
-output [B,  50, 15]
+input  [B, 512, 15]
+output [B, 128, 15]
 ```
 
 模型一次性直接输出完整未来窗口，不进行逐步 autoregressive rollout。
+
+Task E 现在包含两个共享同一数据切分、窗口和 train-only scaler 的子实验：
+
+1. **E1 one-shot forecasting**：每个模型直接完成 `512 -> 128` 预测，研究 immediate future trajectory 的预测准确度。
+2. **E2 rolling forecasting**：复用同一个 E1 模型，连续进行四个 `128` 步 recursive blocks，得到最长 `512` 步预测；后续 block 只使用模型自己的预测更新 context，不使用未来 ground truth，研究误差累积速度。
 
 ## 2. 数据来源
 
@@ -247,9 +252,33 @@ window[context_len:] → target
 --max_val_windows
 --max_test_windows
 --window_sampling random|sequential
+--train-windows-per-trajectory 8
+--val-windows-per-trajectory 4
+--test-windows-per-trajectory 4
+--rolling-windows-per-trajectory 2
+--bootstrap-samples 1000
 ```
 
-如果限制每条 trajectory 的窗口数量，`sequential` 会保留最早窗口，`random` 会随机选择。正式实验更适合使用 random 或 early/middle/late 分层抽样。
+`stride=20` 只用于生成 candidate window starts，不意味着所有高度重叠窗口都必须在
+每个 epoch 中训练或评估。candidate windows 会先保留完整；默认 sampling protocol 为：
+
+```text
+train    每个 epoch 每条 trajectory 随机采样最多 8 个窗口
+val      每条 trajectory 固定采样最多 4 个窗口，位置约为 10/35/65/90%
+E1 test  每条 trajectory 固定采样最多 4 个窗口，位置约为 10/35/65/90%
+E2 test  每条 trajectory 固定采样最多 2 个 rolling starts，位置约为 25/75%
+```
+
+training sampling 每个 epoch 使用新的 deterministic random state，因此同一条
+trajectory 会在不同 epoch 覆盖不同阶段；validation/test sampling 不随 epoch 变化，
+所有模型使用完全相同的 evaluation windows。`--train-windows-per-trajectory 0`、
+`--val-windows-per-trajectory 0`、`--test-windows-per-trajectory 0` 和
+`--rolling-windows-per-trajectory 0` 可恢复使用全部 eligible candidate windows。
+
+当前实现优先保证 trajectory-balanced sampling：每条 eligible trajectory 每个 epoch
+最多贡献固定数量窗口。由于 trajectory 属于唯一的 base system，这已经消除了长寿命
+trajectory 在 window-level training 中的主要过度加权；最终 evaluation 仍进一步按
+system 等权聚合。
 
 `--max_train_variations_per_system` 在完成 train/validation/test 的 system-level
 切分之后，仅对训练集每个 system 内的 variations 做随机上限。例如：
@@ -310,11 +339,10 @@ Chronos-2 示例：
 
 ```bash
 conda run -n stellar python -m tasks.task_e \
-  --model chronos \
+  --model chronos2 \
   --chronos_model_id amazon/chronos-2 \
-  --chronos_variant chronos2 \
-  --context_len 200 \
-  --pred_len 50 \
+  --context_len 512 \
+  --pred_len 128 \
   --foundation_batch_size 16 \
   --output_dir runs/task_e_chronos2
 ```
@@ -331,43 +359,52 @@ experiments/panda_threebody/vendor/panda/
 
 Panda、TimesFM 和 Chronos 的 pretrained 权重由 Hugging Face cache 管理。
 
-### 8.4 Pretrained adapters
+### 8.4 Panda zero-shot
 
-- `panda_adapter`：Panda 前后加入 temporal adapters，默认冻结 Panda backbone。
+`panda_zero_shot` 直接使用 Panda 的原生 `512 -> 128` 配置，不再经过
+`panda_adapter`。`panda_adapter` 仍保留少量历史代码以便读取旧实验，但不再是当前
+Task E 的公开模型选项，也不会参与 E1/E2 benchmark。
 
-### 8.5 固定 prefix=64、预测 window=32 的 horizon 误差实验
+### 8.5 E1 one-shot 与 E2 rolling evaluation
 
-使用 `orbital15`、`context_len=64`、`pred_len=32`。将 `--adapter_decoder` 设为
-`gru` 时，Panda forecast 后使用 GRU decoder；它不把输出长度写死在最后一层，
-因此同一个模型可以通过 `forward(..., output_len=k)` 请求其他预测长度。
+E1 的代表性模型可以分别运行：
 
 ```bash
 conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
-  --model panda_adapter \
-  --context_len 64 \
-  --pred_len 32 \
-  --stride 20 \
-  --max_variations_per_system 2 \
-  --max_windows_per_trajectory 2 \
-  --window_sampling sequential \
-  --adapter_decoder gru \
-  --adapter_gru_layers 2 \
-  --num_train_windows_for_adapter 0 \
-  --output_dir runs/task_e_orbital15_ctx64_pred32_panda_gru
+  --model panda_zero_shot \
+  --context-len 512 \
+  --pred-len 128 \
+  --output-dir runs/task_e_e1_panda_zero_shot
 ```
 
-把 `--adapter_decoder gru` 改为 `mlp` 并使用另一个输出目录，即可得到同设置的
-MLP 对照实验。当前 completion-aware 过滤后，实际窗口数可能少于理论上的
-10000 条 trajectory / 20000 个窗口；测试集的 `horizon_metrics.csv` 保存第 1 到第 32 步的逐步误差；
-`test_horizon_trend.json` 统计每个误差指标的 `is_nondecreasing`、
-`overall_increased`、相邻步非下降比例、horizon-error Spearman 相关和线性斜率。
+当前公开的代表性模型包括 `ridge`、`tcn`、`patchtst`、`itransformer`、
+`chronos2` 和 `panda_zero_shot`。所有模型共享相同的 candidate pool、system split、
+deterministic validation/test windows 和 train-only scaler。
+
+在同一次运行中追加 `--run-rolling` 即可执行 E2，不会重新训练模型：
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --model panda_zero_shot \
+  --representation orbital15 \
+  --context-len 512 \
+  --pred-len 128 \
+  --rolling-blocks 4 \
+  --run-rolling \
+  --output-dir runs/task_e_e1e2_panda_zero_shot
+```
+
+只有真实轨迹仍有完整 `512` 步 future 且全部有限的 rolling starts 才进入 E2。
+E2 默认从每条 trajectory 的 rolling candidate starts 中固定选择最多两个分散位置，
+并保存 `rolling_horizon_mae`、四个 block MAE 和
+`error_amplification_ratio = block_4_mae / block_1_mae`。
 
 
 ## 9. 训练流程
 
-Supervised 和 adapter 模型共享以下流程：
+Supervised 模型共享以下流程：
 
 ```text
 train DataLoader
@@ -431,16 +468,54 @@ Adapter 还需要对应的原始 pretrained checkpoint。
 
 ## 11. Evaluation
 
-当前报告：
+Task E 的统计层级为：
+
+```text
+system
+  -> trajectory / variation
+      -> forecasting window
+```
+
+system split、bootstrap 和最终正文 summary 都以 system 为统计单位。任意 scalar
+error 先在 window 内计算，再按 trajectory 求均值、按 system 对 trajectory 均值，
+最后对 system 等权求均值。原来的 pooled window-weighted 值仍保存为 diagnostic，
+例如 `mae_z_window_weighted`；正文使用 `mae_z_system_balanced`，并将其兼容别名
+保存为 `mae_z`。
+
+E1 的正文核心指标为：
+
+- `mse_z`、`mae_z`、`rmse_z`；
+- Pearson correlation；
+- `horizon_mae[1:128]`；
+- `unit_circle_error`：对 orbital15 的 AP/LAN 两个角度各自的 sin/cos pair 计算
+  `|sin² + cos² - 1|`，并报告四个 pair 的总体均值。
+- `horizon_mae_system_balanced[1:128]`，兼容别名为 `horizon_mae`。
+- `bootstrap_ci95`：对 `mse_z`、`mae_z`、`rmse_z` 做 system-level bootstrap 95% CI，
+  默认 `--bootstrap-samples 1000`。
+
+同时保留以下 secondary metrics：
 
 - z-space MSE、MAE、RMSE；
 - transformed-feature-space MSE、MAE、RMSE；
+- Pearson/Spearman correlation；
 - z-space 和 transformed-feature-space sMAPE；
-- z-space 和 transformed-feature-space Spearman correlation；
 - horizon-wise metrics；
 - channel-wise metrics；
 - KL divergence；
 - Hellinger distance。
+
+E2 另外报告：
+
+- `rolling_horizon_mae[1:512]`；
+- `rolling_horizon_mae_system_balanced[1:512]`；
+- `block_1_mae`、`block_2_mae`、`block_3_mae`、`block_4_mae`；
+- `error_amplification_ratio`。
+- 四个 block MAE 和 amplification ratio 的 system-level bootstrap 95% CI。
+
+每个模型的运行目录保存 `e1_metrics.json`、`rolling_metrics.json`（启用 E2 时）、
+`summary.json`、`summary.csv` 和 `summary.md`。使用
+`python -m tasks.task_e.report --run-dirs ... --output-dir ...` 可汇总多个模型并生成
+`one_shot_horizon_mae.png` 与 `rolling_horizon_mae.png`。
 
 inverse scaler 只撤销 z-score，没有撤销 `log1p` 或 sin/cos，因此该空间是 transformed feature space，而不是真正的原始物理变量空间。新输出使用 `*_transformed`；为了兼容已有结果读取，暂时同时保留同值的 legacy `*_raw` 字段。
 
@@ -457,21 +532,36 @@ sMAPE 以百分数保存为 `smape_percent_z` 和 `smape_percent_raw`，范围�
 
 ## 12. 实验产物
 
+每次运行必须指定 `--output_dir`。`config.json` 的 `sampling_metadata` 会同时保存：
+
+```text
+candidate_*_windows
+sampled_train_windows_per_epoch
+sampled_val_windows
+sampled_e1_test_windows
+sampled_e2_rolling_windows
+num_*_systems
+num_*_trajectories
+*_windows_per_trajectory
+```
+
+这样可以明确区分 candidate pool 和实际训练/评估的窗口数量。
+
 每次运行必须指定 `--output_dir`：
 
 ```bash
 python -m tasks.task_e \
   --model tcn \
   --representation orbital15 \
-  --context_len 200 \
-  --pred_len 50 \
-  --output_dir runs/task_e_tcn_ctx200_pred50
+  --context_len 512 \
+  --pred_len 128 \
+  --output_dir runs/task_e_tcn_ctx512_pred128
 ```
 
 典型输出为：
 
 ```text
-runs/task_e_tcn_ctx200_pred50/
+runs/task_e_tcn_ctx512_pred128/
 ├── config.json
 ├── feature_metadata.json
 ├── scaler.npz
@@ -481,10 +571,23 @@ runs/task_e_tcn_ctx200_pred50/
 ├── test_metrics.json
 ├── horizon_metrics.csv
 ├── channel_metrics.csv
+├── e1_metrics.json
+├── summary.json
+├── summary.csv
+├── summary.md
 └── predictions_sample.npz
 ```
 
-Zero-shot 模型不会生成 `best_model.pt` 和 `train_log.csv`。
+启用 `--run-rolling` 后还会生成：
+
+```text
+├── rolling_metrics.json
+├── e2_metrics.json
+└── rolling_horizon_metrics.csv
+```
+
+Zero-shot 模型不会生成 `best_model.pt` 和 `train_log.csv`。E1/E2 的多模型图表由
+`tasks.task_e.report` 根据各模型运行目录汇总生成。
 
 ## 13. 当前优点
 
@@ -493,15 +596,13 @@ Zero-shot 模型不会生成 `best_model.pt` 和 `train_log.csv`。
 - 同一个 32-variation base system 不跨 split；
 - HDF5 lazy loading；
 - 保存完整 config、scaler 和 feature metadata；
-- validation 选择 checkpoint；
-- 支持 horizon-wise 和 channel-wise 评价；
+- validation 使用固定 deterministic windows 并按 system-balanced `mse_z` 选择 checkpoint；
+- 支持 system-balanced scalar、horizon-wise、channel-wise 评价和 system bootstrap CI；
 - foundation dependencies 缺失时不影响本地 supervised models。
 
 ## 14. 正式实验前的优先修改项
 
 1. 核对 Panda checkpoint 与 `orbital15 + log1p ratios` 的预处理一致性；
 2. 实现完整 physical inverse transform；
-3. validation/test 指标改为流式累计，避免保存全量 context/prediction；
-4. 增加 circular angle、sin/cos norm、物理有效性和守恒指标；
-5. 固定并导出所有模型共用的 test window IDs；
-6. 对 `raw ratio` 与 `log1p ratio` 做消融实验。
+3. 增加 circular angle、sin/cos norm、物理有效性和守恒指标；
+4. 对 `raw ratio` 与 `log1p ratio` 做消融实验。

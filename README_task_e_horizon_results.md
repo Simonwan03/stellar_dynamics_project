@@ -1,5 +1,9 @@
 # Task E 预测窗口误差实验结果
 
+> 历史记录：本文对应旧的 `64 -> 32` Panda adapter 实验。当前 Task E 主协议已经
+> 改为 E1 `512 -> 128` one-shot 与 E2 四段 recursive rolling；本文结果不属于新的
+> E1/E2 benchmark。
+
 ## 实验目的
 
 固定输入 prefix 长度为 64，预测未来 32 个时间步，使用 orbital15 表征，检查预测误差是否随预测 horizon 增加。

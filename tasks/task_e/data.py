@@ -10,7 +10,7 @@ from typing import Any
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
 
 
 ORBITAL_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
@@ -159,24 +159,51 @@ class ForecastWindowDataset(Dataset):
             "start": torch.tensor(start, dtype=torch.long),
         }
 
-    def load_raw_window(self, index: int) -> np.ndarray:
-        return self._load_window(int(self.record_trajectories[index]), int(self.record_starts[index]))
+    def window_record(self, index: int) -> tuple[int, int]:
+        """Return the global trajectory index and start for a dataset window."""
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return int(self.record_trajectories[index]), int(self.record_starts[index])
 
-    def _load_window(self, global_idx: int, start: int) -> np.ndarray:
+    def load_raw_window(self, index: int, total_len: int | None = None) -> np.ndarray:
+        """Load a window, optionally extending it for rolling evaluation."""
+        global_idx, start = self.window_record(index)
+        requested_len = self.total_len if total_len is None else int(total_len)
+        if requested_len <= 0:
+            raise ValueError(f"total_len must be positive, got {requested_len}.")
+        available = min(int(self.valid_lengths[global_idx]), self.sources[0].time_steps)
+        if start + requested_len > available:
+            raise ValueError(
+                f"Requested window exceeds the valid trajectory prefix: "
+                f"trajectory={global_idx}, start={start}, length={requested_len}, available={available}."
+            )
+        return self._load_window(global_idx, start, requested_len)
+
+    def load_transformed_window(self, index: int, total_len: int | None = None) -> np.ndarray:
+        raw = self.load_raw_window(index, total_len=total_len)
+        if not np.isfinite(raw).all():
+            raise ValueError(
+                f"Non-finite values found in forecasting window "
+                f"trajectory={self.window_record(index)[0]}, start={self.window_record(index)[1]}."
+            )
+        return self.scaler.transform(raw)
+
+    def _load_window(self, global_idx: int, start: int, total_len: int | None = None) -> np.ndarray:
         source_id = int(self.source_ids[global_idx])
         local_id = int(self.local_ids[global_idx])
         source = self.sources[source_id]
         handle = self._get_handle(source_id)
-        stop = start + self.total_len
+        requested_len = self.total_len if total_len is None else int(total_len)
+        stop = start + requested_len
         blocks = []
         for group in self.feature_metadata["groups"]:
             raw = np.asarray(handle[group["source_key"]][local_id, start:stop], dtype=np.float32)
             blocks.append(transform_group(raw, group["name"], self.representation))
-        window = np.concatenate([block.reshape(self.total_len, -1) for block in blocks], axis=-1)
-        if window.shape != (self.total_len, self.feature_metadata["num_features"]):
+        window = np.concatenate([block.reshape(requested_len, -1) for block in blocks], axis=-1)
+        if window.shape != (requested_len, self.feature_metadata["num_features"]):
             raise ValueError(
                 f"Constructed window has shape {window.shape}, expected "
-                f"{(self.total_len, self.feature_metadata['num_features'])}."
+                f"{(requested_len, self.feature_metadata['num_features'])}."
             )
         return window.astype(np.float32, copy=False)
 
@@ -197,6 +224,316 @@ class ForecastWindowDataset(Dataset):
 
     def __del__(self) -> None:  # pragma: no cover
         self.close()
+
+
+def _unwrap_forecast_dataset(dataset: Dataset, index: int) -> tuple[ForecastWindowDataset, int]:
+    """Resolve a possibly capped Subset back to its source forecasting dataset."""
+    current: Dataset = dataset
+    current_index = int(index)
+    while isinstance(current, Subset):
+        if current_index < 0 or current_index >= len(current):
+            raise IndexError(current_index)
+        current_index = int(current.indices[current_index])
+        current = current.dataset
+    if not isinstance(current, ForecastWindowDataset):
+        raise TypeError(
+            "Rolling evaluation requires a ForecastWindowDataset or a Subset of one; "
+            f"got {type(current).__name__}."
+        )
+    return current, current_index
+
+
+def _dataset_record_arrays(dataset: Dataset) -> tuple[np.ndarray, np.ndarray]:
+    """Return trajectory IDs and starts in the index space of ``dataset``.
+
+    The normal path is a ``ForecastWindowDataset`` and therefore avoids any
+    Python-level iteration over all records.  The Subset fallback keeps the
+    legacy caps compatible with the sampling helpers.
+    """
+    if isinstance(dataset, ForecastWindowDataset):
+        return dataset.record_trajectories, dataset.record_starts
+    if isinstance(dataset, Subset):
+        trajectory_ids: list[int] = []
+        starts: list[int] = []
+        for index in range(len(dataset)):
+            base, base_index = _unwrap_forecast_dataset(dataset, index)
+            trajectory_id, start = base.window_record(base_index)
+            trajectory_ids.append(trajectory_id)
+            starts.append(start)
+        return np.asarray(trajectory_ids, dtype=np.int64), np.asarray(starts, dtype=np.int64)
+    if isinstance(dataset, DynamicTrajectoryWindowDataset):
+        return _dataset_record_arrays(dataset.base)
+    raise TypeError(
+        "Window sampling requires a ForecastWindowDataset or a compatible Subset, "
+        f"got {type(dataset).__name__}."
+    )
+
+
+def _select_position_indices(
+    count: int,
+    requested: int,
+    target_positions: tuple[float, ...] | list[float] | None,
+) -> np.ndarray:
+    """Select deterministic approximately-uniform positions from a sorted list."""
+    if count <= 0:
+        return np.empty(0, dtype=np.int64)
+    if requested <= 0 or requested >= count:
+        return np.arange(count, dtype=np.int64)
+    positions = np.asarray(
+        target_positions if target_positions is not None else (),
+        dtype=np.float64,
+    ).reshape(-1)
+    if positions.size != requested:
+        positions = np.linspace(0.0, 1.0, requested, dtype=np.float64)
+    positions = np.clip(positions, 0.0, 1.0)
+    raw = np.rint(positions * (count - 1)).astype(np.int64)
+    chosen: list[int] = []
+    used: set[int] = set()
+    for index in raw.tolist():
+        if index not in used:
+            chosen.append(index)
+            used.add(index)
+    if len(chosen) < requested:
+        for index in range(count):
+            if index not in used:
+                chosen.append(index)
+                used.add(index)
+                if len(chosen) == requested:
+                    break
+    return np.asarray(sorted(chosen), dtype=np.int64)
+
+
+def select_deterministic_windows(
+    dataset: Dataset,
+    windows_per_trajectory: int,
+    target_positions: tuple[float, ...] = (0.10, 0.35, 0.65, 0.90),
+) -> Subset | Dataset:
+    """Select fixed coverage windows from every trajectory.
+
+    A value of zero preserves all candidate windows for backwards-compatible
+    full evaluation.  Candidate records are sorted by their start time, and
+    the target positions are interpreted over that sorted candidate list.
+    """
+    if windows_per_trajectory < 0:
+        raise ValueError("windows_per_trajectory must be non-negative.")
+    if windows_per_trajectory == 0:
+        return dataset
+    trajectory_ids, starts = _dataset_record_arrays(dataset)
+    selected: list[np.ndarray] = []
+    for trajectory_id in np.unique(trajectory_ids):
+        record_indices = np.flatnonzero(trajectory_ids == trajectory_id)
+        order = np.argsort(starts[record_indices], kind="stable")
+        ordered_indices = record_indices[order]
+        positions = _select_position_indices(
+            ordered_indices.size,
+            windows_per_trajectory,
+            target_positions,
+        )
+        selected.append(ordered_indices[positions])
+    if not selected:
+        raise ValueError("No windows are available for deterministic trajectory sampling.")
+    indices = np.sort(np.concatenate(selected).astype(np.int64, copy=False))
+    return Subset(dataset, indices.tolist())
+
+
+class DynamicTrajectoryWindowDataset(Dataset):
+    """Per-epoch random windows with a fixed maximum per trajectory.
+
+    This is intentionally trajectory-balanced rather than fully hierarchical:
+    each eligible trajectory contributes at most ``windows_per_trajectory``
+    windows in an epoch.  Because every trajectory belongs to exactly one base
+    system, this removes the dominant long-trajectory weighting while keeping
+    the existing dataset and system split unchanged.
+    """
+
+    def __init__(
+        self,
+        base: Dataset,
+        windows_per_trajectory: int,
+        seed: int,
+    ) -> None:
+        if windows_per_trajectory <= 0:
+            raise ValueError("Dynamic sampling requires windows_per_trajectory > 0.")
+        self.base = base
+        self.windows_per_trajectory = int(windows_per_trajectory)
+        self.seed = int(seed)
+        trajectory_ids, _ = _dataset_record_arrays(base)
+        self._trajectory_groups = [
+            np.flatnonzero(trajectory_ids == trajectory_id).astype(np.int64, copy=False)
+            for trajectory_id in np.unique(trajectory_ids)
+        ]
+        if not self._trajectory_groups:
+            raise ValueError("No candidate windows are available for dynamic sampling.")
+        self.selected_indices = np.empty(0, dtype=np.int64)
+        self.epoch = -1
+        self.set_epoch(0)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+        rng = np.random.default_rng(self.seed + self.epoch)
+        selected: list[np.ndarray] = []
+        for candidate_indices in self._trajectory_groups:
+            count = min(self.windows_per_trajectory, candidate_indices.size)
+            if count == candidate_indices.size:
+                chosen = candidate_indices
+            else:
+                chosen = np.sort(rng.choice(candidate_indices, size=count, replace=False))
+            selected.append(np.asarray(chosen, dtype=np.int64))
+        self.selected_indices = np.concatenate(selected).astype(np.int64, copy=False)
+
+    def __len__(self) -> int:
+        return int(self.selected_indices.size)
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return self.base[int(self.selected_indices[index])]
+
+
+def _rolling_record_candidates(
+    dataset: Dataset,
+    context_len: int,
+    block_len: int,
+    num_blocks: int,
+    windows_per_trajectory: int,
+    target_positions: tuple[float, ...],
+) -> list[tuple[ForecastWindowDataset, int, int]]:
+    if context_len <= 0 or block_len <= 0 or num_blocks <= 0:
+        raise ValueError("Rolling lengths and num_blocks must be positive.")
+    trajectory_ids, _ = _dataset_record_arrays(dataset)
+    base_by_trajectory: dict[int, ForecastWindowDataset] = {}
+    for index, trajectory_id in enumerate(trajectory_ids.tolist()):
+        if trajectory_id not in base_by_trajectory:
+            base, _ = _unwrap_forecast_dataset(dataset, index)
+            base_by_trajectory[int(trajectory_id)] = base
+
+    total_len = int(context_len + block_len * num_blocks)
+    records: list[tuple[ForecastWindowDataset, int, int]] = []
+    for trajectory_id in sorted(base_by_trajectory):
+        base = base_by_trajectory[trajectory_id]
+        available = min(int(base.valid_lengths[trajectory_id]), base.sources[0].time_steps)
+        stride = max(int(getattr(base, "stride", 1)), 1)
+        starts = np.arange(0, available - total_len + 1, stride, dtype=np.int64)
+        positions = _select_position_indices(
+            starts.size,
+            windows_per_trajectory,
+            target_positions,
+        )
+        for start in starts[positions].tolist():
+            records.append((base, int(trajectory_id), int(start)))
+    return records
+
+
+def count_rolling_window_candidates(
+    dataset: Dataset,
+    context_len: int,
+    block_len: int,
+    num_blocks: int,
+    windows_per_trajectory: int,
+    target_positions: tuple[float, ...] = (0.25, 0.75),
+) -> int:
+    """Count rolling starts before the optional finite-value check."""
+    return len(
+        _rolling_record_candidates(
+            dataset,
+            context_len,
+            block_len,
+            num_blocks,
+            windows_per_trajectory,
+            target_positions,
+        )
+    )
+
+
+def _load_rolling_raw(
+    base: ForecastWindowDataset,
+    global_idx: int,
+    start: int,
+    total_len: int,
+) -> np.ndarray:
+    # ForecastWindowDataset can load arbitrary starts through its private
+    # low-level reader.  Small synthetic test doubles may only implement the
+    # public record-based loader, so retain that fallback.
+    if "groups" in getattr(base, "feature_metadata", {}) and hasattr(base, "source_ids"):
+        return base._load_window(global_idx, start, total_len)
+    return base.load_raw_window(0, total_len=total_len)
+
+
+class RollingWindowDataset(Dataset):
+    """Finite test windows with enough future for recursive block rollout.
+
+    Rolling starts are generated from the already prepared test trajectory
+    pool. This keeps the system split and train-only scaler identical to E1,
+    while allowing E2 to use its own deterministic 25%/75% start positions.
+    Starts that cannot provide the complete requested future prefix or contain
+    non-finite values are removed.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        context_len: int,
+        block_len: int,
+        num_blocks: int,
+        windows_per_trajectory: int = 0,
+        target_positions: tuple[float, ...] = (0.25, 0.75),
+    ) -> None:
+        self.context_len = int(context_len)
+        self.block_len = int(block_len)
+        self.num_blocks = int(num_blocks)
+        if self.context_len <= 0 or self.block_len <= 0 or self.num_blocks <= 0:
+            raise ValueError(
+                "context_len, block_len, and num_blocks must be positive for rolling evaluation."
+            )
+        self.total_len = self.context_len + self.block_len * self.num_blocks
+        self.windows_per_trajectory = int(windows_per_trajectory)
+        self.target_positions = tuple(float(value) for value in target_positions)
+        if self.windows_per_trajectory < 0:
+            raise ValueError("windows_per_trajectory must be non-negative.")
+        candidate_records = _rolling_record_candidates(
+            dataset,
+            context_len,
+            block_len,
+            num_blocks,
+            self.windows_per_trajectory,
+            self.target_positions,
+        )
+        self.candidate_count = len(candidate_records)
+        self.records: list[tuple[ForecastWindowDataset, int, int]] = []
+        for base, global_idx, start in candidate_records:
+            available = min(int(base.valid_lengths[global_idx]), base.sources[0].time_steps)
+            if start + self.total_len > available:
+                continue
+            raw = _load_rolling_raw(base, global_idx, start, self.total_len)
+            if np.isfinite(raw).all():
+                self.records.append((base, global_idx, start))
+        if not self.records:
+            raise ValueError(
+                "No test windows have a complete finite future for the requested rolling horizon "
+                f"({self.block_len * self.num_blocks} steps)."
+            )
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        base, global_idx, start = self.records[index]
+        raw = _load_rolling_raw(base, global_idx, start, self.total_len)
+        normalized = base.scaler.transform(raw)
+        context = normalized[: self.context_len]
+        target = normalized[self.context_len :]
+        if context.shape != (self.context_len, base.feature_metadata["num_features"]):
+            raise ValueError(f"Unexpected rolling context shape {context.shape}.")
+        if target.shape != (self.block_len * self.num_blocks, base.feature_metadata["num_features"]):
+            raise ValueError(f"Unexpected rolling target shape {target.shape}.")
+        return {
+            "context": torch.from_numpy(context),
+            "target": torch.from_numpy(target),
+            "trajectory_index": torch.tensor(global_idx, dtype=torch.long),
+            "start": torch.tensor(start, dtype=torch.long),
+        }
 
 
 def prepare_forecasting_data(

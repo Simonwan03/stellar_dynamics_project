@@ -354,10 +354,10 @@ conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
   --model ridge \
-  --context_len 200 \
-  --pred_len 50 \
+  --context-len 512 \
+  --pred-len 128 \
   --stride 20 \
-  --output_dir runs/task_e_ridge_orbital15_ctx200_pred50
+  --output_dir runs/task_e_ridge_orbital15_ctx512_pred128
 ```
 
 The unified entry supports `orbital15` and `raw_state18`/`trajectory`, with
@@ -366,12 +366,32 @@ train-window-only standardization. Available models are:
 
 - `ridge`
 - `tcn`, `patchtst`, `transformer`, `itransformer`
-- `timesfm`, `chronos`, `panda_zero_shot`, `panda_adapter`
+- `timesfm`, `chronos`, `chronos2`, `panda_zero_shot`
 
-其中 `chronos` 默认使用 `amazon/chronos-bolt-small`。将
-`--chronos_model_id` 改为 `amazon/chronos-2`（并设置
-`--chronos_variant chronos2`）时，会使用 Chronos-2 原生多变量预测，
-不再把各通道拆成独立的单变量序列。
+其中 `chronos` 默认使用 `amazon/chronos-bolt-small`。使用
+`--model chronos2`（或将 `--chronos_model_id` 改为 `amazon/chronos-2`）时，
+会使用 Chronos-2 原生多变量预测，不再把各通道拆成独立的单变量序列。
+
+Task E 的主协议包括 E1 one-shot `512 -> 128` 和 E2 四个递归 `128` 步 block
+（最长 horizon `512`）。E2 通过同一次运行的 `--run-rolling --rolling-blocks 4`
+启用，不重新训练模型，也不会使用未来 ground truth 更新 context。
+
+默认 sampling protocol 保留全部 candidate starts，但每个 epoch 每条 train trajectory
+随机采样 8 个窗口；validation/test 固定采样每条 trajectory 的 4 个 early/middle/late
+窗口；E2 每条 trajectory 固定采样 2 个分散 rolling starts。正文 metrics 按
+`system -> trajectory -> window` 层级聚合并对 system 等权，`--bootstrap-samples 1000`
+使用 system-level bootstrap 计算 95% CI。对应 CLI 为
+`--train-windows-per-trajectory`、`--val-windows-per-trajectory`、
+`--test-windows-per-trajectory` 和 `--rolling-windows-per-trajectory`；设置为 0
+可恢复全量 candidate windows。
+
+多个模型运行完成后，可用以下命令生成两张 horizon 曲线和汇总文件：
+
+```bash
+conda run -n stellar python -m tasks.task_e.report \
+  --run-dirs runs/task_e_e1e2_ridge runs/task_e_e1e2_tcn runs/task_e_e1e2_panda \
+  --output-dir results/task_e_e1e2_summary
+```
 
 Every run writes `config.json`, `feature_metadata.json`, `scaler.npz`,
 `val_metrics.json`, `test_metrics.json`, `horizon_metrics.csv`,
@@ -397,7 +417,8 @@ conda run -n stellar python -m tasks.task_e \
 Foundation dependencies are optional. Missing TimesFM, Chronos, or Panda
 packages/checkpoints produce a model-specific installation/checkpoint error;
 they do not affect ridge or supervised models. `panda_zero_shot`
-and the current `panda_adapter` require `orbital15`. The `itransformer` option
+supports the native multivariate Panda path. Historical `panda_adapter` code is
+not an active model option. The `itransformer` option
 is the documented simple variable-token implementation.
 
 Dataset trajectory visualization:

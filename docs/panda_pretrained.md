@@ -99,7 +99,7 @@ conda run -n stellar python -m tasks.task_e \
   --output_dir runs/task_e_panda_zero_shot_local
 ```
 
-Train a small adapter while keeping Panda frozen:
+Historical adapter example (not part of the current Task E protocol; the CLI now rejects `panda_adapter`):
 
 ```bash
 conda run -n stellar python -m tasks.task_e \

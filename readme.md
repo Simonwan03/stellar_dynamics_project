@@ -711,8 +711,13 @@ Task D 的已保存结果已经汇总在本文后面的[完整实验结果总汇
 完成 train/val/test group split，使用 completion-aware train-window scaler，并统一输出 transformed/z
 scale 的 overall、horizon-wise、channel-wise metrics。支持
 `ridge`, `tcn`, `patchtst`, `transformer`, 简化版
-`itransformer`, `timesfm`, `chronos`, `panda_zero_shot` 和
-`panda_adapter`。
+`itransformer`, `timesfm`, `chronos`, `chronos2` 和
+`panda_zero_shot`。
+
+当前主协议见 [`docs/task_e_pipeline.md`](/home/wan/stellar_dynamics/docs/task_e_pipeline.md)：
+E1 是 one-shot `512 -> 128`，E2 是复用同一模型的四段 recursive rolling，最长
+预测 horizon 为 `512`。下面的 E.0/E.1 数值是旧的 `200 -> 50` preliminary 结果，
+仅保留作历史记录。
 
 #### E.0 统一 preliminary benchmark
 
@@ -1691,15 +1696,16 @@ conda run -n stellar python -m tasks.task_d \
 
 ### Task E
 
-统一 forecasting 入口。当前 `results/task_e_local_timesfm/config.json` 对应的 local TimesFM zero-shot 实验：
+统一 forecasting 入口。当前主协议是 E1 `512 -> 128`；追加
+`--run-rolling --rolling-blocks 4` 可在同一次运行中执行 E2：
 
 ```bash
 conda run -n stellar python -m tasks.task_e \
   --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --representation orbital15 \
   --model timesfm \
-  --context_len 200 \
-  --pred_len 50 \
+  --context_len 512 \
+  --pred_len 128 \
   --stride 20 \
   --split_seed 42 \
   --seed 42 \
@@ -1721,7 +1727,12 @@ conda run -n stellar python -m tasks.task_e \
   --d_model 128 \
   --n_heads 4 \
   --ridge_alpha 1.0 \
-  --num_eval_windows 128 \
+  --num_eval_windows 0 \
+  --train-windows-per-trajectory 8 \
+  --val-windows-per-trajectory 4 \
+  --test-windows-per-trajectory 4 \
+  --rolling-windows-per-trajectory 2 \
+  --bootstrap-samples 1000 \
   --foundation_batch_size 32 \
   --timesfm_model_id google/timesfm-2.5-200m-pytorch \
   --chronos_model_id amazon/chronos-bolt-small \
@@ -1729,8 +1740,6 @@ conda run -n stellar python -m tasks.task_e \
   --chronos_num_samples 20 \
   --panda_model_id GilpinLab/panda-72M \
   --freeze_panda \
-  --adapter_lr 0.0001 \
-  --num_train_windows_for_adapter 4096 \
   --hf-local-files-only \
   --torch_dtype auto \
   --output_dir results/task_e_local_timesfm \
@@ -1738,29 +1747,8 @@ conda run -n stellar python -m tasks.task_e \
   --log_every_batches 100
 ```
 
-固定 `orbital15` prefix=64、预测 32 步并比较 adapter decoder：
-
-```bash
-conda run -n stellar python -m tasks.task_e \
-  --data_glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
-  --representation orbital15 \
-  --model panda_adapter \
-  --context_len 64 \
-  --pred_len 32 \
-  --stride 20 \
-  --max_variations_per_system 2 \
-  --max_windows_per_trajectory 2 \
-  --window_sampling sequential \
-  --adapter_decoder gru \
-  --adapter_gru_layers 2 \
-  --num_train_windows_for_adapter 0 \
-  --output_dir runs/task_e_orbital15_ctx64_pred32_panda_gru
-```
-
-使用 `--adapter_decoder mlp` 和不同输出目录运行对照组。每个 system 最多保留 2 条
-满足 completion-aware 过滤的 trajectory，每条取开头 2 个窗口；因此实际窗口数可能
-少于理论上的 10000 条 trajectory / 20000 个窗口。实验会生成 `horizon_metrics.csv`
-与 `test_horizon_trend.json`，用于判断第 1 到第 32 步的 MSE/MAE 是否总体递增。
+旧的 `64 -> 32` Panda adapter 结果仍保留在历史报告中，但 `panda_adapter` 已从当前
+CLI 模型列表停用；当前 Panda 基线使用 `panda_zero_shot` 的原生 `512 -> 128`。
 
 更轻量的 supervised smoke test：
 
@@ -1781,11 +1769,15 @@ conda run -n stellar python -m tasks.task_e \
 
 常用参数：
 
-- `--model ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|panda_zero_shot|panda_adapter`
+- `--model ridge|tcn|patchtst|transformer|itransformer|timesfm|chronos|chronos2|panda_zero_shot`
 - `--representation orbital15|raw_state18|trajectory`
 - `chronos` 默认使用 `amazon/chronos-bolt-small`；使用
-  `--chronos_model_id amazon/chronos-2 --chronos_variant chronos2` 可切换到
-  Chronos-2 原生 multivariate pipeline。
+  `--model chronos2` 可切换到 Chronos-2 原生 multivariate pipeline。
+- `--context-len 512 --pred-len 128 --run-rolling --rolling-blocks 4`: 运行当前 E1/E2 主协议。
+- `--train-windows-per-trajectory 8`: 每个 epoch 每条 train trajectory 动态随机采样最多 8 个 candidate windows。
+- `--val-windows-per-trajectory 4`, `--test-windows-per-trajectory 4`: 固定选择约 10/35/65/90% 的 validation/test windows。
+- `--rolling-windows-per-trajectory 2`: E2 每条 trajectory 固定选择约 25/75% 的 rolling starts。
+- `--bootstrap-samples 1000`: 以 system 为 bootstrap unit 计算 95% CI。
 - `--max_trajectories`, `--max_windows_per_trajectory`, `--max_train_windows`, `--max_val_windows`, `--max_test_windows`: 控制窗口数量
 - `--drop_nan_windows` / `--no-drop_nan_windows`: 默认拒绝 completion-filtered 后仍含非有限值的窗口
 - `--completion_table`: completion metadata 路径，用于过滤无效 trajectory 和事件后窗口

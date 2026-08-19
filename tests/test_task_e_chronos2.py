@@ -65,6 +65,17 @@ class Chronos2PipelineTest(unittest.TestCase):
         self.assertEqual(prediction.shape, (2, 4, 3))
         np.testing.assert_array_equal(FakeChronos2Pipeline.last_inputs.shape, (2, 3, 5))
 
+    def test_chronos2_is_available_as_a_model_alias(self) -> None:
+        args = chronos2_args()
+        args.model = "chronos2"
+        args.chronos_model_id = "amazon/chronos-bolt-small"
+        with patch("chronos.Chronos2Pipeline", FakeChronos2Pipeline):
+            predictor, multivariate = task_e_main.build_foundation_predictor(args, torch.device("cpu"))
+            prediction = predictor(np.zeros((1, 5, 3), dtype=np.float32), 4)
+
+        self.assertTrue(multivariate)
+        self.assertEqual(prediction.shape, (1, 4, 3))
+
 
 if __name__ == "__main__":
     unittest.main()
