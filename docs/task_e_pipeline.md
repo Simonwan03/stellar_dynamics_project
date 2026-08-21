@@ -12,7 +12,7 @@ python -m tasks.task_e --help
 - `tasks/task_e/data.py`：HDF5 数据读取、特征变换、数据切分、scaler 和滑动窗口
 - `tasks/task_e/models.py`：TCN、PatchTST 和简化 iTransformer
 - `tasks/task_e/transformer.py`：Transformer forecaster
-- `tasks/task_e/foundation.py`：TimesFM、Chronos 和 Panda 加载与 zero-shot 推理
+- `tasks/task_e/foundation.py`：Chronos-2 和 Panda 加载与 zero-shot 推理
 - `tasks/task_e/panda_adapter.py`：Panda temporal adapter
 - `tasks/task_e/metrics.py`：overall、horizon-wise 和 channel-wise 指标
 
@@ -66,6 +66,32 @@ dataset_v3/results_batch_*_sampling_2.hdf5
 2. 检查各 shard 的 trajectory 数量、时间长度和 feature shape；
 3. 建立全局 trajectory ID 到 `(shard, local_row)` 的映射；
 4. 在训练时按需读取窗口，不一次性把全部 trajectory 加载到内存。
+
+### 2.1 独立预处理缓存
+
+全量 HDF5 的 finite 检查和 train-only scaler 计算可以单独执行一次。预处理命令只保存窗口索引、有效长度、scaler、feature metadata 和输入文件签名，不复制 HDF5 数据：
+
+```bash
+python -m tasks.task_e.prepare \
+  --cache-dir runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --completion-table dataset_v3/completed_systems_sampling_2.txt \
+  --representation orbital15 \
+  --context-len 512 --pred-len 128 --stride 20 \
+  --drop-nan-windows
+```
+
+之后每个模型运行时传入同一个缓存目录：
+
+```bash
+python -m tasks.task_e \
+  --prepared-cache runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --model chronos2 \
+  --foundation_batch_size 32 \
+  --output-dir runs/task_e_chronos2
+```
+
+缓存加载会校验 HDF5 文件大小/修改时间、completion table 和所有影响窗口/scaler 的设置；配置不一致时会直接报错，避免误用旧缓存。E2 rolling 的少量长窗口仍会在启用 `--run-rolling` 时做自身的完整性检查。
 
 ## 3. 输入表示
 
@@ -326,11 +352,8 @@ Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 
 
 ### 8.3 Pretrained zero-shot models
 
-- `timesfm`：默认 `google/timesfm-2.5-200m-pytorch`；逐 channel 单变量预测；
-- `chronos`：默认 `amazon/chronos-bolt-small`；逐 channel 单变量预测；
-  如果 `--chronos_model_id` 选择 `amazon/chronos-2`，则自动切换到
-  Chronos-2 的原生 multivariate pipeline，输入 `[B,T,C]` 会转换为
-  Chronos-2 所需的 `[B,C,T]`，并取中位 quantile 作为点预测；
+- `chronos2`：默认 `amazon/chronos-2`；使用原生 multivariate pipeline，输入
+  `[B,T,C]` 会转换为 Chronos-2 所需的 `[B,C,T]`，并取中位 quantile 作为点预测；
 - `panda_zero_shot`：默认 `GilpinLab/panda-72M`；直接处理 multivariate
   `orbital15` 或 `raw_state18`。Panda 的共享通道 embedding/forecast head
   支持运行时通道数，因此 15 通道和 18 通道都可传入。
@@ -347,9 +370,8 @@ conda run -n stellar python -m tasks.task_e \
   --output_dir runs/task_e_chronos2
 ```
 
-旧版 Chronos-T5 和 Chronos-Bolt 仍走逐 channel 单变量路径；Chronos-2
-的 `prediction_length` 超过 checkpoint 默认 horizon 时，官方 API 可能发出
-质量提醒并使用长 horizon 策略。
+Chronos-2 的 `prediction_length` 超过 checkpoint 默认 horizon 时，官方 API
+可能发出质量提醒并使用长 horizon 策略。
 
 Panda 源码默认位于：
 
@@ -357,7 +379,7 @@ Panda 源码默认位于：
 experiments/panda_threebody/vendor/panda/
 ```
 
-Panda、TimesFM 和 Chronos 的 pretrained 权重由 Hugging Face cache 管理。
+Panda 和 Chronos-2 的 pretrained 权重由 Hugging Face cache 管理。
 
 ### 8.4 Panda zero-shot
 

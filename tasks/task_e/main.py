@@ -28,6 +28,8 @@ from tasks.task_e.foundation import (  # noqa: E402
     build_chronos2_predictor,
     build_chronos_predictor,
     build_panda_predictor,
+    build_tirex2_predictor,
+    build_toto2_predictor,
     build_timesfm_predictor,
     is_chronos2_model,
 )
@@ -38,6 +40,10 @@ from tasks.task_e.data import (  # noqa: E402
     count_rolling_window_candidates,
     prepare_forecasting_data,
     select_deterministic_windows,
+)
+from tasks.task_e.cache import (  # noqa: E402
+    build_preparation_cache_signature,
+    load_prepared_cache,
 )
 from tasks.task_e.metrics import (  # noqa: E402
     HierarchicalErrorAccumulator,
@@ -51,7 +57,7 @@ from tasks.task_e.panda_dependency import panda_dependency_metadata  # noqa: E40
 
 
 SUPERVISED_MODELS = {"tcn", "patchtst", "transformer", "itransformer"}
-FOUNDATION_MODELS = {"timesfm", "chronos", "chronos2", "panda_zero_shot"}
+FOUNDATION_MODELS = {"chronos2", "panda_zero_shot", "tirex2", "toto2"}
 # Kept out of the public model choices. The implementation and CLI arguments
 # remain import-compatible with historical adapter checkpoints, but the
 # current Task E protocol deliberately does not train or evaluate adapters.
@@ -211,6 +217,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chronos_variant", choices=["bolt", "chronos2"], default="bolt")
     parser.add_argument("--chronos_num_samples", type=int, default=20)
     parser.add_argument("--panda_model_id", type=str, default="GilpinLab/panda-72M")
+    parser.add_argument("--tirex2_model_id", type=str, default="NX-AI/TiRex-2")
+    parser.add_argument("--toto2_model_id", type=str, default="Datadog/Toto-2.0-22m")
     parser.add_argument("--freeze_panda", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--adapter_hidden_dim", type=int, default=None)
     parser.add_argument("--adapter_dropout", type=float, default=0.0)
@@ -259,7 +267,38 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--prediction_samples", type=int, default=16)
     parser.add_argument("--log_every_batches", type=int, default=100)
+    parser.add_argument(
+        "--prepared-cache",
+        "--prepared_cache",
+        dest="prepared_cache",
+        type=Path,
+        default=None,
+        help="Load window records/scaler from a standalone prepared cache.",
+    )
     return parser
+
+
+def _preparation_signature_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    return build_preparation_cache_signature(
+        data_glob=args.data_glob,
+        representation=args.representation,
+        context_len=args.context_len,
+        pred_len=args.pred_len,
+        stride=args.stride,
+        split_seed=args.split_seed,
+        train_frac=args.train_frac,
+        val_frac=args.val_frac,
+        group_size=args.group_size,
+        completion_table=args.completion_table,
+        require_complete_systems=args.require_complete_systems,
+        max_trajectories=args.max_trajectories,
+        max_variations_per_system=args.max_variations_per_system,
+        max_train_variations_per_system=args.max_train_variations_per_system,
+        max_windows_per_trajectory=args.max_windows_per_trajectory,
+        window_sampling=args.window_sampling,
+        drop_nan_windows=args.drop_nan_windows,
+        max_scaler_trajectories=args.max_scaler_trajectories,
+    )
 
 
 def main() -> None:
@@ -280,26 +319,34 @@ def main() -> None:
     if device.type == "cuda":
         print(f"[task_e] CUDA device: {torch.cuda.get_device_name(device)}", flush=True)
 
-    prepared = prepare_forecasting_data(
-        data_glob=args.data_glob,
-        representation=args.representation,
-        context_len=args.context_len,
-        pred_len=args.pred_len,
-        stride=args.stride,
-        split_seed=args.split_seed,
-        group_size=args.group_size,
-        completion_table=args.completion_table,
-        require_complete_systems=args.require_complete_systems,
-        train_frac=args.train_frac,
-        val_frac=args.val_frac,
-        max_trajectories=args.max_trajectories,
-        max_variations_per_system=args.max_variations_per_system,
-        max_train_variations_per_system=args.max_train_variations_per_system,
-        max_windows_per_trajectory=args.max_windows_per_trajectory,
-        window_sampling=args.window_sampling,
-        drop_nan_windows=args.drop_nan_windows,
-        max_scaler_trajectories=args.max_scaler_trajectories,
-        verbose=True,
+    prepared = (
+        load_prepared_cache(
+            args.prepared_cache,
+            _preparation_signature_from_args(args),
+            verbose=True,
+        )
+        if args.prepared_cache is not None
+        else prepare_forecasting_data(
+            data_glob=args.data_glob,
+            representation=args.representation,
+            context_len=args.context_len,
+            pred_len=args.pred_len,
+            stride=args.stride,
+            split_seed=args.split_seed,
+            group_size=args.group_size,
+            completion_table=args.completion_table,
+            require_complete_systems=args.require_complete_systems,
+            train_frac=args.train_frac,
+            val_frac=args.val_frac,
+            max_trajectories=args.max_trajectories,
+            max_variations_per_system=args.max_variations_per_system,
+            max_train_variations_per_system=args.max_train_variations_per_system,
+            max_windows_per_trajectory=args.max_windows_per_trajectory,
+            window_sampling=args.window_sampling,
+            drop_nan_windows=args.drop_nan_windows,
+            max_scaler_trajectories=args.max_scaler_trajectories,
+            verbose=True,
+        )
     )
     feature_names = list(prepared.feature_metadata["channel_names"])
     num_features = int(prepared.feature_metadata["num_features"])
@@ -465,6 +512,7 @@ def main() -> None:
             args.log_every_batches,
             "val",
             return_metadata=True,
+            context_limit=1,
         )
         print("[task_e] evaluating test split", flush=True)
         test_pred, test_target, sample_context, test_trajectory_ids, _ = predict_foundation(
@@ -475,6 +523,7 @@ def main() -> None:
             args.log_every_batches,
             "test",
             return_metadata=True,
+            context_limit=max(int(args.prediction_samples), 1),
         )
         forecast_fn = lambda context: forecast_foundation_batch(
             predictor, context, args.pred_len, multivariate
@@ -496,6 +545,7 @@ def main() -> None:
         bootstrap_samples=0,
         bootstrap_seed=args.seed + 7001,
     )
+    del val_pred, val_target, val_trajectory_ids
     test_metrics = save_evaluation(
         args.output_dir,
         "test",
@@ -520,6 +570,7 @@ def main() -> None:
         feature_names,
         args.prediction_samples,
     )
+    del test_pred, test_target, sample_context, test_trajectory_ids
     rolling_metrics: dict[str, Any] | None = None
     if args.run_rolling:
         rolling_batch_size = args.rolling_batch_size or (
@@ -672,6 +723,12 @@ def build_config(
             args.panda_model_id,
             args.hf_local_files_only,
         )
+    if args.model == "tirex2":
+        config["tirex2_model_id"] = getattr(args, "tirex2_model_id", "NX-AI/TiRex-2")
+        config["tirex2_inference_mode"] = "native_multivariate"
+    if args.model == "toto2":
+        config["toto2_model_id"] = getattr(args, "toto2_model_id", "Datadog/Toto-2.0-22m")
+        config["toto2_inference_mode"] = "native_multivariate"
     return config
 
 
@@ -1130,6 +1187,8 @@ def build_foundation_predictor(
         chronos_variant=chronos_variant,
         chronos_num_samples=args.chronos_num_samples,
         panda_model_id=args.panda_model_id,
+        tirex2_model_id=getattr(args, "tirex2_model_id", "NX-AI/TiRex-2"),
+        toto2_model_id=getattr(args, "toto2_model_id", "Datadog/Toto-2.0-22m"),
         torch_dtype=args.torch_dtype,
     )
     if args.model == "timesfm":
@@ -1145,6 +1204,10 @@ def build_foundation_predictor(
         return build_chronos_predictor(foundation_args, str(device)), False
     if args.model == "panda_zero_shot":
         return build_panda_predictor(foundation_args, str(device)), True
+    if args.model == "tirex2":
+        return build_tirex2_predictor(foundation_args, str(device)), True
+    if args.model == "toto2":
+        return build_toto2_predictor(foundation_args, str(device)), True
     raise ValueError(args.model)
 
 
@@ -1156,16 +1219,24 @@ def predict_foundation(
     log_every_batches: int = 100,
     split: str = "eval",
     return_metadata: bool = False,
+    context_limit: int | None = None,
 ) -> tuple[Any, ...]:
     predictions, targets, contexts = [], [], []
     trajectory_ids, starts = [], []
+    context_limit = None if context_limit is None else max(int(context_limit), 1)
+    context_collected = 0
     started = time.perf_counter()
     total_batches = len(loader)
     for batch_idx, batch in enumerate(loader, start=1):
         context = batch["context"].numpy()
         predictions.append(forecast_foundation_batch(predictor, context, pred_len, multivariate))
         targets.append(batch["target"].numpy())
-        contexts.append(context)
+        if context_limit is None:
+            contexts.append(context)
+        elif context_collected < context_limit:
+            take = min(context_limit - context_collected, context.shape[0])
+            contexts.append(context[:take])
+            context_collected += take
         if return_metadata:
             if "trajectory_index" not in batch or "start" not in batch:
                 raise ValueError("Evaluation dataset does not provide trajectory/start metadata.")

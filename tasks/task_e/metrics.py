@@ -16,7 +16,7 @@ def _hierarchical_reduce(
     group_size: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Reduce window values as window -> trajectory -> system -> dataset."""
-    values = np.asarray(values, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float32)
     trajectory_ids = np.asarray(trajectory_ids, dtype=np.int64).reshape(-1)
     if values.ndim < 1 or values.shape[0] != trajectory_ids.size:
         raise ValueError(
@@ -51,7 +51,7 @@ def _hierarchical_reduce_finite(
     trajectory_ids: np.ndarray,
     group_size: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    values = np.asarray(values, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float32)
     if values.ndim == 1:
         finite = np.isfinite(values)
     else:
@@ -142,7 +142,7 @@ def summarize_error_hierarchy(
     bootstrap_seed: int = 42,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
     """Summarize errors with both pooled-window and system-balanced reductions."""
-    error_z = np.asarray(error_z, dtype=np.float64)
+    error_z = np.asarray(error_z, dtype=np.float32)
     if error_z.ndim != 3:
         raise ValueError(f"Expected error array [N,H,C], got {error_z.shape}.")
     trajectory_ids = np.asarray(trajectory_ids, dtype=np.int64).reshape(-1)
@@ -426,10 +426,7 @@ def compute_forecast_metrics(
     target_z = np.asarray(target_z, dtype=np.float32)
     if pred_z.shape != target_z.shape or pred_z.ndim != 3:
         raise ValueError(f"Expected matching [N,H,C] arrays, got {pred_z.shape} and {target_z.shape}")
-    pred_raw = scaler.inverse_transform(pred_z)
-    target_raw = scaler.inverse_transform(target_z)
     error_z = pred_z - target_z
-    error_raw = pred_raw - target_raw
 
     if trajectory_ids is None:
         trajectory_ids = np.arange(pred_z.shape[0], dtype=np.int64)
@@ -444,6 +441,10 @@ def compute_forecast_metrics(
         bootstrap_samples=bootstrap_samples,
         bootstrap_seed=bootstrap_seed,
     )
+    del error_z
+    pred_raw = scaler.inverse_transform(pred_z)
+    target_raw = scaler.inverse_transform(target_z)
+    error_raw = pred_raw - target_raw
     raw_hierarchy, _ = summarize_error_hierarchy(
         error_raw,
         trajectory_ids,
@@ -451,6 +452,7 @@ def compute_forecast_metrics(
         bootstrap_samples=0,
         bootstrap_seed=bootstrap_seed,
     )
+    del error_raw
     window_pearson_z = _per_window_pearson(pred_z, target_z)
     window_pearson_raw = _per_window_pearson(pred_raw, target_raw)
     balanced_pearson_z, _, _, _ = _hierarchical_reduce_finite(
@@ -742,7 +744,7 @@ def compute_unit_circle_error(
     feature_names: list[str],
 ) -> tuple[float | None, dict[str, float | None]]:
     """Measure how closely predicted angle sin/cos pairs stay on the unit circle."""
-    prediction_transformed = np.asarray(prediction_transformed, dtype=np.float64)
+    prediction_transformed = np.asarray(prediction_transformed, dtype=np.float32)
     if prediction_transformed.ndim != 3:
         raise ValueError(
             f"Expected transformed predictions with shape [N,H,C], got {prediction_transformed.shape}."
@@ -776,7 +778,7 @@ def _per_window_unit_circle_error(
     prediction_transformed: np.ndarray,
     feature_names: list[str],
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    prediction_transformed = np.asarray(prediction_transformed, dtype=np.float64)
+    prediction_transformed = np.asarray(prediction_transformed, dtype=np.float32)
     channel_lookup = {name: index for index, name in enumerate(feature_names)}
     by_angle: dict[str, np.ndarray] = {}
     for angle_family in ("APs", "LANs"):
@@ -799,16 +801,16 @@ def _per_window_unit_circle_error(
 
 
 def _per_window_smape(pred: np.ndarray, target: np.ndarray, epsilon: float) -> np.ndarray:
-    pred = np.asarray(pred, dtype=np.float64)
-    target = np.asarray(target, dtype=np.float64)
+    pred = np.asarray(pred, dtype=np.float32)
+    target = np.asarray(target, dtype=np.float32)
     denominator = np.abs(pred) + np.abs(target)
     terms = 2.0 * np.abs(pred - target) / np.maximum(denominator, max(float(epsilon), 1e-12))
     return 100.0 * np.mean(terms, axis=(1, 2), dtype=np.float64)
 
 
 def _per_window_pearson(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
-    pred = np.asarray(pred, dtype=np.float64).reshape(pred.shape[0], -1)
-    target = np.asarray(target, dtype=np.float64).reshape(target.shape[0], -1)
+    pred = np.asarray(pred, dtype=np.float32).reshape(pred.shape[0], -1)
+    target = np.asarray(target, dtype=np.float32).reshape(target.shape[0], -1)
     pred_centered = pred - np.mean(pred, axis=1, keepdims=True, dtype=np.float64)
     target_centered = target - np.mean(target, axis=1, keepdims=True, dtype=np.float64)
     numerator = np.sum(pred_centered * target_centered, axis=1, dtype=np.float64)
@@ -823,8 +825,8 @@ def _per_window_pearson(pred: np.ndarray, target: np.ndarray) -> np.ndarray:
 
 
 def _finite_pairs(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    pred_values = np.asarray(pred, dtype=np.float64).reshape(-1)
-    target_values = np.asarray(target, dtype=np.float64).reshape(-1)
+    pred_values = np.asarray(pred, dtype=np.float32).reshape(-1)
+    target_values = np.asarray(target, dtype=np.float32).reshape(-1)
     finite = np.isfinite(pred_values) & np.isfinite(target_values)
     return pred_values[finite], target_values[finite]
 
@@ -857,8 +859,8 @@ def _empirical_probabilities(
 ) -> tuple[np.ndarray, np.ndarray]:
     if bins < 2:
         raise ValueError("distribution_bins must be at least 2.")
-    pred_values = np.asarray(pred, dtype=np.float64).reshape(-1)
-    target_values = np.asarray(target, dtype=np.float64).reshape(-1)
+    pred_values = np.asarray(pred, dtype=np.float32).reshape(-1)
+    target_values = np.asarray(target, dtype=np.float32).reshape(-1)
     finite = np.isfinite(pred_values) & np.isfinite(target_values)
     pred_values = pred_values[finite]
     target_values = target_values[finite]

@@ -48,7 +48,7 @@ class EvalData:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate pretrained TimesFM, Chronos, Panda, and PatchTST on direct three-body trajectory forecasting. "
+            "Evaluate pretrained TimesFM, Chronos, Panda, TiRex-2, Toto-2.0, and PatchTST on direct three-body trajectory forecasting. "
             "Univariate models treat each channel independently; Panda consumes the full multivariate window."
         )
     )
@@ -79,6 +79,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chronos-model-id", type=str, default="amazon/chronos-t5-small")
     parser.add_argument("--chronos-num-samples", type=int, default=20)
     parser.add_argument("--panda-model-id", type=str, default="GilpinLab/panda-72M")
+    parser.add_argument("--tirex2-model-id", type=str, default="NX-AI/TiRex-2")
+    parser.add_argument("--toto2-model-id", type=str, default="Datadog/Toto-2.0-22m")
     parser.add_argument(
         "--timesfm-model-id",
         type=str,
@@ -141,6 +143,8 @@ def main() -> None:
             "timesfm_model_id": args.timesfm_model_id,
             "chronos_model_id": args.chronos_model_id,
             "panda_model_id": args.panda_model_id,
+            "tirex2_model_id": args.tirex2_model_id,
+            "toto2_model_id": args.toto2_model_id,
             "patchtst_model_id": args.patchtst_model_id,
         },
     )
@@ -389,13 +393,17 @@ def build_predictor(model_name: str, args: argparse.Namespace, device: str) -> C
         return build_chronos_predictor(args, device)
     if model_name == "panda":
         return build_panda_predictor(args, device)
+    if model_name == "tirex2":
+        return build_tirex2_predictor(args, device)
+    if model_name == "toto2":
+        return build_toto2_predictor(args, device)
     if model_name == "patchtst":
         return build_patchtst_predictor(args, device)
-    raise ValueError(f"Unknown model '{model_name}'. Supported: naive,timesfm,chronos,panda,patchtst")
+    raise ValueError(f"Unknown model '{model_name}'. Supported: naive,timesfm,chronos,panda,tirex2,toto2,patchtst")
 
 
 def uses_multivariate_context(model_name: str, args: argparse.Namespace | None = None) -> bool:
-    if model_name == "panda":
+    if model_name in {"panda", "tirex2", "toto2"}:
         return True
     return model_name == "chronos" and args is not None and is_chronos2_model(args.chronos_model_id)
 
@@ -624,6 +632,179 @@ def reduce_chronos2_forecast(forecast: Any, pred_len: int, num_channels: int) ->
     median_forecast = np.median(array[:, :, :pred_len], axis=1)
     return median_forecast.transpose(1, 0).astype(np.float32)
 
+
+def build_tirex2_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
+    """Build the native multivariate TiRex-2 zero-shot predictor.
+
+    TiRex-2 receives one ``TimeseriesType`` per forecasting window, with its
+    target laid out as ``[channels, context]``.  The public Task E layout is
+    ``[batch, context, channels]``; this adapter performs only that layout
+    conversion and keeps all channels in the same model call so the native
+    cross-variate mixer is used.
+    """
+    try:
+        from tirex2 import TimeseriesType, load_model  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "TiRex-2 is not installed. Install it with: pip install 'tirex-2==0.2.1'"
+        ) from exc
+
+    model_id = getattr(args, "tirex2_model_id", "NX-AI/TiRex-2")
+    hf_kwargs = {"local_files_only": bool(getattr(args, "hf_local_files_only", True))}
+    model = load_model(model_id, device=device, hf_kwargs=hf_kwargs)
+    quantile_levels = np.asarray([float(level) for level in model.quantiles], dtype=np.float32)
+    median_index = int(np.argmin(np.abs(quantile_levels - 0.5)))
+    batch_size = max(1, int(getattr(args, "batch_size", 1)))
+    print(
+        f"[task_e] loaded TiRex-2 model={model_id} "
+        "inference_mode=native_multivariate",
+        flush=True,
+    )
+
+    def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
+        values = np.asarray(batch, dtype=np.float32)
+        if values.ndim != 3:
+            raise ValueError(f"TiRex-2 expects [B,T,C] input, got {values.shape}.")
+        if values.shape[1] != int(args.context_len):
+            raise ValueError(
+                f"TiRex-2 expects context length {args.context_len}, got {values.shape[1]}."
+            )
+        if not np.isfinite(values).all():
+            raise ValueError("TiRex-2 received non-finite context values.")
+
+        timeseries = [
+            TimeseriesType(
+                target=torch.as_tensor(window.T, dtype=torch.float32),
+                past_covariates=None,
+                future_covariates=None,
+            )
+            for window in values
+        ]
+        forecasts = model.forecast(
+            timeseries,
+            prediction_length=int(pred_len),
+            output_type="numpy",
+            batch_size=batch_size,
+        )
+        predictions: list[np.ndarray] = []
+        for index, forecast in enumerate(forecasts):
+            array = np.asarray(forecast, dtype=np.float32)
+            channels = values.shape[2]
+            if array.ndim != 3 or array.shape[0] != channels or array.shape[1] <= median_index:
+                raise ValueError(
+                    f"TiRex-2 returned shape {array.shape} for window {index}; "
+                    f"expected [{channels}, quantiles, horizon]."
+                )
+            if array.shape[2] < pred_len:
+                raise ValueError(
+                    f"TiRex-2 returned horizon {array.shape[2]}, expected at least {pred_len}."
+                )
+            predictions.append(array[:, median_index, :pred_len].T)
+        if len(predictions) != values.shape[0]:
+            raise ValueError(
+                f"TiRex-2 returned {len(predictions)} forecasts for {values.shape[0]} windows."
+            )
+        return np.stack(predictions, axis=0).astype(np.float32)
+
+    return predict
+
+
+def build_toto2_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
+    """Build the native multivariate Toto-2.0 zero-shot predictor.
+
+    Toto-2.0 expects [batch, channels, context] and returns
+    [quantiles, batch, channels, horizon]. Task E uses [batch, context,
+    channels] and consumes the median point forecast, so this adapter only
+    performs layout conversion and median selection while preserving all
+    channels in the same model call.
+    """
+    try:
+        from toto2 import Toto2Model  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Toto-2.0 is not installed. Install the official package with: "
+            "pip install 'toto-2==2.0.0'"
+        ) from exc
+
+    model_id = getattr(args, "toto2_model_id", "Datadog/Toto-2.0-22m")
+    model = Toto2Model.from_pretrained(
+        model_id,
+        local_files_only=bool(getattr(args, "hf_local_files_only", True)),
+    )
+    model = model.to(device).eval()
+    quantile_levels = np.asarray(
+        getattr(
+            getattr(model, "output_head", None),
+            "knots",
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+        ),
+        dtype=np.float32,
+    )
+    median_index = int(np.argmin(np.abs(quantile_levels - 0.5)))
+    print(
+        f"[task_e] loaded Toto-2.0 model={model_id} "
+        "inference_mode=native_multivariate",
+        flush=True,
+    )
+
+    def predict(batch: np.ndarray, pred_len: int) -> np.ndarray:
+        values = np.asarray(batch, dtype=np.float32)
+        if values.ndim != 3:
+            raise ValueError(f"Toto-2.0 expects [B,T,C] input, got {values.shape}.")
+        if values.shape[1] != int(args.context_len):
+            raise ValueError(
+                f"Toto-2.0 expects context length {args.context_len}, got {values.shape[1]}."
+            )
+        if not np.isfinite(values).all():
+            raise ValueError("Toto-2.0 received non-finite context values.")
+
+        target = torch.as_tensor(
+            np.transpose(values, (0, 2, 1)),
+            dtype=torch.float32,
+            device=device,
+        )
+        target_mask = torch.ones_like(target, dtype=torch.bool)
+        series_ids = torch.zeros(
+            target.shape[0], target.shape[1], dtype=torch.long, device=target.device
+        )
+        with torch.inference_mode():
+            forecasts = model.forecast(
+                {
+                    "target": target,
+                    "target_mask": target_mask,
+                    "series_ids": series_ids,
+                },
+                horizon=int(pred_len),
+                decode_block_size=None,
+                has_missing_values=False,
+            )
+        if not isinstance(forecasts, torch.Tensor):
+            forecasts = torch.as_tensor(forecasts, device=target.device)
+        channels = values.shape[2]
+        if (
+            forecasts.ndim != 4
+            or forecasts.shape[1] != values.shape[0]
+            or forecasts.shape[2] != channels
+        ):
+            raise ValueError(
+                f"Toto-2.0 returned shape {tuple(forecasts.shape)}; "
+                f"expected [quantiles, {values.shape[0]}, {channels}, horizon]."
+            )
+        if forecasts.shape[0] <= median_index or forecasts.shape[3] < int(pred_len):
+            raise ValueError(
+                f"Toto-2.0 returned shape {tuple(forecasts.shape)}; "
+                f"expected median quantile and horizon >= {pred_len}."
+            )
+        return (
+            forecasts[median_index, :, :, : int(pred_len)]
+            .permute(0, 2, 1)
+            .detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
+
+    return predict
 
 def build_panda_predictor(args: argparse.Namespace, device: str) -> Callable[[np.ndarray, int], np.ndarray]:
     model = load_panda_model(args, device)

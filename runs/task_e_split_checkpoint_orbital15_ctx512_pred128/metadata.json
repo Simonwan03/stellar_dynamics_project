@@ -1,0 +1,25 @@
+{
+  "completion_table": "/data/sampling_2/completed_systems_sampling_2.txt",
+  "context_len": 512,
+  "created_unix": 1787244970.268948,
+  "data_glob": "dataset_v3/results_batch_*_sampling_2.hdf5",
+  "eligible_trajectories": 64597,
+  "group_size": 32,
+  "pred_len": 128,
+  "record_counts": {
+    "test": 579595,
+    "train": 2678195,
+    "val": 601017
+  },
+  "representation": "orbital15",
+  "requires_finite_window_scan": true,
+  "requires_scaler_fit": true,
+  "split_seed": 42,
+  "stride": 20,
+  "trajectory_counts": {
+    "test": 9648,
+    "train": 44988,
+    "val": 9961
+  },
+  "valid_trajectories": 159936
+}

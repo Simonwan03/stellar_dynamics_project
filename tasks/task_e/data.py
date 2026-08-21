@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import glob
 import re
+import threading
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,23 @@ TRAJECTORY_ALIASES = {
 }
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
 
+
+CACHE_SCHEMA_VERSION = 1
+CACHE_FILES = ("manifest.json", "feature_metadata.json", "scaler.npz", "records.npz")
+
+
+def _work_chunks(indices: np.ndarray, num_workers: int) -> list[np.ndarray]:
+    """Split record indices into a small number of ordered worker chunks."""
+    indices = np.asarray(indices, dtype=np.int64).reshape(-1)
+    if not indices.size:
+        return []
+    workers = max(1, min(int(num_workers), int(indices.size)))
+    chunk_count = max(workers, workers * 4)
+    chunk_size = max(1, (indices.size + chunk_count - 1) // chunk_count)
+    return [
+        indices[start : start + chunk_size]
+        for start in range(0, indices.size, chunk_size)
+    ]
 
 @dataclass(frozen=True)
 class SequenceSource:
@@ -69,6 +88,16 @@ class StandardScaler:
             feature_names=np.asarray(feature_names, dtype=object),
         )
 
+    @classmethod
+    def load(cls, path: str | Path) -> tuple["StandardScaler", list[str]]:
+        """Load a scaler and its channel names from a cache/output ``.npz`` file."""
+        with np.load(Path(path), allow_pickle=True) as payload:
+            if "mean" not in payload or "std" not in payload:
+                raise ValueError(f"Scaler file is missing mean/std arrays: {path}")
+            feature_names = payload.get("feature_names")
+            names = [] if feature_names is None else [str(name) for name in feature_names.tolist()]
+            return cls(payload["mean"], payload["std"]), names
+
 
 class ForecastWindowDataset(Dataset):
     def __init__(
@@ -88,6 +117,9 @@ class ForecastWindowDataset(Dataset):
         seed: int,
         drop_nan_windows: bool,
         valid_lengths: np.ndarray,
+        num_workers: int = 1,
+        cached_record_trajectories: np.ndarray | None = None,
+        cached_record_starts: np.ndarray | None = None,
     ) -> None:
         self.sources = sources
         self.source_ids = source_ids
@@ -101,8 +133,36 @@ class ForecastWindowDataset(Dataset):
         self.total_len = self.context_len + self.pred_len
         self.stride = int(stride)
         self.drop_nan_windows = bool(drop_nan_windows)
-        self._handles: dict[int, h5py.File] = {}
+        self.num_workers = int(num_workers)
+        if self.num_workers <= 0:
+            raise ValueError(f"num_workers must be positive, got {self.num_workers}.")
+        self._thread_local = threading.local()
+        self._thread_handles: dict[int, dict[int, h5py.File]] = {}
+        self._thread_handles_lock = threading.Lock()
         self.valid_lengths = np.asarray(valid_lengths, dtype=np.int64)
+        if (cached_record_trajectories is None) != (cached_record_starts is None):
+            raise ValueError("cached_record_trajectories and cached_record_starts must be provided together.")
+        if cached_record_trajectories is not None and cached_record_starts is not None:
+            cached_trajectories = np.asarray(cached_record_trajectories, dtype=np.int64).reshape(-1)
+            cached_starts = np.asarray(cached_record_starts, dtype=np.int64).reshape(-1)
+            if cached_trajectories.shape != cached_starts.shape:
+                raise ValueError(
+                    "Cached window trajectory/start arrays must have the same shape: "
+                    f"{cached_trajectories.shape} vs {cached_starts.shape}"
+                )
+            if not cached_starts.size:
+                raise ValueError("Cached window records are empty.")
+            if np.any(cached_trajectories < 0) or np.any(cached_trajectories >= self.valid_lengths.size):
+                raise ValueError("Cached window records contain invalid trajectory indices.")
+            if np.any(cached_starts < 0):
+                raise ValueError("Cached window records contain negative starts.")
+            available = np.minimum(self.valid_lengths[cached_trajectories], sources[0].time_steps)
+            if np.any(cached_starts + self.total_len > available):
+                raise ValueError("Cached window records exceed the valid trajectory prefixes.")
+            # Cached records have already passed the optional finite-value scan.
+            self.record_trajectories = cached_trajectories
+            self.record_starts = cached_starts
+            return
         record_trajectories: list[np.ndarray] = []
         record_starts: list[np.ndarray] = []
         for global_idx in self.trajectory_indices:
@@ -122,14 +182,30 @@ class ForecastWindowDataset(Dataset):
         self.record_trajectories = np.concatenate(record_trajectories)
         self.record_starts = np.concatenate(record_starts)
         if self.drop_nan_windows:
-            finite_mask = np.fromiter(
-                (
-                    np.isfinite(self._load_window(int(global_idx), int(start))).all()
-                    for global_idx, start in zip(self.record_trajectories, self.record_starts)
-                ),
-                dtype=bool,
-                count=self.record_starts.size,
-            )
+            record_indices = np.arange(self.record_starts.size, dtype=np.int64)
+
+            def scan_chunk(chunk: np.ndarray) -> np.ndarray:
+                return np.fromiter(
+                    (
+                        np.isfinite(
+                            self._load_window(
+                                int(self.record_trajectories[index]),
+                                int(self.record_starts[index]),
+                            )
+                        ).all()
+                        for index in chunk
+                    ),
+                    dtype=bool,
+                    count=chunk.size,
+                )
+
+            chunks = _work_chunks(record_indices, self.num_workers)
+            if len(chunks) <= 1:
+                finite_mask = scan_chunk(chunks[0])
+            else:
+                with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+                    masks = list(executor.map(scan_chunk, chunks))
+                finite_mask = np.concatenate(masks)
             self.record_trajectories = self.record_trajectories[finite_mask]
             self.record_starts = self.record_starts[finite_mask]
             if not self.record_starts.size:
@@ -208,19 +284,28 @@ class ForecastWindowDataset(Dataset):
         return window.astype(np.float32, copy=False)
 
     def _get_handle(self, source_id: int) -> h5py.File:
-        handle = self._handles.get(source_id)
+        handles = getattr(self._thread_local, "handles", None)
+        if handles is None:
+            handles = {}
+            self._thread_local.handles = handles
+            with self._thread_handles_lock:
+                self._thread_handles[threading.get_ident()] = handles
+        handle = handles.get(source_id)
         if handle is None:
             handle = h5py.File(self.sources[source_id].path, "r")
-            self._handles[source_id] = handle
+            handles[source_id] = handle
         return handle
 
     def close(self) -> None:
-        for handle in self._handles.values():
-            try:
-                handle.close()
-            except Exception:
-                pass
-        self._handles.clear()
+        with self._thread_handles_lock:
+            handle_sets = list(self._thread_handles.values())
+            self._thread_handles.clear()
+        for handles in handle_sets:
+            for handle in handles.values():
+                try:
+                    handle.close()
+                except Exception:
+                    pass
 
     def __del__(self) -> None:  # pragma: no cover
         self.close()
@@ -303,6 +388,23 @@ def _select_position_indices(
     return np.asarray(sorted(chosen), dtype=np.int64)
 
 
+def _record_indices_by_trajectory(trajectory_ids: np.ndarray) -> list[np.ndarray]:
+    """Group record indices by trajectory using one global stable sort."""
+    trajectory_ids = np.asarray(trajectory_ids, dtype=np.int64).reshape(-1)
+    if not trajectory_ids.size:
+        return []
+    order = np.argsort(trajectory_ids, kind="stable")
+    sorted_ids = trajectory_ids[order]
+    boundaries = np.concatenate(
+        (
+            np.asarray([0], dtype=np.int64),
+            np.flatnonzero(sorted_ids[1:] != sorted_ids[:-1]).astype(np.int64) + 1,
+            np.asarray([sorted_ids.size], dtype=np.int64),
+        )
+    )
+    return [order[start:end] for start, end in zip(boundaries[:-1], boundaries[1:])]
+
+
 def select_deterministic_windows(
     dataset: Dataset,
     windows_per_trajectory: int,
@@ -320,8 +422,7 @@ def select_deterministic_windows(
         return dataset
     trajectory_ids, starts = _dataset_record_arrays(dataset)
     selected: list[np.ndarray] = []
-    for trajectory_id in np.unique(trajectory_ids):
-        record_indices = np.flatnonzero(trajectory_ids == trajectory_id)
+    for record_indices in _record_indices_by_trajectory(trajectory_ids):
         order = np.argsort(starts[record_indices], kind="stable")
         ordered_indices = record_indices[order]
         positions = _select_position_indices(
@@ -358,10 +459,7 @@ class DynamicTrajectoryWindowDataset(Dataset):
         self.windows_per_trajectory = int(windows_per_trajectory)
         self.seed = int(seed)
         trajectory_ids, _ = _dataset_record_arrays(base)
-        self._trajectory_groups = [
-            np.flatnonzero(trajectory_ids == trajectory_id).astype(np.int64, copy=False)
-            for trajectory_id in np.unique(trajectory_ids)
-        ]
+        self._trajectory_groups = _record_indices_by_trajectory(trajectory_ids)
         if not self._trajectory_groups:
             raise ValueError("No candidate windows are available for dynamic sampling.")
         self.selected_indices = np.empty(0, dtype=np.int64)
@@ -555,6 +653,7 @@ def prepare_forecasting_data(
     window_sampling: str = "sequential",
     drop_nan_windows: bool = False,
     max_scaler_trajectories: int = 0,
+    num_workers: int = 1,
     verbose: bool = True,
 ) -> PreparedForecastData:
     representation = normalize_representation(representation)
@@ -564,12 +663,16 @@ def prepare_forecasting_data(
         raise ValueError("Expected train_frac > 0, val_frac > 0, and train_frac + val_frac < 1.")
     if window_sampling not in {"random", "sequential"}:
         raise ValueError("window_sampling must be random or sequential.")
+    if num_workers <= 0:
+        raise ValueError(f"num_workers must be positive, got {num_workers}.")
 
     paths = [Path(path) for path in sorted(glob.glob(data_glob))]
     if not paths:
         raise FileNotFoundError(f"No HDF5 files matched --data_glob={data_glob!r}")
     if verbose:
         print(f"[data] matched {len(paths)} HDF5 shards for {data_glob!r}", flush=True)
+        if num_workers > 1:
+            print(f"[data] using {num_workers} worker threads for window preparation", flush=True)
     sources = inspect_sources(paths, representation)
     if verbose:
         total_rows = sum(source.row_count for source in sources)
@@ -633,6 +736,7 @@ def prepare_forecasting_data(
         window_sampling=window_sampling,
         drop_nan_windows=drop_nan_windows,
         valid_lengths=valid_lengths,
+        num_workers=num_workers,
     )
     train_dataset = ForecastWindowDataset(
         trajectory_indices=split_indices["train"], seed=split_seed + 101, **common
@@ -647,6 +751,7 @@ def prepare_forecasting_data(
         train_dataset,
         max_trajectories=max_scaler_trajectories,
         seed=split_seed + 23,
+        num_workers=num_workers,
         verbose=verbose,
     )
     train_dataset.scaler = scaler
@@ -996,8 +1101,11 @@ def fit_scaler_from_windows(
     dataset: ForecastWindowDataset,
     max_trajectories: int,
     seed: int,
+    num_workers: int = 1,
     verbose: bool = True,
 ) -> StandardScaler:
+    if num_workers <= 0:
+        raise ValueError(f"num_workers must be positive, got {num_workers}.")
     trajectories = np.unique(dataset.record_trajectories)
     if 0 < max_trajectories < trajectories.size:
         rng = np.random.default_rng(seed)
@@ -1014,14 +1122,32 @@ def fit_scaler_from_windows(
             f"{selected_records.size} selected valid windows",
             flush=True,
         )
-    for record_index in selected_records:
-        values = dataset.load_raw_window(int(record_index)).reshape(-1, channels)
-        if not np.isfinite(values).all():
-            dropped_windows += 1
-            continue
-        sums += values.sum(axis=0, dtype=np.float64)
-        sumsq += np.square(values, dtype=np.float64).sum(axis=0, dtype=np.float64)
-        counts += values.shape[0]
+    def accumulate_chunk(record_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+        chunk_sums = np.zeros(channels, dtype=np.float64)
+        chunk_sumsq = np.zeros(channels, dtype=np.float64)
+        chunk_counts = np.zeros(channels, dtype=np.int64)
+        chunk_dropped = 0
+        for record_index in record_indices:
+            values = dataset.load_raw_window(int(record_index)).reshape(-1, channels)
+            if not np.isfinite(values).all():
+                chunk_dropped += 1
+                continue
+            chunk_sums += values.sum(axis=0, dtype=np.float64)
+            chunk_sumsq += np.square(values, dtype=np.float64).sum(axis=0, dtype=np.float64)
+            chunk_counts += values.shape[0]
+        return chunk_sums, chunk_sumsq, chunk_counts, chunk_dropped
+
+    chunks = _work_chunks(selected_records, num_workers)
+    if len(chunks) <= 1:
+        partials = [accumulate_chunk(chunks[0])]
+    else:
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            partials = list(executor.map(accumulate_chunk, chunks))
+    for chunk_sums, chunk_sumsq, chunk_counts, chunk_dropped in partials:
+        sums += chunk_sums
+        sumsq += chunk_sumsq
+        counts += chunk_counts
+        dropped_windows += chunk_dropped
     if np.any(counts == 0):
         missing = np.flatnonzero(counts == 0).tolist()
         raise ValueError(f"Scaler has no finite values for channels {missing}.")

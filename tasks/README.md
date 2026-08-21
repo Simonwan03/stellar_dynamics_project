@@ -360,17 +360,41 @@ conda run -n stellar python -m tasks.task_e \
   --output_dir runs/task_e_ridge_orbital15_ctx512_pred128
 ```
 
+For a large run, prepare the HDF5 window index and train-only scaler once:
+
+```bash
+conda run -n stellar python -m tasks.task_e.prepare \
+  --cache-dir runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
+  --completion-table dataset_v3/completed_systems_sampling_2.txt \
+  --context-len 512 --pred-len 128 --stride 20 \
+  --drop-nan-windows
+```
+
+Then reuse it for each model:
+
+```bash
+conda run -n stellar python -m tasks.task_e \
+  --prepared-cache runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --model chronos2 \
+  --foundation_batch_size 32 \
+  --output_dir runs/task_e_chronos2
+```
+
+The cache stores window records and metadata, not a copy of the HDF5 files. It
+is rejected automatically when source files or preprocessing settings differ.
 The unified entry supports `orbital15` and `raw_state18`/`trajectory`, with
 base-system group train/validation/test splits, completion-aware windows, and
 train-window-only standardization. Available models are:
 
 - `ridge`
 - `tcn`, `patchtst`, `transformer`, `itransformer`
-- `timesfm`, `chronos`, `chronos2`, `panda_zero_shot`
+- `chronos2`, `panda_zero_shot`, `tirex2`, `toto2`
 
-其中 `chronos` 默认使用 `amazon/chronos-bolt-small`。使用
-`--model chronos2`（或将 `--chronos_model_id` 改为 `amazon/chronos-2`）时，
-会使用 Chronos-2 原生多变量预测，不再把各通道拆成独立的单变量序列。
+`chronos2` 使用 `amazon/chronos-2` 的原生多变量预测，不再把各通道拆成
+独立的单变量序列。
+`tirex2` 使用 `NX-AI/TiRex-2` 的原生多目标预测，同样保留 15 个通道的联合建模。
+`toto2` 使用 `Datadog/Toto-2.0-22m` 的原生多变量预测，并选取 0.5 分位数作为点预测。
 
 Task E 的主协议包括 E1 one-shot `512 -> 128` 和 E2 四个递归 `128` 步 block
 （最长 horizon `512`）。E2 通过同一次运行的 `--run-rolling --rolling-blocks 4`
@@ -414,7 +438,7 @@ conda run -n stellar python -m tasks.task_e \
   --output_dir runs/task_e_tcn_smoke
 ```
 
-Foundation dependencies are optional. Missing TimesFM, Chronos, or Panda
+Foundation dependencies are optional. Missing Chronos-2 or Panda
 packages/checkpoints produce a model-specific installation/checkpoint error;
 they do not affect ridge or supervised models. `panda_zero_shot`
 supports the native multivariate Panda path. Historical `panda_adapter` code is

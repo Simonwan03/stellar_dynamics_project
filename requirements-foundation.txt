@@ -27,8 +27,11 @@ orjson>=3.9
 statsmodels>=0.14
 wandb>=0.16
 
-# TimesFM zero-shot and adapter baselines.
-git+https://github.com/google-research/timesfm.git
+# Chronos-2 native multivariate zero-shot baseline.
+chronos-forecasting==2.1.0
 
-# Chronos zero-shot and adapter baselines.
-git+https://github.com/amazon-science/chronos-forecasting.git
+# TiRex-2 native multivariate zero-shot baseline.
+tirex-2==0.2.1
+
+# Toto-2.0 native multivariate zero-shot baseline (officially Python >=3.12).
+toto-2==2.0.0
