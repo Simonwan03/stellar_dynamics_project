@@ -10,8 +10,8 @@ Run from the repository root, for example::
     conda run -n stellar python -m tasks.common.analyze_divergence
 
 ``time_unbound == censor_time`` means that the trajectory reached the end of
-the integration without diverging.  At group level, the representative time is
-the earliest valid divergence time among the 32 variations.
+the integration without diverging.  At system level, the representative time
+is the earliest valid divergence time among the 32 variations.
 """
 
 from __future__ import annotations
@@ -29,6 +29,19 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TABLE = ROOT / "dataset_v3" / "completed_systems_sampling_2.txt"
 DEFAULT_OUTPUT_DIR = ROOT / "results" / "divergence_statistics"
 COLUMNS = ["index", "batch", "time_unbound", "wall_time", "diagnosis"]
+
+
+def figure_caption(group_size: int) -> str:
+    """Return the paper-facing caption for the survival-distribution figure."""
+    return (
+        "Distribution of instability times in the dataset. "
+        "(a) Empirical survival distribution of individual trajectories from the analyzed complete systems. "
+        f"(b) System-level survival distribution, where the instability time of a system is defined as "
+        f"the earliest instability among its {group_size} variations "
+        f"(T_sys = min_{{j=1,...,{group_size}}} T_j). "
+        "Dashed vertical lines indicate the 50th, 90th, and 99th percentiles of finite instability times. "
+        "Trajectories that remain bound throughout the simulation horizon are treated as right-censored."
+    )
 
 
 def parse_percentiles(value: str) -> list[float]:
@@ -135,35 +148,52 @@ def plot_population(
     censor_time: float,
     percentiles: list[float],
     title: str,
+    population_label: str = "samples",
+    show_ylabel: bool = True,
 ) -> None:
-    x, counts = survival_curve(times, censor_time)
+    values = np.asarray(times, dtype=np.float64)
+    x, counts = survival_curve(values, censor_time)
+    total = values.size
+    survival_fraction = counts / total if total else np.zeros_like(counts, dtype=np.float64)
     positive = counts > 0
-    axis.plot(x[positive], counts[positive], color="#0072B2", linewidth=1.8)
-    axis.fill_between(x[positive], counts[positive], 0, color="#56B4E9", alpha=0.16)
+    axis.plot(x[positive], survival_fraction[positive], color="#0072B2", linewidth=1.8)
+    axis.fill_between(x[positive], survival_fraction[positive], 0, color="#56B4E9", alpha=0.12)
 
-    event_times = np.asarray(times, dtype=np.float64)
-    event_times = event_times[event_times < censor_time]
+    event_times = values[values < censor_time]
     if event_times.size:
         percentile_values = np.percentile(event_times, percentiles)
         for percentile, value in zip(percentiles, percentile_values):
-            axis.axvline(value, color="black", linestyle="--", linewidth=1.2)
-            axis.annotate(
+            axis.axvline(value, color="0.35", linestyle="--", linewidth=1.0, alpha=0.65)
+            axis.text(
+                value,
+                0.97,
                 f"p{percentile:g}",
-                xy=(value, 0.98),
-                xycoords=("data", "axes fraction"),
-                xytext=(3, 0),
-                textcoords="offset points",
+                transform=axis.get_xaxis_transform(),
                 ha="left",
                 va="top",
-                fontsize=9,
+                fontsize=7.5,
+                color="0.25",
             )
 
     axis.set_xlim(left=0.0, right=censor_time)
-    axis.set_ylim(bottom=0.0)
-    axis.set_title(title)
-    axis.set_xlabel("No. of outer orbits")
-    axis.set_ylabel(r"$N(T_{\mathrm{unbound}} \geq t)$")
-    axis.grid(alpha=0.2, which="both")
+    axis.set_ylim(0.0, 1.0)
+    axis.set_title(title, loc="left", pad=3.0)
+    axis.set_xlabel(r"Time $t$ [outer orbital periods]")
+    if show_ylabel:
+        axis.set_ylabel(r"Survival fraction $S(t)=P(T \geq t)$")
+    else:
+        axis.set_ylabel("")
+    axis.text(
+        0.98,
+        0.86,
+        f"N={total:,} {population_label}",
+        transform=axis.transAxes,
+        ha="right",
+        va="top",
+        fontsize=7.5,
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.8, "pad": 1.5},
+    )
+    axis.grid(alpha=0.12, linewidth=0.5, which="major")
 
 
 def analyze(
@@ -185,7 +215,9 @@ def analyze(
     if group_table.empty:
         raise ValueError("No groups remain after validity/completeness filtering.")
 
-    trajectory_times = valid["time_unbound"].to_numpy(dtype=np.float64)
+    included_group_ids = group_table["group_id"].to_numpy()
+    trajectory_valid = valid[(valid["index"] // group_size).isin(included_group_ids)]
+    trajectory_times = trajectory_valid["time_unbound"].to_numpy(dtype=np.float64)
     group_times = group_table["time_unbound"].to_numpy(dtype=np.float64)
     raw_group_count = int(table.assign(group_id=table["index"] // group_size)["group_id"].nunique())
 
@@ -195,8 +227,10 @@ def analyze(
         "group_size": int(group_size),
         "group_representative": "minimum time_unbound among variations",
         "percentiles_use_divergent_samples_only": True,
+        "figure_caption": figure_caption(group_size),
         "raw_rows": int(len(table)),
         "invalid_rows": int(len(table) - len(valid)),
+        "valid_rows_excluded_as_incomplete_groups": int(len(valid) - len(trajectory_valid)),
         "raw_groups": raw_group_count,
         "groups_excluded_as_invalid_or_incomplete": int(raw_group_count - len(group_table)),
         "trajectory": summarize_population(trajectory_times, censor_time, percentiles),
@@ -212,23 +246,57 @@ def analyze(
 
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(1, 2, figsize=(13, 4.8), constrained_layout=True)
-    plot_population(axes[0], trajectory_times, censor_time, percentiles, "Individual trajectories")
+    try:
+        import scienceplots  # noqa: F401
+    except ModuleNotFoundError:
+        pass
+    else:
+        plt.style.use(["science", "no-latex"])
+    plt.rcParams.update(
+        {
+            "font.size": 8,
+            "font.family": "serif",
+            "mathtext.fontset": "stix",
+            "axes.labelsize": 9,
+            "axes.titlesize": 9,
+            "xtick.labelsize": 7.5,
+            "ytick.labelsize": 7.5,
+            "legend.fontsize": 7,
+            "axes.linewidth": 0.8,
+            "xtick.major.width": 0.8,
+            "ytick.major.width": 0.8,
+            "lines.linewidth": 1.8,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
+
+    figure, axes = plt.subplots(1, 2, figsize=(7.0, 2.8), constrained_layout=True, sharey=True)
+    plot_population(
+        axes[0],
+        trajectory_times,
+        censor_time,
+        percentiles,
+        "(a) Trajectory level",
+        population_label="trajectories",
+    )
     plot_population(
         axes[1],
         group_times,
         censor_time,
         percentiles,
-        f"Groups of {group_size} (earliest divergence)",
+        "(b) System level",
+        population_label="systems",
+        show_ylabel=False,
     )
-    figure.savefig(output_dir / "divergence_time_distribution.png", dpi=200, bbox_inches="tight")
+    figure.savefig(output_dir / "divergence_time_distribution.pdf", bbox_inches="tight")
     plt.close(figure)
     return summary
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Count divergent trajectories and plot individual/group divergence-time survival curves."
+        description="Count instability times and plot trajectory-level/system-level survival curves."
     )
     parser.add_argument("--table", type=Path, default=DEFAULT_TABLE, help="Completion table path.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -266,7 +334,7 @@ def main() -> None:
         f"({trajectory['divergent_fraction']:.2%})"
     )
     print(
-        f"Groups: {group['divergent']:,}/{group['total']:,} divergent "
+        f"Systems: {group['divergent']:,}/{group['total']:,} divergent "
         f"({group['divergent_fraction']:.2%}); representative = earliest of {args.group_size} variations"
     )
     print(f"Outputs: {args.output_dir.resolve()}")

@@ -28,6 +28,12 @@ from tasks.common.experiment_utils import (
     select_device,
     set_random_seed,
 )
+from tasks.common.case_split import (
+    case_split_indices,
+    default_case_split_manifest_path,
+    ensure_case_split_manifest,
+    missing_case_ids,
+)
 
 
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
@@ -909,8 +915,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-stride", type=int, default=1)
     parser.add_argument("--time-horizon", type=float, default=DEFAULT_TIME_HORIZON)
     parser.add_argument("--models", type=str, default="svm,cnn,tcn,attention")
-    parser.add_argument("--test-size", type=float, default=0.125)
-    parser.add_argument("--val-size", type=float, default=0.1)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument(
+        "--val-ratio",
+        "--val-size",
+        dest="val_ratio",
+        type=float,
+        default=0.15,
+        help="Validation fraction of total systems. --val-size is a legacy alias.",
+    )
+    parser.add_argument(
+        "--test-ratio",
+        "--test-size",
+        dest="test_ratio",
+        type=float,
+        default=0.15,
+        help="Test fraction of total systems. --test-size is a legacy alias.",
+    )
+    parser.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=None,
+        help="Shared raw_case_id split CSV; created from the completion table when absent.",
+    )
+    parser.add_argument("--overwrite-split-manifest", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=50)
@@ -958,6 +986,49 @@ def main() -> None:
     labels = load_aligned_labels(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt", batch_ids, rows_loaded)
     X, feature_names = build_prefix_features(data, result_keys=result_keys, add_time=add_time, include_geom=include_geom)
     X, y, labels, valid_mask = filter_valid_samples(X, labels, data, args.time_horizon)
+    labels_path = args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt"
+    split_manifest = args.split_manifest or default_case_split_manifest_path(
+        args.dataset_dir,
+        args.sampling_id,
+        args.group_size,
+        args.time_horizon,
+        args.seed,
+        args.train_ratio,
+        args.val_ratio,
+        args.test_ratio,
+    )
+    split_manifest_df = ensure_case_split_manifest(
+        labels_path,
+        split_manifest,
+        group_size=args.group_size,
+        time_horizon=args.time_horizon,
+        seed=args.seed,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        overwrite=args.overwrite_split_manifest,
+    )
+    loaded_case_ids = (labels["index"].to_numpy(dtype=np.int64) // args.group_size).astype(np.int64)
+    manifest_case_ids = split_manifest_df["raw_case_id"].to_numpy(dtype=np.int64)
+    known_case_mask = np.isin(loaded_case_ids, manifest_case_ids)
+    if not np.all(known_case_mask):
+        dropped = int((~known_case_mask).sum())
+        print(f"Dropping {dropped} valid trajectory rows outside the common complete-system universe.")
+        X = X[known_case_mask]
+        y = y[known_case_mask]
+        labels = labels.loc[known_case_mask].reset_index(drop=True)
+    if args.max_shards is None and args.rows_per_shard is None:
+        remaining_case_ids = (labels["index"].to_numpy(dtype=np.int64) // args.group_size).astype(np.int64)
+        missing = missing_case_ids(remaining_case_ids, split_manifest_df)
+        counts = pd.Series(remaining_case_ids).value_counts()
+        expected_case_ids = split_manifest_df["raw_case_id"].to_numpy(dtype=np.int64)
+        incomplete = expected_case_ids[counts.reindex(expected_case_ids, fill_value=0).to_numpy() != args.group_size]
+        missing = np.union1d(missing, incomplete)
+        if missing.size:
+            raise ValueError(
+                "Task B does not contain the full common system universe after input filtering; "
+                f"missing {missing.size} raw_case_id values (first: {missing[:10].tolist()})."
+            )
     if args.target_mode == "group_fraction":
         X, y, labels = build_group_fraction_samples(
             X,
@@ -968,22 +1039,14 @@ def main() -> None:
         )
     if args.target_mode == "trajectory_binary":
         sample_case_ids = (labels["index"].to_numpy(dtype=np.int64) // args.group_size).astype(np.int64)
-        train_idx, val_idx, test_idx = grouped_case_split_indices(
-            y,
-            sample_case_ids,
-            test_size=args.test_size,
-            val_size=args.val_size,
-            seed=args.seed,
-        )
     else:
-        rng = np.random.default_rng(args.seed)
-        indices = np.arange(len(y))
-        rng.shuffle(indices)
-        n_test = int(round(len(indices) * args.test_size))
-        n_val = int(round(len(indices) * args.val_size))
-        test_idx = indices[:n_test]
-        val_idx = indices[n_test : n_test + n_val]
-        train_idx = indices[n_test + n_val :]
+        sample_case_ids = labels["raw_case_id"].to_numpy(dtype=np.int64)
+    split_indices = case_split_indices(sample_case_ids, split_manifest_df)
+    train_idx, val_idx, test_idx = (
+        split_indices["train"],
+        split_indices["val"],
+        split_indices["test"],
+    )
     X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
     y_train, y_val, y_test = y[train_idx], y[val_idx], y[test_idx]
     X_train, [X_val, X_test], seq_norm = standardize_sequence_train(X_train, X_val, X_test)
@@ -998,8 +1061,19 @@ def main() -> None:
     gru_layers = args.gru_layers if args.gru_layers is not None else temporal_scale["gru"]["layers"]
     group_attention_hidden = args.hidden_dim if args.hidden_dim is not None else attention_hidden
 
+    split_membership = np.empty(len(sample_case_ids), dtype=object)
+    for split_name, split_rows in split_indices.items():
+        split_membership[split_rows] = split_name
+    labels = labels.copy()
+    labels["split"] = split_membership
     labels.to_csv(output_dir / "labels_filtered.csv", index=False)
-    np.savez(output_dir / "split_indices.npz", train_idx=train_idx, val_idx=val_idx, test_idx=test_idx)
+    np.savez(
+        output_dir / "split_indices.npz",
+        train_idx=train_idx,
+        val_idx=val_idx,
+        test_idx=test_idx,
+        case_ids=sample_case_ids,
+    )
     np.savez(output_dir / "sequence_normalization.npz", mean=seq_norm["mean"], std=seq_norm["std"])
     save_json(
         output_dir / "config.json",
@@ -1013,6 +1087,19 @@ def main() -> None:
             "target_max": float(y.max()),
             "input_shape": tuple(X.shape[1:]),
             "feature_names": feature_names,
+            "split_manifest": split_manifest,
+            "split_unit": "complete raw_case_id system",
+            "split_horizon": float(args.time_horizon),
+            "split_ratios": {
+                "train": float(args.train_ratio),
+                "val": float(args.val_ratio),
+                "test": float(args.test_ratio),
+            },
+            "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
+            "split_case_counts": {
+                name: int(np.unique(sample_case_ids[rows]).size)
+                for name, rows in split_indices.items()
+            },
             "effective_model_scale": {
                 "cnn": {"hidden": cnn_hidden},
                 "tcn": {"hidden": tcn_hidden, "levels": tcn_levels},

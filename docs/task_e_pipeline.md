@@ -537,7 +537,8 @@ E2 另外报告：
 每个模型的运行目录保存 `e1_metrics.json`、`rolling_metrics.json`（启用 E2 时）、
 `summary.json`、`summary.csv` 和 `summary.md`。使用
 `python -m tasks.task_e.report --run-dirs ... --output-dir ...` 可汇总多个模型并生成
-`one_shot_horizon_mae.png` 与 `rolling_horizon_mae.png`。
+`one_shot_horizon_mae.png`、`rolling_horizon_mae.png` 与论文用的
+`rolling_horizon_mae.pdf`。
 
 inverse scaler 只撤销 z-score，没有撤销 `log1p` 或 sin/cos，因此该空间是 transformed feature space，而不是真正的原始物理变量空间。新输出使用 `*_transformed`；为了兼容已有结果读取，暂时同时保留同值的 legacy `*_raw` 字段。
 

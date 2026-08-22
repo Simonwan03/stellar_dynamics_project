@@ -52,6 +52,12 @@ from tasks.common.experiment_utils import (  # noqa: E402
     select_device,
     set_random_seed,
 )
+from tasks.common.case_split import (  # noqa: E402
+    case_split_indices,
+    default_case_split_manifest_path,
+    ensure_case_split_manifest,
+    missing_case_ids,
+)
 from tasks.task_b.main import (  # noqa: E402
     FULL_RESULT_KEYS,
     ORBITAL15_RESULT_KEYS,
@@ -68,7 +74,6 @@ from tasks.task_c.main import (  # noqa: E402
     TemporalAttentionEncoder,
     build_variation_subset_indices,
     standardize_case_train,
-    stratified_case_split,
 )
 
 
@@ -1022,8 +1027,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models", type=str, default="baseline,stats")
     parser.add_argument("--encoder-type", choices=["stats", "cnn", "tcn", "gru", "attention"], default="stats")
     parser.add_argument("--curve-loss-weight", type=float, default=0.2)
-    parser.add_argument("--test-ratio", type=float, default=0.2)
-    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument("--test-ratio", type=float, default=0.15)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument(
+        "--split-horizon",
+        type=float,
+        default=10000.0,
+        help="Fixed horizon used only to stratify the shared A/B/C system split.",
+    )
+    parser.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=None,
+        help="Shared raw_case_id split CSV; created from the completion table when absent.",
+    )
+    parser.add_argument("--overwrite-split-manifest", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=40)
@@ -1114,7 +1133,41 @@ def main() -> None:
     old_model_target = (times_model[..., None] >= future_times[None, None, :]).mean(axis=1)
     old_system_target = old_full_target if args.variation_target == "full32" else old_model_target
 
-    train_idx, val_idx, test_idx = stratified_case_split(system_target, args.test_ratio, args.val_ratio, args.seed)
+    labels_path = args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt"
+    split_manifest = args.split_manifest or default_case_split_manifest_path(
+        args.dataset_dir,
+        args.sampling_id,
+        args.group_size,
+        args.split_horizon,
+        args.seed,
+        args.train_ratio,
+        args.val_ratio,
+        args.test_ratio,
+    )
+    split_manifest_df = ensure_case_split_manifest(
+        labels_path,
+        split_manifest,
+        group_size=args.group_size,
+        time_horizon=args.split_horizon,
+        seed=args.seed,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        overwrite=args.overwrite_split_manifest,
+    )
+    if args.max_shards is None and args.rows_per_shard is None and args.max_cases is None:
+        missing = missing_case_ids(case_ids, split_manifest_df)
+        if missing.size:
+            raise ValueError(
+                "Task C survival does not contain the full common system universe after input filtering; "
+                f"missing {missing.size} raw_case_id values (first: {missing[:10].tolist()})."
+            )
+    split_indices = case_split_indices(case_ids, split_manifest_df)
+    train_idx, val_idx, test_idx = (
+        split_indices["train"],
+        split_indices["val"],
+        split_indices["test"],
+    )
     X_train, X_val, X_test = X_model[train_idx], X_model[val_idx], X_model[test_idx]
     target_train, target_val, target_test = hazard_target[train_idx], hazard_target[val_idx], hazard_target[test_idx]
     risk_train, risk_val, risk_test = at_risk[train_idx], at_risk[val_idx], at_risk[test_idx]
@@ -1171,6 +1224,15 @@ def main() -> None:
             "censoring_fraction": float(target_meta["censored"].mean()),
             "left_boundary_event_fraction": float((times_model <= hazard_t_min).mean()),
             "full32_system_target_saved": True,
+            "split_manifest": split_manifest,
+            "split_unit": "complete raw_case_id system",
+            "split_horizon": float(args.split_horizon),
+            "split_ratios": {
+                "train": float(args.train_ratio),
+                "val": float(args.val_ratio),
+                "test": float(args.test_ratio),
+            },
+            "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
         },
     )
 

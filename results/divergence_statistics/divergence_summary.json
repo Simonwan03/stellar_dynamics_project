@@ -4,19 +4,21 @@
   "group_size": 32,
   "group_representative": "minimum time_unbound among variations",
   "percentiles_use_divergent_samples_only": true,
+  "figure_caption": "Distribution of instability times in the dataset. (a) Empirical survival distribution of individual trajectories from the analyzed complete systems. (b) System-level survival distribution, where the instability time of a system is defined as the earliest instability among its 32 variations (T_sys = min_{j=1,...,32} T_j). Dashed vertical lines indicate the 50th, 90th, and 99th percentiles of finite instability times. Trajectories that remain bound throughout the simulation horizon are treated as right-censored.",
   "raw_rows": 160000,
   "invalid_rows": 47,
+  "valid_rows_excluded_as_incomplete_groups": 17,
   "raw_groups": 5000,
   "groups_excluded_as_invalid_or_incomplete": 2,
   "trajectory": {
-    "total": 159953,
-    "divergent": 109553,
+    "total": 159936,
+    "divergent": 109536,
     "non_divergent_at_censor_time": 50400,
-    "divergent_fraction": 0.6849074415609585,
+    "divergent_fraction": 0.6848739495798319,
     "divergence_time_percentiles": {
       "p50": 255.0,
       "p90": 4050.0,
-      "p99": 9062.39999999998
+      "p99": 9063.24999999997
     }
   },
   "group": {

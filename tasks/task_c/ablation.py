@@ -57,8 +57,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-shards", type=int, default=None)
     parser.add_argument("--rows-per-shard", type=int, default=None)
     parser.add_argument("--max-cases", type=int, default=None)
-    parser.add_argument("--test-ratio", type=float, default=0.2)
-    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument("--test-ratio", type=float, default=0.15)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument(
+        "--split-horizon",
+        type=float,
+        default=10000.0,
+        help="Fixed horizon used only to stratify the shared A/B/C system split.",
+    )
+    parser.add_argument("--split-manifest", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=40)
@@ -134,6 +142,10 @@ def run_cell(
         str(args.test_ratio),
         "--val-ratio",
         str(args.val_ratio),
+        "--train-ratio",
+        str(args.train_ratio),
+        "--split-horizon",
+        str(args.split_horizon),
         "--seed",
         str(args.seed),
         "--batch-size",
@@ -163,6 +175,8 @@ def run_cell(
         command += ["--max-cases", str(args.max_cases)]
     if args.device is not None:
         command += ["--device", args.device]
+    if args.split_manifest is not None:
+        command += ["--split-manifest", str(args.split_manifest)]
     if args.no_geom:
         command.append("--no-geom")
     if args.no_time:

@@ -16,6 +16,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+MODEL_DISPLAY_NAMES = {
+    "chronos2": "Chronos2",
+    "panda_zero_shot": "PANDA zero-shot",
+    "toto2": "TOTO2",
+    "tirex2": "TiRex2",
+}
+MODEL_ORDER = ("chronos2", "panda_zero_shot", "toto2", "tirex2")
+MODEL_COLORS = {
+    "chronos2": "#0072B2",
+    "panda_zero_shot": "#D55E00",
+    "toto2": "#009E73",
+    "tirex2": "#CC79A7",
+}
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build Task E E1/E2 model comparison reports.")
     parser.add_argument(
@@ -72,6 +86,7 @@ def build_report(run_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
     _save_markdown(output_dir / "summary.md", records)
     _plot_one_shot(output_dir / "one_shot_horizon_mae.png", records)
     _plot_rolling(output_dir / "rolling_horizon_mae.png", records)
+    _plot_rolling(output_dir / "rolling_horizon_mae.pdf", records)
     return summary
 
 
@@ -164,7 +179,13 @@ def _save_summary_csv(path: Path, records: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        for record in records:
+        ordered_records = sorted(
+            records,
+            key=lambda record: MODEL_ORDER.index(record["model"])
+            if record["model"] in MODEL_ORDER
+            else len(MODEL_ORDER),
+        )
+        for record in ordered_records:
             ci = record.get("bootstrap_ci95", {}).get("mae_z", {})
             record["mae_z_ci95_low"] = ci.get("ci95_low")
             record["mae_z_ci95_high"] = ci.get("ci95_high")
@@ -237,25 +258,78 @@ def _plot_one_shot(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def _plot_rolling(path: Path, records: list[dict[str, Any]]) -> None:
-    figure, axis = plt.subplots(figsize=(8, 5))
-    plotted = False
-    for record in records:
-        values = np.asarray(record["e2_rolling_horizon_mae"], dtype=np.float64)
-        if values.size == 0:
-            continue
-        axis.plot(np.arange(1, values.size + 1), values, linewidth=1.8, label=record["model"])
-        plotted = True
-    for boundary in (128, 256, 384):
-        axis.axvline(boundary, color="0.5", linestyle="--", linewidth=0.8)
-    axis.set_xlabel("Global forecast horizon")
-    axis.set_ylabel("MAE_z")
-    axis.set_title("Task E E2 recursive rolling horizon MAE")
-    if plotted:
-        axis.legend()
-    axis.grid(alpha=0.25)
-    figure.tight_layout()
-    figure.savefig(path, dpi=160)
-    plt.close(figure)
+    try:
+        import scienceplots  # noqa: F401
+    except ModuleNotFoundError:
+        style_context: list[str] = []
+    else:
+        style_context = ["science", "no-latex"]
+
+    with plt.style.context(style_context):
+        plt.rcParams.update(
+            {
+                "font.size": 8,
+                "font.family": "serif",
+                "mathtext.fontset": "stix",
+                "axes.labelsize": 8.5,
+                "axes.titlesize": 9,
+                "xtick.labelsize": 7.5,
+                "ytick.labelsize": 7.5,
+                "legend.fontsize": 7.5,
+                "axes.linewidth": 0.8,
+                "xtick.major.width": 0.8,
+                "ytick.major.width": 0.8,
+                "lines.linewidth": 1.8,
+                "pdf.fonttype": 42,
+                "ps.fonttype": 42,
+            }
+        )
+        figure, axis = plt.subplots(figsize=(7.0, 3.0))
+        plotted = False
+        max_horizon = 0
+        ordered_records = sorted(
+            records,
+            key=lambda record: MODEL_ORDER.index(record["model"])
+            if record["model"] in MODEL_ORDER
+            else len(MODEL_ORDER),
+        )
+        for record in ordered_records:
+            values = np.asarray(record["e2_rolling_horizon_mae"], dtype=np.float64)
+            if values.size == 0:
+                continue
+            horizon = np.arange(1, values.size + 1)
+            model = record["model"]
+            axis.plot(
+                horizon,
+                values,
+                color=MODEL_COLORS.get(model),
+                linewidth=1.8,
+                label=MODEL_DISPLAY_NAMES.get(model, model),
+            )
+            max_horizon = max(max_horizon, values.size)
+            plotted = True
+
+        if not plotted:
+            plt.close(figure)
+            return
+
+        for boundary in (128, 256, 384):
+            if boundary < max_horizon:
+                axis.axvline(boundary, color="0.5", linestyle="--", linewidth=0.7, alpha=0.6)
+        axis.set_xlim(1, max_horizon)
+        axis.set_ylim(bottom=0.0)
+        axis.set_xticks([step for step in (128, 256, 384, 512) if step <= max_horizon])
+        axis.set_xlabel("Forecast horizon [steps]")
+        axis.set_ylabel("MAE (standardized z-scale)")
+        axis.legend(frameon=False, loc="upper left", ncol=2, handlelength=2.5)
+        axis.grid(axis="y", alpha=0.15, linewidth=0.5)
+        axis.grid(axis="x", visible=False)
+        figure.tight_layout()
+        save_kwargs: dict[str, Any] = {"bbox_inches": "tight"}
+        if path.suffix.lower() == ".png":
+            save_kwargs["dpi"] = 300
+        figure.savefig(path, **save_kwargs)
+        plt.close(figure)
 
 
 def _load_json(path: Path) -> dict[str, Any]:

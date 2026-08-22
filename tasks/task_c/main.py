@@ -16,6 +16,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tasks.common.experiment_utils import ensure_dir, parse_name_list, save_csv, save_json, select_device, set_random_seed
+from tasks.common.case_split import (
+    case_split_indices,
+    default_case_split_manifest_path,
+    ensure_case_split_manifest,
+    missing_case_ids,
+)
 from tasks.task_b.main import (
     FULL_RESULT_KEYS,
     ORBITAL15_RESULT_KEYS,
@@ -885,8 +891,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--models", type=str, default="baseline,direct,direct_mean_std,traj,dual")
     parser.add_argument("--encoder-type", choices=["cnn", "gru", "attention"], default="cnn")
-    parser.add_argument("--test-ratio", type=float, default=0.2)
-    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument("--test-ratio", type=float, default=0.15)
+    parser.add_argument("--val-ratio", type=float, default=0.15)
+    parser.add_argument(
+        "--split-horizon",
+        type=float,
+        default=10000.0,
+        help="Fixed horizon used only to stratify the shared A/B/C system split.",
+    )
+    parser.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=None,
+        help="Shared raw_case_id split CSV; created from the completion table when absent.",
+    )
+    parser.add_argument("--overwrite-split-manifest", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=40)
@@ -1008,7 +1028,41 @@ def main() -> None:
     else:
         q_cases = y_cases.mean(axis=1)
 
-    train_idx, val_idx, test_idx = stratified_case_split(q_cases, args.test_ratio, args.val_ratio, args.seed)
+    labels_path = args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt"
+    split_manifest = args.split_manifest or default_case_split_manifest_path(
+        args.dataset_dir,
+        args.sampling_id,
+        args.group_size,
+        args.split_horizon,
+        args.seed,
+        args.train_ratio,
+        args.val_ratio,
+        args.test_ratio,
+    )
+    split_manifest_df = ensure_case_split_manifest(
+        labels_path,
+        split_manifest,
+        group_size=args.group_size,
+        time_horizon=args.split_horizon,
+        seed=args.seed,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        overwrite=args.overwrite_split_manifest,
+    )
+    if args.max_shards is None and args.rows_per_shard is None and args.max_cases is None:
+        missing = missing_case_ids(case_ids, split_manifest_df)
+        if missing.size:
+            raise ValueError(
+                "Task C does not contain the full common system universe after input filtering; "
+                f"missing {missing.size} raw_case_id values (first: {missing[:10].tolist()})."
+            )
+    split_indices = case_split_indices(case_ids, split_manifest_df)
+    train_idx, val_idx, test_idx = (
+        split_indices["train"],
+        split_indices["val"],
+        split_indices["test"],
+    )
     X_train, X_val, X_test = X_cases[train_idx], X_cases[val_idx], X_cases[test_idx]
     y_train, y_val, y_test = y_cases[train_idx], y_cases[val_idx], y_cases[test_idx]
     q_train, q_val, q_test = q_cases[train_idx], q_cases[val_idx], q_cases[test_idx]
@@ -1040,6 +1094,15 @@ def main() -> None:
             "variation_subset_seed": int(args.variation_subset_seed),
             "variation_indices": variation_indices,
             "observed_time_end": observed_time_end,
+            "split_manifest": split_manifest,
+            "split_unit": "complete raw_case_id system",
+            "split_horizon": float(args.split_horizon),
+            "split_ratios": {
+                "train": float(args.train_ratio),
+                "val": float(args.val_ratio),
+                "test": float(args.test_ratio),
+            },
+            "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
         },
     )
 

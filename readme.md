@@ -181,6 +181,36 @@ unstable。每个 system 内 unstable variation 数量的分布如下：
 
 ## Tasks
 
+### Shared Task A/B/C Split Protocol
+
+Task A、Task B 和 Task C 的正式结果必须使用同一份 system-level split，不能分别
+调用各自的随机切分函数。当前统一协议如下：
+
+- 切分单位是 `raw_case_id`，即一个 base system 及其全部 `32` 条 variations；B 的
+  trajectory-level 样本也必须继承所属 system 的 split，不能把同一 system 的
+  variations 分到不同集合。
+- 候选全集是 completion table 中 `time_unbound >= 0` 且 `diagnosis == 0`，并且
+  `variation_id=0..31` 齐全的 `4998` 个 system。
+- 以固定 `time_horizon=10000` 的 system stable fraction 做粗分层，分箱为
+  `0`、`(0,0.25]`、`(0.25,0.5]`、`(0.5,1)` 和 `1`；分层只用于保持各集合的
+  稳定性分布相近，不改变任何任务标签。
+- 使用 `seed=42` 和 `70/15/15` 比例。由于 system 数量必须是整数，实际为
+  `3498 / 750 / 750`（`69.988% / 15.006% / 15.006%`）。B 的
+  `trajectory_binary` 对应 `111936 / 24000 / 24000` 条 trajectory。
+- manifest 默认位于 `dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv`，旁边有同名 `.json` 元数据。首次运行 A/B/C 任一入口会创建它，后续入口会校验并复用它；也可以显式传入同一个 `--split-manifest`。
+
+建议先显式生成 manifest：
+
+```bash
+python scripts/create_common_case_split.py \
+  --dataset-dir dataset_v3 --sampling-id 2 --group-size 32 \
+  --time-horizon 10000 --train-ratio 0.70 --val-ratio 0.15 \
+  --test-ratio 0.15 --seed 42
+```
+
+已有的旧结果（例如 `3498/500/1000` 或 B 的 `125/10` 配置）不能与新协议下的
+结果直接混合比较，A/B/C 需要在同一 manifest 下重新运行。
+
 ### Task A: Group Stability from Initial Conditions
 
 入口脚本：[tasks/task_a/main.py](/home/wan/stellar_dynamics/tasks/task_a/main.py)
@@ -262,8 +292,10 @@ conda run -n stellar python -m tasks.task_a \
   --models mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
-  --test-size 0.2 \
-  --val-size 0.1 \
+  --train-ratio 0.70 \
+  --val-ratio 0.15 \
+  --test-ratio 0.15 \
+  --split-manifest dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv \
   --seed 42 \
   --epochs 50 \
   --device cuda \
@@ -302,7 +334,9 @@ Task B 有两个模式：
   - group 模式：
     - `concat`: `[G, T, 32*C]`
     - `set_attention`: `[G, T, 32, C]`
-- `trajectory_binary` 默认按 `raw_case_id` 做 group split，避免同一个 base system 的 32 条 perturbations 泄漏到不同数据集
+- `trajectory_binary` 默认读取 Shared Task A/B/C Split Protocol 生成的 manifest，按
+  `raw_case_id` 做 group split，避免同一个 base system 的 32 条 perturbations 泄漏到
+  不同数据集；`group_fraction` 和 Task C 使用完全相同的 system IDs
 - 如需旧版宽特征栈，可切到 `--representation full`
 
 **模型族**
@@ -378,6 +412,9 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 - 输入张量是 `[num_cases, 32, time, channels]`
 - 默认 future horizons 是：
   - `500,800,1500,2500,4000,6500,10000`
+- system split 默认复用 Shared Task A/B/C Split Protocol 的
+  `3498/750/750` manifest；variation ablation 只改变输入 variation 数量，不改变
+  train/val/test 的 system 边界
 
 **模型族**
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import torch
 from torch import nn
 
@@ -112,7 +110,18 @@ class PatchTSTForecaster(nn.Module):
         return prediction.transpose(1, 2)
 
 
-class ITransformerSimple(nn.Module):
+class ITransformerForecaster(nn.Module):
+    """Task E adapter for the official iTransformer forecasting architecture.
+
+    The implementation follows the official variates-as-tokens path:
+    per-sample temporal normalization, inverted value embedding, Transformer
+    encoding across variates, direct projection to the forecast horizon, and
+    de-normalization.  Task E does not provide timestamp covariates, so the
+    optional official ``x_mark`` token path is deliberately omitted.
+
+    Reference: https://github.com/thuml/iTransformer/blob/main/model/iTransformer.py
+    """
+
     def __init__(
         self,
         num_features: int,
@@ -124,10 +133,18 @@ class ITransformerSimple(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
+        if num_features <= 0 or context_len <= 0 or pred_len <= 0:
+            raise ValueError("num_features, context_len, and pred_len must be positive.")
         if d_model % n_heads:
             raise ValueError("d_model must be divisible by n_heads.")
+        self.num_features = int(num_features)
+        self.context_len = int(context_len)
+        self.pred_len = int(pred_len)
+        self.normalization_epsilon = 1e-5
+
+        # Official DataEmbedding_inverted without optional timestamp covariates.
         self.embedding = nn.Linear(context_len, d_model)
-        self.channel_embedding = nn.Parameter(torch.zeros(1, num_features, d_model))
+        self.embedding_dropout = nn.Dropout(dropout)
         layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
@@ -135,15 +152,40 @@ class ITransformerSimple(nn.Module):
             dropout=dropout,
             activation="gelu",
             batch_first=True,
-            norm_first=True,
+            norm_first=False,
         )
-        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-        self.head = nn.Linear(d_model, pred_len)
-        nn.init.normal_(self.channel_embedding, std=0.02)
+        self.encoder = nn.TransformerEncoder(
+            layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(d_model),
+        )
+        self.projector = nn.Linear(d_model, pred_len)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        tokens = self.embedding(x.transpose(1, 2)) + self.channel_embedding
-        return self.head(self.encoder(tokens)).transpose(1, 2)
+        if x.ndim != 3:
+            raise ValueError(f"iTransformer expects [batch,time,channels], got {tuple(x.shape)}.")
+        if x.shape[1:] != (self.context_len, self.num_features):
+            raise ValueError(
+                "iTransformer input has shape "
+                f"{tuple(x.shape)}; expected [batch,{self.context_len},{self.num_features}]."
+            )
+
+        # Non-stationary normalization used by the official implementation.
+        means = x.mean(dim=1, keepdim=True).detach()
+        centered = x - means
+        stdev = torch.sqrt(
+            torch.var(centered, dim=1, keepdim=True, unbiased=False)
+            + self.normalization_epsilon
+        )
+        normalized = centered / stdev
+
+        # [B,L,N] -> [B,N,E]: each physical channel is one variate token.
+        tokens = self.embedding_dropout(self.embedding(normalized.transpose(1, 2)))
+        encoded = self.encoder(tokens)
+        forecast = self.projector(encoded).transpose(1, 2)
+
+        # Return to the same coordinates as the Task E input/scaler.
+        return forecast * stdev + means
 
 
 def build_supervised_model(
@@ -168,7 +210,7 @@ def build_supervised_model(
             d_model, n_heads, num_layers, dropout,
         )
     if model_name == "itransformer":
-        return ITransformerSimple(
+        return ITransformerForecaster(
             num_features, context_len, pred_len, d_model, n_heads, num_layers, dropout
         )
     if model_name == "transformer":

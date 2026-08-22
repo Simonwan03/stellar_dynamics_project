@@ -156,23 +156,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_scaler_trajectories", type=int, default=0)
     parser.add_argument("--window_sampling", choices=["random", "sequential"], default="sequential")
     parser.add_argument("--drop_nan_windows", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--patience", type=int, default=7)
     parser.add_argument("--grad_clip", type=float, default=1.0)
-    parser.add_argument("--amp", action="store_true")
+    parser.add_argument(
+        "--amp",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use CUDA automatic mixed precision when running on a GPU (default: enabled).",
+    )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--hidden_dim", type=int, default=128)
-    parser.add_argument("--num_layers", type=int, default=4)
+    parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--kernel_size", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--patch_len", type=int, default=16)
     parser.add_argument("--patch_stride", type=int, default=8)
-    parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--n_heads", type=int, default=4)
+    parser.add_argument("--d_model", type=int, default=256)
+    parser.add_argument("--n_heads", type=int, default=8)
     parser.add_argument("--ridge_alpha", type=float, default=1.0)
     parser.add_argument(
         "--num_eval_windows",
@@ -690,7 +695,16 @@ def build_config(
         "model_family": model_family,
         "training_mode": training_mode,
         "adapter_gradient_note": adapter_gradient_note,
-        "itransformer_variant": "simple_variable_token_encoder" if args.model.startswith("itransformer") else None,
+        "itransformer_variant": (
+            "official_variates_as_tokens_with_instance_normalization"
+            if args.model.startswith("itransformer")
+            else None
+        ),
+        "itransformer_reference": (
+            "https://github.com/thuml/iTransformer/blob/main/model/iTransformer.py"
+            if args.model.startswith("itransformer")
+            else None
+        ),
         "evaluation_protocol": {
             "E1": {
                 "name": "one_shot_future_trajectory_forecasting",

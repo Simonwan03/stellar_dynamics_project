@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import explained_variance_score, mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -31,9 +30,14 @@ from tasks.common.experiment_utils import (
     save_binary_curves,
     select_device,
     set_random_seed,
-    stratified_split_indices,
     standardize_from_train,
     binary_metrics_from_probs,
+)
+from tasks.common.case_split import (
+    case_split_indices,
+    default_case_split_manifest_path,
+    ensure_case_split_manifest,
+    missing_case_ids,
 )
 
 
@@ -588,8 +592,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="base",
         help="Preset XGBoost profile.",
     )
-    parser.add_argument("--test-size", type=float, default=0.2)
-    parser.add_argument("--val-size", type=float, default=0.1, help="Validation fraction of total cases for MLP monitoring.")
+    parser.add_argument("--train-ratio", type=float, default=0.70)
+    parser.add_argument(
+        "--val-ratio",
+        "--val-size",
+        dest="val_ratio",
+        type=float,
+        default=0.15,
+        help="Validation fraction of total systems. --val-size is a legacy alias.",
+    )
+    parser.add_argument(
+        "--test-ratio",
+        "--test-size",
+        dest="test_ratio",
+        type=float,
+        default=0.15,
+        help="Test fraction of total systems. --test-size is a legacy alias.",
+    )
+    parser.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=None,
+        help="Shared raw_case_id split CSV; created from the completion table when absent.",
+    )
+    parser.add_argument("--overwrite-split-manifest", action="store_true")
     parser.add_argument("--max-cases", type=int, default=None, help="Optional first-N case limit for smoke tests.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -677,6 +703,27 @@ def main() -> None:
             f"time_unbound={max_observed_horizon:g} in {labels_path}. "
             "Use a horizon within the recorded completion-time range."
         )
+    split_manifest = args.split_manifest or default_case_split_manifest_path(
+        args.dataset_dir,
+        args.sampling_id,
+        args.group_size,
+        args.time_horizon,
+        args.seed,
+        args.train_ratio,
+        args.val_ratio,
+        args.test_ratio,
+    )
+    split_manifest_df = ensure_case_split_manifest(
+        labels_path,
+        split_manifest,
+        group_size=args.group_size,
+        time_horizon=args.time_horizon,
+        seed=args.seed,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        overwrite=args.overwrite_split_manifest,
+    )
     if args.max_cases is not None:
         max_cases = max(1, int(args.max_cases))
         case_ids = case_ids[:max_cases]
@@ -684,33 +731,38 @@ def main() -> None:
         label_df = label_df.iloc[:max_cases].reset_index(drop=True)
     X, feature_names = load_tokenized_features(tokenized_path, case_ids, selected_features)
     X, y, label_df, case_ids = filter_finite_cases(X, y, label_df, case_ids)
-    if args.target_mode == "binary_any":
-        if np.unique(y).size < 2:
-            raise ValueError("binary_any requires both all-stable and any-unbound systems after filtering.")
-        train_idx, val_idx, test_idx = stratified_split_indices(
-            y,
-            test_size=args.test_size,
-            val_size=float(args.val_size) / max(1e-8, 1.0 - float(args.test_size)),
-            seed=args.seed,
-        )
-    else:
-        train_val_idx, test_idx = train_test_split(
-            np.arange(len(y)),
-            test_size=args.test_size,
-            random_state=args.seed,
-        )
-        val_fraction_of_train_val = float(args.val_size) / max(1e-8, 1.0 - float(args.test_size))
-        train_idx, val_idx = train_test_split(
-            train_val_idx,
-            test_size=val_fraction_of_train_val,
-            random_state=args.seed,
-        )
+    if args.max_cases is None:
+        missing = missing_case_ids(case_ids, split_manifest_df)
+        if missing.size:
+            raise ValueError(
+                "Task A does not contain the full common system universe after finite-value filtering; "
+                f"missing {missing.size} raw_case_id values (first: {missing[:10].tolist()})."
+            )
+    if args.target_mode == "binary_any" and np.unique(y).size < 2:
+        raise ValueError("binary_any requires both all-stable and any-unbound systems after filtering.")
+    split_indices = case_split_indices(case_ids, split_manifest_df)
+    train_idx, val_idx, test_idx = (
+        split_indices["train"],
+        split_indices["val"],
+        split_indices["test"],
+    )
     X_train, X_val, X_test = X[train_idx], X[val_idx], X[test_idx]
     y_train, y_val, y_test = y[train_idx], y[val_idx], y[test_idx]
     X_train, [X_val, X_test], norm = standardize_from_train(X_train, X_val, X_test)
 
+    split_membership = np.empty(len(case_ids), dtype=object)
+    for split_name, split_rows in split_indices.items():
+        split_membership[split_rows] = split_name
+    label_df = label_df.copy()
+    label_df["split"] = split_membership
     label_df.to_csv(output_dir / "group_labels.csv", index=False)
-    np.savez(output_dir / "split_indices.npz", train_idx=train_idx, val_idx=val_idx, test_idx=test_idx)
+    np.savez(
+        output_dir / "split_indices.npz",
+        train_idx=train_idx,
+        val_idx=val_idx,
+        test_idx=test_idx,
+        case_ids=case_ids,
+    )
     np.savez(output_dir / "normalization_stats.npz", mean=norm["mean"], std=norm["std"])
     save_json(
         output_dir / "config.json",
@@ -730,6 +782,15 @@ def main() -> None:
             "label_mean": float(y.mean()),
             "label_min": float(y.min()),
             "label_max": float(y.max()),
+            "split_manifest": split_manifest,
+            "split_unit": "complete raw_case_id system",
+            "split_horizon": float(args.time_horizon),
+            "split_ratios": {
+                "train": float(args.train_ratio),
+                "val": float(args.val_ratio),
+                "test": float(args.test_ratio),
+            },
+            "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
         },
     )
 

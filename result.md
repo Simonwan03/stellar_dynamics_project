@@ -6,14 +6,19 @@ This document consolidates the latest saved experimental results currently avail
 
 - The main dataset contains 4,998 complete valid systems, with 32 variations per system and 159,936 complete trajectories.
 - The default initial-condition representation is `orbital15` (15 orbital channels per time step).
-- Splits are made at the system level when the task is system-based; Task B uses a trajectory-level group split by `raw_case_id`.
+- The current code uses one shared `raw_case_id` manifest for Tasks A--C: `3498/750/750`
+  complete systems under the 70/15/15 protocol. The saved metrics below predate that
+  protocol unless explicitly stated and must be rerun before cross-task comparison.
 - Metrics from different tasks use different targets and protocols and should not be compared numerically across tasks.
 
 ## Task A: Stable-fraction and binary stability prediction
 
 ### Protocol
 
-The latest expanded experiment uses `seed=42`, a `70/10/20` system split, `orbital15` initial conditions, and a maximum horizon of 10,000. Two targets are evaluated:
+The latest saved expanded experiment uses `seed=42`, an older `70/10/20` system split,
+`orbital15` initial conditions, and a maximum horizon of 10,000. Two targets are
+evaluated. It is retained as a historical result; new runs should use the shared
+`70/15/15` manifest described in `readme.md`.
 
 1. `stable_fraction`: the fraction of the 32 variations that remain stable up to the selected horizon.
 2. `binary_any`: a binary target whose positive class is a system for which all 32 variations remain stable within the horizon.
@@ -55,7 +60,12 @@ Sources: [expanded Task A summary](results/task_a_experiments/metrics_augmented/
 
 ### Protocol and encoder distinction
 
-Task B predicts the binary stability state of an individual trajectory from an early prefix. The data contain 159,953 trajectories, and the split uses `seed=42`, `test_size=0.125`, `val_size=0.1`, and grouping by the base system. The canonical Task B target is the stable-positive label, `time_unbound >= 10000`; the Panda experiment also reports the inverse `unbound_positive` label, `time_unbound < 10000`.
+Task B predicts the binary stability state of an individual trajectory from an early prefix.
+The saved runs below use the historical `test_size=0.125`, `val_size=0.1` configuration
+and grouping by the base system. New runs use the shared `70/15/15` manifest, with the
+canonical 4,998-system universe and 159,936 complete trajectories. The canonical Task B
+target is the stable-positive label, `time_unbound >= 10000`; the Panda experiment also
+reports the inverse `unbound_positive` label, `time_unbound < 10000`.
 
 The encoder-based results use frozen `GilpinLab/panda-72M` and Chronos-2 encoders. Panda uses `patch_mean_keep_channels` and produces a `15 x 768` representation; Chronos-2 uses its frozen `[REG]` representation with the same feature dimension. The raw `orbital15` SVM/CNN/TCN/GRU/Attention experiments below are complementary temporal baselines and prefix ablations.
 
@@ -122,7 +132,11 @@ Sources: [Panda linear-head metrics](experiments/panda_threebody/outputs/panda_u
 
 ### Protocol
 
-The latest Task C experiments use a 20-bin logarithmic survival representation over event times from 5 to 10,000 and predict the full 32-variation system target. Chronos-2 and PANDA use frozen embeddings extracted from a prefix of 96 steps; the raw-statistics and TCN baselines use a prefix of 100 steps. The split contains 4,998 systems with a 20% system-level test set.
+The latest saved Task C experiments use a 20-bin logarithmic survival representation over
+event times from 5 to 10,000 and predict the full 32-variation system target. Chronos-2
+and PANDA use frozen embeddings extracted from a prefix of 96 steps; the raw-statistics
+and TCN baselines use a prefix of 100 steps. These saved runs use a historical 20%
+system-level test set; new runs should use the shared `3498/750/750` system manifest.
 
 `Overall MAE` is the mean error over the survival curve. `Final MAE` is the error at the final horizon. `Legacy-horizon MAE` is evaluated at the historical horizons 500, 800, 1,500, 2,500, 4,000, 6,500, and 10,000. IBS is the integrated Brier score; lower is better.
 
