@@ -885,6 +885,29 @@ def predict_sequence_regressor(model: nn.Module, loader: DataLoader, device: tor
     return np.concatenate(y_all), np.concatenate(p_all)
 
 
+def save_test_predictions(
+    path: Path,
+    labels: pd.DataFrame,
+    test_idx: np.ndarray,
+    target_stable: np.ndarray,
+    probability_stable: np.ndarray,
+) -> None:
+    """Persist test probabilities for overall and future-only Task B analysis."""
+    target_stable = np.asarray(target_stable, dtype=np.int64).reshape(-1)
+    probability_stable = np.asarray(probability_stable, dtype=np.float64).reshape(-1)
+    if len(test_idx) != target_stable.size or target_stable.size != probability_stable.size:
+        raise ValueError("Test prediction arrays do not match test row count.")
+    frame = labels.iloc[np.asarray(test_idx, dtype=np.int64)][
+        ["index", "num_batch", "time_unbound", "diagnosis", "raw_case_id", "split"]
+    ].copy()
+    frame["task_b_row"] = np.asarray(test_idx, dtype=np.int64)
+    frame["target_stable"] = target_stable
+    frame["prob_stable"] = probability_stable
+    frame["target_unbound"] = 1 - target_stable
+    frame["prob_unbound"] = 1.0 - probability_stable
+    frame.to_csv(path, index=False)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task B: prefix trajectory models.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
@@ -1065,6 +1088,7 @@ def main() -> None:
     for split_name, split_rows in split_indices.items():
         split_membership[split_rows] = split_name
     labels = labels.copy()
+    labels["raw_case_id"] = sample_case_ids
     labels["split"] = split_membership
     labels.to_csv(output_dir / "labels_filtered.csv", index=False)
     np.savez(
@@ -1218,6 +1242,7 @@ def main() -> None:
         prob = predict_svm(svm, X_test_2d, device)
         metrics["svm"] = {"test": binary_metrics_from_probs(y_test, prob)}
         save_csv(output_dir / "svm_train_log.csv", history)
+        save_test_predictions(output_dir / "svm_test_predictions.csv", labels, test_idx, y_test, prob)
         torch.save(
             {
                 "model_state_dict": svm.state_dict(),
@@ -1256,6 +1281,7 @@ def main() -> None:
         y_eval, prob = predict_classifier(model, test_loader, device)
         metrics[name] = {"test": binary_metrics_from_probs(y_eval, prob)}
         save_csv(output_dir / f"{name}_train_log.csv", history)
+        save_test_predictions(output_dir / f"{name}_test_predictions.csv", labels, test_idx, y_eval, prob)
         torch.save({"model_state_dict": model.state_dict()}, output_dir / f"{name}_model.pt")
         save_binary_curves(output_dir / f"{name}_test_curves.png", y_eval, prob, f"Task B {name}")
 

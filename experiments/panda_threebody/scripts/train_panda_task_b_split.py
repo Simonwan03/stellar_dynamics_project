@@ -495,6 +495,26 @@ def main() -> None:
         )
         for split, rows in split_rows.items()
     }
+    # Training intentionally shuffles its loader.  Use separate deterministic
+    # loaders when exporting predictions so each prediction remains aligned
+    # with task_labels.iloc[split_rows[split]].
+    eval_loaders = {
+        split: DataLoader(
+            TaskSplitFeatureDataset(
+                feature_cache,
+                cache_rows,
+                missing_features,
+                missing_rows,
+                target_unbound,
+                rows,
+            ),
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True,
+        )
+        for split, rows in split_rows.items()
+    }
 
     model = build_head(
         args.head,
@@ -558,7 +578,10 @@ def main() -> None:
     all_metrics: dict[str, Any] = {}
     prediction_parts: list[pd.DataFrame] = []
     for split, rows in split_rows.items():
-        y_unbound, prob_unbound = predict(model, loaders[split], device)
+        y_unbound, prob_unbound = predict(model, eval_loaders[split], device)
+        expected_target = target_unbound[rows]
+        if not np.array_equal(y_unbound, expected_target):
+            raise RuntimeError(f"Prediction export order is misaligned for the {split} split.")
         y_stable = 1.0 - y_unbound
         prob_stable = 1.0 - prob_unbound
         all_metrics[split] = {

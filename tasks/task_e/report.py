@@ -19,13 +19,15 @@ import numpy as np
 MODEL_DISPLAY_NAMES = {
     "chronos2": "Chronos2",
     "panda_zero_shot": "PANDA zero-shot",
+    "itransformer": "iTransformer",
     "toto2": "TOTO2",
     "tirex2": "TiRex2",
 }
-MODEL_ORDER = ("chronos2", "panda_zero_shot", "toto2", "tirex2")
+MODEL_ORDER = ("chronos2", "panda_zero_shot", "itransformer", "toto2", "tirex2")
 MODEL_COLORS = {
     "chronos2": "#0072B2",
     "panda_zero_shot": "#D55E00",
+    "itransformer": "#E69F00",
     "toto2": "#009E73",
     "tirex2": "#CC79A7",
 }
@@ -63,7 +65,14 @@ def build_report(run_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
         (
             json.dumps(record["split_trajectory_counts"], sort_keys=True),
             json.dumps(record["used_window_counts"], sort_keys=True),
-            json.dumps(record.get("sampling_metadata", {}), sort_keys=True),
+            json.dumps(
+                {
+                    key: value
+                    for key, value in record.get("sampling_metadata", {}).items()
+                    if key not in {"last_train_epoch", "last_train_epoch_windows"}
+                },
+                sort_keys=True,
+            ),
             json.dumps(record["resolved_source_paths"], sort_keys=True),
             record["scaler_fit_scope"],
         )

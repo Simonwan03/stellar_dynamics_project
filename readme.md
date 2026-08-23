@@ -16,7 +16,7 @@
 
 ## Repository Layout
 
-- [dataset_v3](</home/wan/stellar_dynamics/dataset_v3>): 当前主数据集，`Task A-E` 都围绕它展开
+- [dataset_v3](</mnt/d/stellar_dynamics_data/sampling_2>): 当前主数据集，`Task A-E` 都围绕它展开
 - [scripts](</home/wan/stellar_dynamics/scripts>): 任务级入口脚本
 - [tasks](</home/wan/stellar_dynamics/tasks>): 各任务入口、数据处理、模型和训练工具
 - [results](</home/wan/stellar_dynamics/results>) / [runs](</home/wan/stellar_dynamics/runs>) / [Panda outputs](</home/wan/stellar_dynamics/experiments/panda_threebody/outputs>): 各任务产物
@@ -822,11 +822,12 @@ E1 是 one-shot `512 -> 128`，E2 是复用同一模型的四段 recursive rolli
 预测 horizon 为 `512`。下面的 E.0/E.1 数值是旧的 `200 -> 50` preliminary 结果，
 仅保留作历史记录。
 
-#### E.current 当前 E1/E2 主协议结果（2026-08-21）
+#### E.current 当前 E1/E2 主协议结果（2026-08-23）
 
-以下表格只纳入已经完整生成 validation、test 和 E2 指标文件的运行。四个模型均使用
-`orbital15`、15 个通道、zero-shot 原生多变量预测，以及相同的 `512 -> 128` E1 /
-四段递归 E2 协议。结果按 `system -> trajectory -> forecasting_window` 聚合；
+以下表格只纳入已经完整生成 validation、test 和 E2 指标文件的运行。五个模型均使用
+`orbital15`、15 个通道以及相同的 `512 -> 128` E1 / 四段递归 E2 协议；其中四个
+foundation models 使用 zero-shot 原生多变量预测，iTransformer 使用全监督训练。
+结果按 `system -> trajectory -> forecasting_window` 聚合；
 E2 的 overall 指标使用 system-balanced aggregation。
 
 采样协议保持一致：validation `39,518` windows，E1 test `38,245` windows，
@@ -838,7 +839,8 @@ E2 rolling `17,485` windows。它们不是全部 candidate windows；candidate w
 | Model | Checkpoint | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | [Chronos-2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md) | `amazon/chronos-2` | 0.2331056 | **0.2282289** | 0.4828101 | 0.8580278 | **33.3610%** | **0.2264770** |
-| [Panda zero-shot](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md) | `GilpinLab/panda-72M` | **0.2217443** | 0.2370772 | **0.4708973** | **0.8624963** | 36.1440% | 0.2861868 |
+| [Panda zero-shot](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md) | `GilpinLab/panda-72M` | 0.2217443 | 0.2370772 | 0.4708973 | 0.8624963 | 36.1440% | 0.2861868 |
+| [iTransformer](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md) | `iTransformer (30 epochs)` | **0.2123486** | 0.2429306 | **0.4608130** | **0.8672591** | 38.2350% | 0.3151870 |
 | [TiRex-2](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md) | `NX-AI/TiRex-2` | 0.2421608 | 0.2407973 | 0.4920984 | 0.8508211 | 34.5179% | 0.2277438 |
 | [Toto-2.0](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md) | `Datadog/Toto-2.0-22m` | 0.2262473 | 0.2303106 | 0.4756546 | 0.8601255 | 33.6224% | 0.2310443 |
 
@@ -846,16 +848,18 @@ E2 rolling `17,485` windows。它们不是全部 candidate windows；candidate w
 
 | Model | MSE-z | MAE-z | RMSE-z | Block MAE（1 -> 4） | Error amplification |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Chronos-2 | 0.4433864 | 0.2917852 | 0.6658727 | 0.2201 -> 0.3397 | 1.5436 |
-| Panda zero-shot | **0.3058527** | 0.2993932 | **0.5530395** | 0.2267 -> **0.3416** | 1.5065 |
-| TiRex-2 | 0.3300729 | 0.3052347 | 0.5745198 | 0.2352 -> 0.3507 | **1.4909** |
-| Toto-2.0 | 0.3152865 | **0.2981152** | 0.5615038 | **0.2234 -> 0.3483** | 1.5592 |
+| Chronos-2 | 0.4433864 | **0.2917852** | 0.6658727 | **0.2201 -> 0.3397** | 1.5436 |
+| Panda zero-shot | 0.3058527 | 0.2993932 | 0.5530395 | 0.2267 -> 0.3416 | 1.5065 |
+| iTransformer | **0.3054687** | 0.3045539 | **0.5526922** | 0.2380 -> 0.3515 | **1.4772** |
+| TiRex-2 | 0.3300729 | 0.3052347 | 0.5745198 | 0.2352 -> 0.3507 | 1.4909 |
+| Toto-2.0 | 0.3152865 | 0.2981152 | 0.5615038 | 0.2234 -> 0.3483 | 1.5592 |
 
-E1 中 Panda zero-shot 的 MSE-z / Pearson 最好；Chronos-2 的 MAE-z、sMAPE 和
-unit-circle error 最低。E2 中 Panda zero-shot 的 MSE-z 最低，Toto-2.0 的 MAE-z
-略低于其他模型。上述差异是同一评估协议下的数值比较，不代表统计显著性检验。
+E1 中 iTransformer 的 MSE-z / RMSE-z / Pearson 最好；Chronos-2 的 MAE-z、sMAPE 和
+unit-circle error 最低。E2 中 iTransformer 的 MSE-z、RMSE-z 和误差放大比最好，
+Chronos-2 的 MAE-z 及四个 rollout block 的绝对 MAE 最低。上述差异是同一评估协议
+下的数值比较，不代表统计显著性检验。
 
-Ridge、TCN、PatchTST、Transformer 和 iTransformer 的已有数字属于下面的历史
+Ridge、TCN、PatchTST 和 Transformer 的已有数字属于下面的历史
 `E.0/E.1` preliminary benchmark（`context=200 -> pred=50`），没有与本表混合。
 `runs/task_e_e1e2_tcn_orbital15_ctx512_pred128` 当前只有 console log，暂无可纳入
 主协议排行榜的最终 metrics。
@@ -864,6 +868,7 @@ Ridge、TCN、PatchTST、Transformer 和 iTransformer 的已有数字属于下�
 
 - [Chronos-2 summary](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md)
 - [Panda zero-shot summary](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md)
+- [iTransformer summary](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md)
 - [TiRex-2 summary](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md)
 - [Toto-2.0 summary](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md)
 
@@ -883,6 +888,7 @@ MSE-z/RMSE-z 仅保存 overall 指标。
 | --- | --- | --- |
 | Chronos-2 | [runs/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
 | Panda zero-shot | [runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
+| iTransformer | [runs/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json](runs/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json) | [runs/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json](runs/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json) |
 | TiRex-2 | [runs/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
 | Toto-2.0 | [runs/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
 

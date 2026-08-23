@@ -61,15 +61,108 @@ Sources: [expanded Task A summary](results/task_a_experiments/metrics_augmented/
 ### Protocol and encoder distinction
 
 Task B predicts the binary stability state of an individual trajectory from an early prefix.
-The saved runs below use the historical `test_size=0.125`, `val_size=0.1` configuration
-and grouping by the base system. New runs use the shared `70/15/15` manifest, with the
-canonical 4,998-system universe and 159,936 complete trajectories. The canonical Task B
-target is the stable-positive label, `time_unbound >= 10000`; the Panda experiment also
-reports the inverse `unbound_positive` label, `time_unbound < 10000`.
+The historical runs later in this section use the older `test_size=0.125`, `val_size=0.1`
+configuration. The paper results immediately below use the shared `70/15/15` manifest,
+with the canonical 4,998-system universe and 159,936 complete trajectories. The canonical
+Task B target is the stable-positive label, `time_unbound >= 10000`; the new comparison
+reports the inverse `unbound_positive` label, `time_unbound < 10000`, because it directly
+measures detection of instability.
 
 The encoder-based results use frozen `GilpinLab/panda-72M` and Chronos-2 encoders. Panda uses `patch_mean_keep_channels` and produces a `15 x 768` representation; Chronos-2 uses its frozen `[REG]` representation with the same feature dimension. The raw `orbital15` SVM/CNN/TCN/GRU/Attention experiments below are complementary temporal baselines and prefix ablations.
 
-### Latest Panda-encoder results: prefix = 512
+### Latest paper results: shared split, matched linear probes
+
+**These are the latest Task B results intended for the paper.** Panda and Chronos-2 use
+the same 4,998-system universe, case-level `3498/750/750` train/validation/test split,
+input rows, target labels, 11,521-parameter linear probe, optimizer settings, and seed.
+The test set contains 24,000 trajectories from 750 systems. Train, validation, and test
+have no overlapping `raw_case_id` values.
+
+| Prefix | Encoder | Test accuracy | AUROC | AUPRC | Late-unbound recall |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 96 | Panda | **0.8640** | 0.9467 | 0.9751 | **0.6334** |
+| 96 | Chronos-2 | 0.8623 | **0.9531** | **0.9781** | 0.6139 |
+| 512 | Panda | **0.9217** | 0.9786 | 0.9902 | **0.4517** |
+| 512 | Chronos-2 | 0.9209 | **0.9791** | **0.9905** | 0.4006 |
+
+At prefix=96, Chronos-2 has the stronger ranking metrics, while Panda has 1.95 percentage
+points higher recall for trajectories that become unbound only after the prefix. At
+prefix=512 the overall ranking metrics are effectively tied; Panda has 5.11 percentage
+points higher late-unbound recall, whereas Chronos-2 correctly retains 1.24 percentage
+points more trajectories that remain stable through the final horizon. Thus neither
+encoder is uniformly superior at the default probability threshold of 0.5.
+
+The overall metrics include trajectories that have already become unbound within the
+observed prefix: 9,776 test trajectories at prefix=96 and 13,807 at prefix=512. Both
+encoders detect virtually all of these cases. To isolate genuine forward prediction, the
+following table evaluates only trajectories that are still bound at the end of the prefix.
+
+| Prefix | Encoder | Future-only AUROC | Balanced accuracy | AUPRC |
+| ---: | --- | ---: | ---: | ---: |
+| 96 | Panda | 0.8721 | **0.7614** | 0.8354 |
+| 96 | Chronos-2 | **0.8853** | 0.7565 | **0.8471** |
+| 512 | Panda | **0.8789** | **0.6952** | **0.6495** |
+| 512 | Chronos-2 | 0.8782 | 0.6758 | 0.6490 |
+
+The future-only AUROC is approximately 0.87--0.89, materially below the headline AUROC
+because already-unbound trajectories are easy to identify from the observed state. At
+prefix=512, the future-only positive rate is 24.8%, so balanced accuracy and AUPRC are
+more informative than raw accuracy. These experiments currently use one random seed;
+small encoder differences should therefore not be presented as statistically conclusive.
+
+Sources: [Panda prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix96_linear/metrics.json), [Chronos-2 prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix96_linear/metrics.json), [Panda prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix512_linear/metrics.json), and [Chronos-2 prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix512_linear/metrics.json). The future-only table is recomputed from the corresponding `predictions_all.csv` files after excluding trajectories with `time_unbound < prefix_steps * 5`.
+
+### Complete common-split comparison: encoder, physics, and raw-sequence baselines
+
+The following two tables are the complete matched comparison on the new common split.
+All rows use 24,000 test trajectories from the same 750 test systems. `Stable F1` and
+the overall AUROC/AUPRC use the stable-positive target (`time_unbound >= 10000`); the
+future-only table uses the inverse unbound-positive target to match the earlier encoder
+diagnostic. The raw-sequence models use the same `orbital15` channels, normalization,
+seed, 50-epoch maximum, and validation-AUROC early stopping as the historical raw
+baseline. Physics summary uses 120 prefix-summary features and XGBoost.
+
+#### Overall test metrics
+
+| Prefix | Representation | Model | Accuracy | Stable F1 | AUROC | AUPRC |
+| ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 96 | Panda frozen encoder | Linear probe | 0.86404 | 0.80696 | 0.94669 | 0.89107 |
+| 96 | Chronos-2 frozen encoder | Linear probe | 0.86229 | 0.80667 | **0.95311** | **0.90827** |
+| 96 | Physics summary | XGBoost | **0.90000** | **0.84043** | **0.96486** | **0.93194** |
+| 96 | Raw `orbital15` | SVM | 0.74929 | 0.58002 | 0.81347 | 0.61662 |
+| 96 | Raw `orbital15` | CNN | 0.79367 | 0.60916 | 0.88876 | 0.75257 |
+| 96 | Raw `orbital15` | TCN | 0.81667 | 0.74020 | 0.89713 | 0.75230 |
+| 512 | Panda frozen encoder | Linear probe | 0.92167 | 0.88451 | 0.97855 | 0.95504 |
+| 512 | Chronos-2 frozen encoder | Linear probe | 0.92087 | 0.88482 | 0.97912 | 0.95524 |
+| 512 | Physics summary | XGBoost | **0.93292** | **0.89605** | **0.98514** | **0.96730** |
+| 512 | Raw `orbital15` | SVM | 0.75900 | 0.59176 | 0.82820 | 0.62324 |
+| 512 | Raw `orbital15` | CNN | 0.88392 | 0.82047 | 0.94698 | 0.85432 |
+| 512 | Raw `orbital15` | TCN | 0.89729 | 0.84108 | 0.95934 | 0.88999 |
+
+#### Future-only test metrics
+
+Only trajectories still bound when the prefix ends are retained (`time_unbound >=
+prefix_steps * 5`). `N` is 14,224 for prefix=96 and 10,193 for prefix=512. Metrics use
+the unbound-positive target and the default probability threshold of 0.5.
+
+| Prefix | Representation | Model | N | Future-only AUROC | Balanced accuracy | AUPRC |
+| ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 96 | Panda frozen encoder | Linear probe | 14,224 | 0.87214 | 0.76135 | 0.83540 |
+| 96 | Chronos-2 frozen encoder | Linear probe | 14,224 | 0.88533 | 0.75648 | **0.84709** |
+| 96 | Physics summary | XGBoost | 14,224 | **0.91268** | **0.83188** | **0.88737** |
+| 96 | Raw `orbital15` | SVM | 14,224 | 0.66870 | 0.62452 | 0.61321 |
+| 96 | Raw `orbital15` | CNN | 14,224 | 0.74615 | 0.66670 | 0.71170 |
+| 96 | Raw `orbital15` | TCN | 14,224 | 0.75901 | 0.68928 | 0.73999 |
+| 512 | Panda frozen encoder | Linear probe | 10,193 | 0.87887 | 0.69519 | 0.64948 |
+| 512 | Chronos-2 frozen encoder | Linear probe | 10,193 | 0.87825 | 0.67583 | 0.64904 |
+| 512 | Physics summary | XGBoost | 10,193 | **0.90414** | **0.77828** | **0.74362** |
+| 512 | Raw `orbital15` | SVM | 10,193 | 0.60746 | 0.57917 | 0.32109 |
+| 512 | Raw `orbital15` | CNN | 10,193 | 0.71575 | 0.64920 | 0.47488 |
+| 512 | Raw `orbital15` | TCN | 10,193 | 0.76583 | 0.67489 | 0.52768 |
+
+The machine-readable aggregation is [task_b_common_comparison_metrics.csv](results/task_b_common/task_b_common_comparison_metrics.csv); each model's raw metrics and test probabilities are stored under [the common Task B output directory](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/).
+
+### Historical Panda-encoder results: prefix = 512
 
 These runs use the same prefix=512 split as the raw-feature ablation. The table reports the stable-positive target so that it is directly comparable with the canonical Task B metrics.
 
@@ -101,9 +194,12 @@ At prefix=96, Physics+XGBoost is the strongest of these three main representatio
 
 Additional prefix=96 fusion diagnostics are available: Chronos-2 plus physics fusion reaches stable-positive F1=0.82596, AUROC=0.95599, and AUPRC=0.90989; Panda plus physics fusion reaches 0.81629, 0.94924, and 0.89168, respectively. These are logistic fusion probes and should be distinguished from the Physics+XGBoost result.
 
-### Latest prefix = 512 comparison beyond the Panda heads
+### Historical prefix = 512 comparison beyond the Panda heads
 
-The latest saved prefix=512 physics run uses the same 120-feature summary representation with XGBoost. Chronos-2 encoder metrics are currently available at prefix=96, but no corresponding prefix=512 Chronos-2 Task B classification result is saved. The separate Chronos-2 context=512 results in Task E are forecasting results and are not interchangeable with this Task B encoder experiment.
+The earlier prefix=512 physics run uses the same 120-feature summary representation with
+XGBoost, but predates the shared paper split. A matched prefix=512 Chronos-2 result is now
+reported in the latest-paper-results subsection above. The separate Chronos-2 context=512
+results in Task E are forecasting results and are not interchangeable with Task B.
 
 | Representation | Model | Accuracy | Stable F1 | AUROC | AUPRC |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -132,13 +228,108 @@ Sources: [Panda linear-head metrics](experiments/panda_threebody/outputs/panda_u
 
 ### Protocol
 
-The latest saved Task C experiments use a 20-bin logarithmic survival representation over
-event times from 5 to 10,000 and predict the full 32-variation system target. Chronos-2
-and PANDA use frozen embeddings extracted from a prefix of 96 steps; the raw-statistics
-and TCN baselines use a prefix of 100 steps. These saved runs use a historical 20%
-system-level test set; new runs should use the shared `3498/750/750` system manifest.
+Task C uses a 20-bin logarithmic survival representation over event times from 5 to
+10,000 and predicts the full 32-variation system target. The current paper comparison
+uses prefix=96 for every model, the shared system-level manifest
+`dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv`, and 20
+training epochs on the GPU. This is the latest common-split result; the historical
+20%-test-set runs are retained below for provenance only.
 
 `Overall MAE` is the mean error over the survival curve. `Final MAE` is the error at the final horizon. `Legacy-horizon MAE` is evaluated at the historical horizons 500, 800, 1,500, 2,500, 4,000, 6,500, and 10,000. IBS is the integrated Brier score; lower is better.
+
+### Latest common split: prefix=96, 20-bin event-time/censoring target
+
+The split contains 3,498 train systems, 750 validation systems, and 750 test systems;
+all 32 variations of a system remain in the same split. The right-censoring fraction is
+0.315126 at the variation level.
+
+Architecture naming: the raw rows differ in their trajectory encoder, while all use the
+same MLP hazard predictor. The PANDA/Chronos rows use a frozen foundation encoder, one
+of three representation pooling choices, and the same MLP hazard predictor. In the table,
+`shared MLP hazard head` means `LayerNorm → Linear → GELU → Dropout → Linear(20)`; the
+input dimension changes with the pooled representation, but the predictor structure is
+the same. The CLI/artifact names (`cnn`, `embedding_direct`, etc.) are retained in the
+source paths for reproducibility.
+
+| Encoder / representation | Predictor | Overall MAE | Final MAE | IBS |
+| --- | --- | ---: | ---: | ---: |
+| No learned encoder (train-mean curve) | None (baseline) | 0.309931 | 0.351022 | 0.131530 |
+| Raw orbital15 CNN encoder | Shared MLP hazard head | 0.090960 | 0.172839 | 0.075234 |
+| Raw orbital15 Stats encoder | Shared MLP hazard head | 0.066928 | 0.147462 | 0.063156 |
+| Raw orbital15 TCN encoder | Shared MLP hazard head | 0.066243 | 0.156397 | 0.060562 |
+| Frozen PANDA encoder + mean/std pooling | Shared MLP hazard head | 0.060236 | 0.103509 | 0.055019 |
+| Frozen PANDA encoder + channel-attention pooling | Shared MLP hazard head | 0.045852 | 0.089240 | 0.048635 |
+| Frozen PANDA encoder + direct pooling | Shared MLP hazard head | 0.042693 | 0.081913 | 0.045943 |
+| Frozen Chronos-2 encoder + mean/std pooling | Shared MLP hazard head | 0.047562 | 0.093931 | 0.048029 |
+| Frozen Chronos-2 encoder + channel-attention pooling | Shared MLP hazard head | 0.041431 | 0.088733 | 0.042572 |
+| Frozen Chronos-2 encoder + direct pooling | Shared MLP hazard head | **0.037562** | 0.082615 | **0.041600** |
+
+Chronos-2 direct-pooling + shared MLP has the best overall curve MAE and IBS; PANDA
+direct-pooling + shared MLP has the best final-bin MAE (0.081913). The raw TCN encoder
+with the shared MLP is the strongest raw-feature
+baseline by overall MAE and IBS. Sources: [latest raw common-split metrics](results/task_c_survival20_common_prefix96_raw/metrics.json), [latest PANDA common-split metrics](results/task_c_survival20_common_prefix96_panda/metrics.json), [latest Chronos-2 common-split metrics](results/task_c_survival20_common_prefix96_chronos/metrics.json), and [shared split manifest](dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv).
+
+### Per-bin test errors on the latest common split
+
+The following tables use the 750-system test split. `System MAE` is `horizon_mae`, the
+absolute error of the system-level survival fraction at each bin upper edge. `Brier` is
+`brier_by_bin`, averaged over the 32 variations and test systems. Lower is better in both
+tables. The 20 rows correspond to the 20 logarithmic bins, not the legacy seven horizons.
+
+#### System-level MAE by bin
+
+| Bin | Upper edge | Mean baseline | CNN+shared MLP | Stats+shared MLP | TCN+shared MLP | PANDA mean/std+shared MLP | PANDA attention+shared MLP | PANDA direct+shared MLP | Chronos mean/std+shared MLP | Chronos attention+shared MLP | Chronos direct+shared MLP |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 7.31 | 0.093252 | 0.051311 | 0.040894 | 0.035501 | 0.047504 | 0.039274 | 0.036154 | 0.040640 | 0.033700 | 0.029684 |
+| 2 | 10.69 | 0.150522 | 0.066139 | 0.048043 | 0.037915 | 0.057444 | 0.044852 | 0.041913 | 0.045799 | 0.035408 | 0.032138 |
+| 3 | 15.64 | 0.186214 | 0.074177 | 0.050469 | 0.038740 | 0.061544 | 0.046701 | 0.043187 | 0.047472 | 0.035308 | 0.032530 |
+| 4 | 22.87 | 0.210642 | 0.076915 | 0.049459 | 0.035682 | 0.060031 | 0.042634 | 0.039887 | 0.044655 | 0.030929 | 0.029249 |
+| 5 | 33.44 | 0.241966 | 0.077692 | 0.047262 | 0.034895 | 0.057366 | 0.037603 | 0.035535 | 0.039797 | 0.026266 | 0.024242 |
+| 6 | 48.90 | 0.269184 | 0.075638 | 0.043274 | 0.036469 | 0.053853 | 0.031524 | 0.029064 | 0.034498 | 0.022299 | 0.021034 |
+| 7 | 71.50 | 0.294162 | 0.066073 | 0.036976 | 0.035232 | 0.044931 | 0.023148 | 0.022656 | 0.026890 | 0.016498 | 0.015537 |
+| 8 | 104.56 | 0.315761 | 0.057306 | 0.035597 | 0.035891 | 0.039291 | 0.022129 | 0.021138 | 0.023034 | 0.016983 | 0.016088 |
+| 9 | 152.91 | 0.336607 | 0.049818 | 0.035377 | 0.033374 | 0.035888 | 0.018562 | 0.018686 | 0.019311 | 0.013868 | 0.013191 |
+| 10 | 223.61 | 0.354754 | 0.046471 | 0.033902 | 0.031470 | 0.031980 | 0.016821 | 0.016754 | 0.015687 | 0.013554 | 0.011301 |
+| 11 | 326.99 | 0.368285 | 0.043089 | 0.029887 | 0.029468 | 0.028950 | 0.015667 | 0.016102 | 0.015755 | 0.013704 | 0.011451 |
+| 12 | 478.18 | 0.377458 | 0.054618 | 0.026956 | 0.032076 | 0.031155 | 0.017150 | 0.016675 | 0.016726 | 0.014883 | 0.011979 |
+| 13 | 699.26 | 0.382394 | 0.077647 | 0.048333 | 0.052738 | 0.045779 | 0.035516 | 0.033349 | 0.035337 | 0.032721 | 0.028512 |
+| 14 | 1022.57 | 0.385376 | 0.099720 | 0.071056 | 0.075419 | 0.059403 | 0.049700 | 0.046980 | 0.050192 | 0.048967 | 0.042704 |
+| 15 | 1495.35 | 0.385947 | 0.119785 | 0.091578 | 0.097044 | 0.073485 | 0.062370 | 0.058763 | 0.064547 | 0.062220 | 0.055128 |
+| 16 | 2186.72 | 0.381903 | 0.134718 | 0.107421 | 0.112933 | 0.082929 | 0.072329 | 0.065801 | 0.074623 | 0.071801 | 0.064410 |
+| 17 | 3197.76 | 0.378769 | 0.148777 | 0.121147 | 0.127226 | 0.091236 | 0.080026 | 0.072522 | 0.082243 | 0.079195 | 0.072093 |
+| 18 | 4676.24 | 0.371866 | 0.159678 | 0.132574 | 0.138689 | 0.097493 | 0.084702 | 0.077121 | 0.088270 | 0.084748 | 0.077739 |
+| 19 | 6838.31 | 0.362541 | 0.166785 | 0.140898 | 0.147693 | 0.100944 | 0.087082 | 0.079661 | 0.091834 | 0.086839 | 0.079611 |
+| 20 | 10000.00 | 0.351022 | 0.172839 | 0.147462 | 0.156397 | 0.103509 | 0.089240 | 0.081913 | 0.093931 | 0.088733 | 0.082615 |
+
+#### Variation-level Brier error by bin
+
+| Bin | Upper edge | Mean baseline | CNN+shared MLP | Stats+shared MLP | TCN+shared MLP | PANDA mean/std+shared MLP | PANDA attention+shared MLP | PANDA direct+shared MLP | Chronos mean/std+shared MLP | Chronos attention+shared MLP | Chronos direct+shared MLP |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 7.31 | 0.022960 | 0.043130 | 0.040178 | 0.036609 | 0.040767 | 0.037435 | 0.036088 | 0.038178 | 0.032200 | 0.029948 |
+| 2 | 10.69 | 0.046872 | 0.058432 | 0.050910 | 0.041392 | 0.053661 | 0.047052 | 0.045290 | 0.047187 | 0.037287 | 0.035076 |
+| 3 | 15.64 | 0.064345 | 0.062292 | 0.052211 | 0.039036 | 0.055283 | 0.047056 | 0.043571 | 0.046578 | 0.035376 | 0.033782 |
+| 4 | 22.87 | 0.077373 | 0.063023 | 0.050396 | 0.036245 | 0.053270 | 0.042807 | 0.039244 | 0.042732 | 0.031602 | 0.030181 |
+| 5 | 33.44 | 0.094511 | 0.060661 | 0.046143 | 0.032194 | 0.048374 | 0.035840 | 0.032702 | 0.036414 | 0.025697 | 0.024368 |
+| 6 | 48.90 | 0.110087 | 0.056672 | 0.040900 | 0.030577 | 0.041412 | 0.027934 | 0.024954 | 0.029445 | 0.019976 | 0.019085 |
+| 7 | 71.50 | 0.122165 | 0.050846 | 0.035798 | 0.031289 | 0.033502 | 0.019958 | 0.018084 | 0.024330 | 0.015486 | 0.015127 |
+| 8 | 104.56 | 0.132993 | 0.045594 | 0.034382 | 0.032622 | 0.030522 | 0.020329 | 0.018645 | 0.020858 | 0.016116 | 0.015036 |
+| 9 | 152.91 | 0.143111 | 0.041457 | 0.035595 | 0.032429 | 0.027425 | 0.018140 | 0.016573 | 0.017950 | 0.013299 | 0.012914 |
+| 10 | 223.61 | 0.151981 | 0.040008 | 0.037733 | 0.032766 | 0.025934 | 0.018464 | 0.016721 | 0.017088 | 0.013960 | 0.013680 |
+| 11 | 326.99 | 0.159602 | 0.040839 | 0.035066 | 0.034249 | 0.026062 | 0.019501 | 0.017688 | 0.018801 | 0.015563 | 0.015196 |
+| 12 | 478.18 | 0.164550 | 0.052656 | 0.033062 | 0.036682 | 0.030457 | 0.024992 | 0.021548 | 0.023752 | 0.019671 | 0.018004 |
+| 13 | 699.26 | 0.167911 | 0.071803 | 0.053423 | 0.055769 | 0.048508 | 0.044626 | 0.041949 | 0.043252 | 0.040574 | 0.039204 |
+| 14 | 1022.57 | 0.170011 | 0.091068 | 0.074367 | 0.076145 | 0.065228 | 0.062109 | 0.059707 | 0.060806 | 0.058572 | 0.057841 |
+| 15 | 1495.35 | 0.171634 | 0.104879 | 0.089612 | 0.091961 | 0.076389 | 0.073903 | 0.070962 | 0.072404 | 0.070324 | 0.069061 |
+| 16 | 2186.72 | 0.170626 | 0.115391 | 0.101268 | 0.103881 | 0.084764 | 0.082728 | 0.078826 | 0.080767 | 0.078570 | 0.077132 |
+| 17 | 3197.76 | 0.170275 | 0.121923 | 0.108405 | 0.110876 | 0.088135 | 0.085864 | 0.082271 | 0.084139 | 0.081539 | 0.080897 |
+| 18 | 4676.24 | 0.167241 | 0.126550 | 0.112877 | 0.116575 | 0.091081 | 0.088894 | 0.085458 | 0.086579 | 0.083497 | 0.082668 |
+| 19 | 6838.31 | 0.163356 | 0.128483 | 0.115311 | 0.119294 | 0.090649 | 0.088668 | 0.085255 | 0.085621 | 0.082182 | 0.082001 |
+| 20 | 10000.00 | 0.158993 | 0.128962 | 0.115480 | 0.120645 | 0.088953 | 0.086405 | 0.083317 | 0.083704 | 0.079959 | 0.080797 |
+
+### Historical 20% test split (not used for the latest comparison)
+
+The following saved runs use the previous 3,498/500/1,000 system split and should not be
+mixed with the common-split table above.
 
 | Model | Input | Overall MAE | Final MAE | Legacy-horizon MAE | IBS |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -200,11 +391,12 @@ MSE, MAE, and RMSE are reported on the standardized z-scale. Unit-circle error e
 | Model | MSE (z) | MAE (z) | RMSE (z) | Pearson | Unit-circle error |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Chronos2 | 0.2331 | **0.2282** | 0.4828 | 0.8580 | **0.2265** |
-| PANDA zero-shot | **0.2217** | 0.2371 | **0.4709** | **0.8625** | 0.2862 |
+| PANDA zero-shot | 0.2217 | 0.2371 | 0.4709 | 0.8625 | 0.2862 |
+| iTransformer | **0.2123** | 0.2429 | **0.4608** | **0.8673** | 0.3152 |
 | TOTO2 | 0.2262 | 0.2303 | 0.4757 | 0.8601 | 0.2310 |
 | TiRex2 | 0.2422 | 0.2408 | 0.4921 | 0.8508 | 0.2277 |
 
-PANDA zero-shot obtains the best MSE, RMSE, and Pearson correlation. Chronos2 obtains the best MAE and unit-circle error.
+iTransformer obtains the best MSE, RMSE, and Pearson correlation. Chronos2 obtains the best MAE and unit-circle error.
 
 ### E2: recursive 512-step rollout
 
@@ -212,17 +404,18 @@ PANDA zero-shot obtains the best MSE, RMSE, and Pearson correlation. Chronos2 ob
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Chronos2 | **0.2201** | **0.2895** | **0.3179** | **0.3397** | 1.5436 |
 | PANDA zero-shot | 0.2267 | 0.3033 | 0.3260 | 0.3416 | 1.5065 |
+| iTransformer | 0.2380 | 0.2993 | 0.3294 | 0.3515 | **1.4772** |
 | TOTO2 | 0.2234 | 0.2957 | 0.3250 | 0.3483 | 1.5592 |
-| TiRex2 | 0.2352 | 0.3039 | 0.3310 | 0.3507 | **1.4909** |
+| TiRex2 | 0.2352 | 0.3039 | 0.3310 | 0.3507 | 1.4909 |
 
-All models accumulate error during recursive rollout. Chronos2 has the lowest absolute MAE in every rollout block, while TiRex2 has the lowest relative amplification because its first-block error is already higher.
+All models accumulate error during recursive rollout. Chronos2 has the lowest absolute MAE in every rollout block, while iTransformer has the lowest relative amplification.
 
-Sources: [Chronos2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md), [PANDA zero-shot](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md), [TOTO2](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md), and [TiRex2](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md).
+Sources: [Chronos2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md), [PANDA zero-shot](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md), [iTransformer](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md), [TOTO2](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md), and [TiRex2](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md).
 
 ## Overall takeaways
 
 - **Task A:** XGBoost-strong is the strongest regression and ranking model; MLP-base is best when the binary decision is evaluated by F1.
-- **Task B:** The latest prefix=512 Physics+XGBoost result reaches stable-positive F1=0.9024, AUROC=0.9852, and AUPRC=0.9652. Frozen Panda and Chronos-2 encoders are also competitive, with the latest Chronos-2 probe currently available at prefix=96.
-- **Task C:** Frozen foundation-model embeddings followed by attention provide the best full-system survival prediction, with Chronos-2 leading on overall curve metrics and PANDA leading at the final horizon.
+- **Task B:** The latest paper comparison uses a shared case-level `70/15/15` split and matched linear probes. At prefix=96 Chronos-2 leads Panda in AUROC (0.9531 vs. 0.9467); at prefix=512 they are effectively tied in AUROC (0.9791 vs. 0.9786), while Panda has higher late-unbound recall (0.4517 vs. 0.4006). The older Physics+XGBoost result is retained as a historical baseline but should not be compared directly across split protocols.
+- **Task C:** On the latest prefix=96 common split, Chronos-2 direct frozen embeddings lead overall curve MAE, legacy-horizon MAE, and IBS; PANDA direct has the best final-bin MAE, while raw TCN is the strongest raw-feature baseline.
 - **Task D:** The MLP predicts the Lyapunov-like proxy substantially better than the constant and random-forest baselines. The target remains a discrete observational proxy rather than a strict Lyapunov time.
 - **Task E:** Foundation time-series models are competitive for one-shot forecasting, but recursive rollout still shows clear error accumulation over the 512-step horizon.
