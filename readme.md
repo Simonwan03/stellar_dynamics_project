@@ -241,12 +241,20 @@ python scripts/create_common_case_split.py \
 
 **模型族**
 
-- `mlp`
-- `xgboost`
+- `binary_any`：`equation2`、`mlp`、`xgboost`
+- `stable_fraction`：`mlp`、`xgboost`
+
+其中 `equation2` 直接使用原始初始条件中的半长轴比、外轨偏心率、质量和轨道
+角动量方向，按 Equation (2) 计算每条 variation 的稳定性；system 只有在 32 条
+variation 的 Equation (2) margin 都为正时才预测为 stable。它不训练参数，但仍在
+公共 manifest 的 train/val/test system 上分别报告指标，test 结果可与 MLP 和
+XGBoost 直接比较。
 
 `stable_fraction` 是连续值回归；`binary_any` 是 system-level 的 0/1 分类。
 在 `binary_any` 模式下，MLP 默认使用 `BCEWithLogitsLoss`，XGBoost 使用
 `binary:logistic`，并报告 accuracy、precision、recall、F1、AUROC 和 AUPRC。
+MLP 和 XGBoost 的二分类阈值默认只在 validation set 上选择 F1 最大值，再固定到
+test set；Equation (2) 保持其物理判据 `margin > 0`，不使用标签调阈值。
 此外，`metrics.json` 还会保存 balanced accuracy、specificity、FPR/FNR、MCC、
 混淆矩阵（TN/FP/FN/TP）、Brier score、log loss，以及 10-bin 的 ECE/MCE，
 便于同时检查类别不平衡、阈值表现和概率校准。`stable_fraction` 回归会额外报告
@@ -255,7 +263,7 @@ median absolute error、explained variance、Pearson/Spearman、平均偏差、�
 
 这项任务强调的是：不看时间演化，只凭初值能预测多少 system-level 稳定性信息。
 
-**实验结果**
+**历史实验结果（旧切分）**
 
 观测稳定比例来自每个 system 的 `32` 次扰动试验，因此即使模型准确预测了
 潜在稳定概率 \(p\)，标签本身仍有二项采样噪声：
@@ -280,6 +288,8 @@ median absolute error、explained variance、Pearson/Spearman、平均偏差、�
 `MLP-large` 的 MAE 最低。所有模型仍明显高于上述二项采样噪声尺度，
 说明仅凭初始条件预测长期稳定比例仍有较大难度。
 
+**当前公共切分重跑结果**
+
 要运行“只要一个 variation unbound 就判为不稳定”的二分类版本：
 
 ```bash
@@ -289,6 +299,42 @@ conda run -n stellar python -m tasks.task_a \
   --group-size 32 \
   --time-horizon 10000 \
   --target-mode binary_any \
+  --models equation2,mlp,xgboost \
+  --mlp-size base \
+  --xgb-size base \
+  --train-ratio 0.70 \
+  --val-ratio 0.15 \
+  --test-ratio 0.15 \
+  --split-manifest dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv \
+  --seed 42 \
+  --epochs 50 \
+  --device cuda \
+  --output-dir results/task_a_common/binary
+```
+
+`--time-horizon` 可以直接改成其他判定时刻，例如 `5000`；当前
+`completed_systems_sampling_2.txt` 的 `time_unbound` 最大值是 `10000`，因此不要设置超过
+`10000` 的 horizon。
+二分类输出会保存 `metrics.json`、Equation (2) 的 system 预测、MLP/XGBoost
+模型文件、测试集预测以及 MLP 的 ROC/PR 曲线。
+
+本次公共切分重跑的 test 结果保存在 `results/task_a_common/binary/metrics.json`：
+
+| Method | Accuracy | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: |
+| Equation (2) | 0.6187 | 0.4414 | 0.7529 | 0.2810 |
+| MLP-base | 0.7507 | 0.4905 | 0.8416 | **0.5139** |
+| XGBoost-base | **0.8053** | **0.5350** | **0.8525** | 0.5089 |
+
+运行 stable-fraction 回归版本：
+
+```bash
+conda run -n stellar python -m tasks.task_a \
+  --dataset-dir dataset_v3 \
+  --sampling-id 2 \
+  --group-size 32 \
+  --time-horizon 10000 \
+  --target-mode stable_fraction \
   --models mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
@@ -299,14 +345,16 @@ conda run -n stellar python -m tasks.task_a \
   --seed 42 \
   --epochs 50 \
   --device cuda \
-  --output-dir results/task_a_binary_any
+  --output-dir results/task_a_common/stable_fraction
 ```
 
-`--time-horizon` 可以直接改成其他判定时刻，例如 `5000`；当前
-`completed_systems_sampling_2.txt` 的 `time_unbound` 最大值是 `10000`，因此不要设置超过
-`10000` 的 horizon。
-二分类输出会保存 `metrics.json`、MLP/XGBoost 模型文件、测试集预测以及
-MLP 的 ROC/PR 曲线。
+本次 stable-fraction 公共切分重跑的 test 结果保存在
+`results/task_a_common/stable_fraction/metrics.json`：
+
+| Method | MSE | RMSE | MAE | R² |
+| --- | ---: | ---: | ---: | ---: |
+| MLP-base | 0.0901 | 0.3001 | **0.2247** | 0.4335 |
+| XGBoost-base | **0.0884** | **0.2972** | 0.2330 | **0.4442** |
 
 ### Task B: Prefix-Based Instability Prediction
 
@@ -347,6 +395,24 @@ Task B 有两个模式：
 - `gru`: 两层单向 GRU temporal encoder
 - `attention`: Transformer encoder over time
 - `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
+
+#### 公共切分下的 frozen encoder probe
+
+Panda 和 Chronos-2 的 frozen embedding 都使用相同的 `linear` classification head、
+相同的 `111936/24000/24000` trajectory split 和 `time_horizon=10000`。分类头内部以
+`time_unbound < 10000` 为 unbound-positive 训练，下面统一按 stable-positive 目标报告：
+
+| Encoder | Prefix | Accuracy | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Panda | 96 | 0.8640 | 0.8070 | 0.9467 | 0.8911 |
+| Panda | 512 | 0.9217 | 0.8845 | 0.9786 | 0.9550 |
+| Chronos-2 | 96 | 0.8623 | 0.8067 | 0.9531 | 0.9083 |
+| Chronos-2 | 512 | 0.9209 | 0.8848 | 0.9791 | 0.9552 |
+
+结果位于 `experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/`。
+这些结果沿用 Task B 的 early-detection 定义，prefix 内已经 unbound 的样本没有排除；
+因此它们适合比较 encoder 和 prefix，不能直接解释为严格的 future-only 预测，也不应
+直接与 Task A 的 initial-condition 结果混合排名。
 
 **默认参数规模（`orbital15` 表示）**
 

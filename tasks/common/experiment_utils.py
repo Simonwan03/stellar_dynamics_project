@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import random
 from pathlib import Path
 from typing import Any
@@ -215,6 +216,40 @@ def binary_metrics_from_probs(y_true: np.ndarray, prob: np.ndarray, threshold: f
         metrics["auc"] = float("nan")
         metrics["average_precision"] = float("nan")
     return metrics
+
+
+def select_binary_threshold_by_f1(
+    y_true: np.ndarray,
+    prob: np.ndarray,
+    default_threshold: float = 0.5,
+) -> float:
+    """Select the F1-maximizing threshold without using a test set."""
+
+    y_true = np.asarray(y_true).reshape(-1).astype(np.int64)
+    prob = np.clip(np.asarray(prob).reshape(-1).astype(np.float64), 0.0, 1.0)
+    if not 0.0 <= default_threshold <= 1.0:
+        raise ValueError(f"default_threshold must lie in [0, 1], got {default_threshold}.")
+    if y_true.size != prob.size:
+        raise ValueError(f"y_true and prob must have the same length, got {y_true.size} and {prob.size}.")
+    if not np.isfinite(prob).all():
+        raise ValueError("prob must contain only finite values.")
+    if y_true.size == 0 or len(np.unique(y_true)) < 2:
+        return float(default_threshold)
+
+    candidates = np.unique(np.concatenate([prob, np.asarray([default_threshold], dtype=np.float64)]))
+    best_threshold = float(default_threshold)
+    best_score = -float("inf")
+    for threshold in candidates:
+        score = float(f1_score(y_true, (prob >= threshold).astype(np.int64), zero_division=0))
+        closer_to_default = abs(float(threshold) - default_threshold) < abs(best_threshold - default_threshold)
+        same_distance_and_higher = (
+            math.isclose(abs(float(threshold) - default_threshold), abs(best_threshold - default_threshold), rel_tol=0.0, abs_tol=1e-12)
+            and float(threshold) > best_threshold
+        )
+        if score > best_score or (math.isclose(score, best_score, rel_tol=0.0, abs_tol=1e-12) and (closer_to_default or same_distance_and_higher)):
+            best_score = score
+            best_threshold = float(threshold)
+    return best_threshold
 
 
 def save_binary_curves(path: str | Path, y_true: np.ndarray, prob: np.ndarray, title: str) -> None:

@@ -32,6 +32,7 @@ from tasks.common.experiment_utils import (
     set_random_seed,
     standardize_from_train,
     binary_metrics_from_probs,
+    select_binary_threshold_by_f1,
 )
 from tasks.common.case_split import (
     case_split_indices,
@@ -39,6 +40,7 @@ from tasks.common.case_split import (
     ensure_case_split_manifest,
     missing_case_ids,
 )
+from tasks.common.traditional_stability import load_initial_conditions
 
 
 DEFAULT_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
@@ -260,6 +262,39 @@ def filter_finite_cases(
     return X[finite_mask], y[finite_mask], label_df.loc[finite_mask].reset_index(drop=True), case_ids[finite_mask]
 
 
+def equation2_group_predictions(
+    input_path: str | Path,
+    case_ids: np.ndarray,
+    group_size: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return Equation (2) all-variation predictions for selected systems."""
+
+    predictions = load_initial_conditions(Path(input_path), group_size=group_size)
+    group_margin = predictions.groupby("group_id", sort=True)["stability_margin"].min()
+    selected_margin = group_margin.reindex(np.asarray(case_ids, dtype=np.int64))
+    if selected_margin.isna().any():
+        missing = selected_margin[selected_margin.isna()].index.to_numpy(dtype=np.int64)
+        raise ValueError(
+            "Equation (2) did not produce predictions for all selected systems; "
+            f"missing raw_case_id values: {missing[:10].tolist()}"
+        )
+    margins = selected_margin.to_numpy(dtype=np.float64)
+    return (margins > 0.0).astype(np.float32), margins
+
+
+def resolve_binary_threshold(
+    y_val: np.ndarray,
+    prob_val: np.ndarray,
+    requested_threshold: float | None,
+) -> tuple[float, str]:
+    if requested_threshold is not None:
+        threshold = float(requested_threshold)
+        if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+            raise ValueError(f"--binary-threshold must lie in [0, 1], got {requested_threshold}.")
+        return threshold, "fixed_cli_value"
+    return select_binary_threshold_by_f1(y_val, prob_val), "validation_max_f1"
+
+
 def make_loaders(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -352,9 +387,14 @@ def regression_metrics_from_preds(y_true: np.ndarray, pred: np.ndarray) -> dict[
     }
 
 
-def save_binary_predictions(path: str | Path, y_true: np.ndarray, prob: np.ndarray) -> None:
+def save_binary_predictions(
+    path: str | Path,
+    y_true: np.ndarray,
+    prob: np.ndarray,
+    threshold: float = 0.5,
+) -> None:
     rows = [
-        {"y_true": int(label), "probability": float(score), "prediction": int(score >= 0.5)}
+        {"y_true": int(label), "probability": float(score), "prediction": int(score >= threshold)}
         for label, score in zip(np.asarray(y_true).reshape(-1), np.asarray(prob).reshape(-1))
     ]
     save_csv(path, rows)
@@ -534,11 +574,14 @@ def run_xgboost_regressor(
 def run_xgboost_classifier(
     X_train: np.ndarray,
     y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
     output_dir: Path,
     random_state: int,
     preset: dict[str, Any],
+    requested_threshold: float | None = None,
 ) -> dict[str, Any]:
     try:
         import xgboost as xgb
@@ -555,11 +598,16 @@ def run_xgboost_classifier(
     )
     model.fit(X_train, y_train.astype(np.int32))
     train_prob = model.predict_proba(X_train)[:, 1]
+    val_prob = model.predict_proba(X_val)[:, 1]
     test_prob = model.predict_proba(X_test)[:, 1]
+    threshold, threshold_source = resolve_binary_threshold(y_val, val_prob, requested_threshold)
     model.get_booster().save_model(output_dir / "xgboost_binary_model.json")
     return {
-        "train": binary_metrics_from_probs(y_train, train_prob),
-        "test": binary_metrics_from_probs(y_test, test_prob),
+        "threshold": threshold,
+        "threshold_source": threshold_source,
+        "train": binary_metrics_from_probs(y_train, train_prob, threshold=threshold),
+        "val": binary_metrics_from_probs(y_val, val_prob, threshold=threshold),
+        "test": binary_metrics_from_probs(y_test, test_prob, threshold=threshold),
     }
 
 
@@ -579,7 +627,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
     parser.add_argument("--regroup", action="store_true", help="Create/update ICs_sampling_*_groupof*.hdf5.")
     parser.add_argument("--overwrite-tokenized", action="store_true")
-    parser.add_argument("--models", type=str, default="mlp,xgboost")
+    parser.add_argument(
+        "--models",
+        type=str,
+        default=None,
+        help="Comma-separated methods. Defaults to equation2,mlp,xgboost for binary_any and mlp,xgboost for stable_fraction.",
+    )
     parser.add_argument(
         "--mlp-size",
         choices=sorted(MLP_PRESETS),
@@ -637,6 +690,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Minimum validation-MSE improvement required to reset the early-stopping patience counter.",
     )
     parser.add_argument(
+        "--binary-threshold",
+        type=float,
+        default=None,
+        help="Binary decision threshold. Defaults to the validation-set F1 optimum.",
+    )
+    parser.add_argument(
         "--mlp-loss",
         choices=["mse", "bce"],
         default=None,
@@ -662,7 +721,22 @@ def main() -> None:
     hidden = tuple(parse_int_list(args.hidden) or mlp_preset["hidden"])
     dropout = float(args.dropout if args.dropout is not None else mlp_preset["dropout"])
     early_stopping_patience = args.early_stopping_patience if args.early_stopping_patience > 0 else None
-    models = set(parse_name_list(args.models))
+    if args.models is None:
+        models = {"equation2", "mlp", "xgboost"} if args.target_mode == "binary_any" else {"mlp", "xgboost"}
+    else:
+        models = set(parse_name_list(args.models))
+    if "equation_2" in models:
+        models.remove("equation_2")
+        models.add("equation2")
+    allowed_models = {"mlp", "xgboost"}
+    if args.target_mode == "binary_any":
+        allowed_models.add("equation2")
+    unsupported = sorted(models - allowed_models)
+    if unsupported:
+        raise ValueError(
+            f"Unsupported Task A methods for target_mode={args.target_mode}: {unsupported}. "
+            f"Allowed methods: {sorted(allowed_models)}"
+        )
 
     if args.regroup or not tokenized_path.exists():
         tokenized_shapes = regroup_initial_conditions(
@@ -768,6 +842,7 @@ def main() -> None:
         output_dir / "config.json",
         {
             **vars(args),
+            "models": ",".join(sorted(models)),
             "device": str(device),
             "tokenized_path": tokenized_path,
             "tokenized_shapes": tokenized_shapes,
@@ -791,10 +866,51 @@ def main() -> None:
                 "test": float(args.test_ratio),
             },
             "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
+            "binary_threshold_policy": (
+                "validation_max_f1"
+                if args.binary_threshold is None
+                else "fixed_cli_value"
+            )
+            if args.target_mode == "binary_any"
+            else None,
+            "binary_threshold_override": args.binary_threshold,
+            "equation2_group_rule": (
+                "stable iff the minimum Equation (2) margin across all variations is positive"
+                if "equation2" in models
+                else None
+            ),
         },
     )
 
     all_metrics: dict[str, Any] = {}
+    if "equation2" in models:
+        if args.target_mode != "binary_any":
+            raise ValueError("Equation (2) is only defined for Task A binary_any classification.")
+        equation2_prob, equation2_margin = equation2_group_predictions(
+            ics_path,
+            case_ids,
+            group_size=args.group_size,
+        )
+        equation2_metrics = {
+            split_name: binary_metrics_from_probs(y[split_rows], equation2_prob[split_rows])
+            for split_name, split_rows in split_indices.items()
+        }
+        all_metrics["equation2"] = equation2_metrics
+        equation2_rows = []
+        for row, case_id in enumerate(case_ids):
+            split_name = str(split_membership[row])
+            equation2_rows.append(
+                {
+                    "raw_case_id": int(case_id),
+                    "split": split_name,
+                    "y_true": int(y[row]),
+                    "stability_margin": float(equation2_margin[row]),
+                    "probability_stable": float(equation2_prob[row]),
+                    "prediction_stable": int(equation2_prob[row] >= 0.5),
+                }
+            )
+        save_csv(output_dir / "equation2_predictions.csv", equation2_rows)
+
     if "mlp" in models:
         train_loader, test_loader = make_loaders(X_train, y_train, args.batch_size, (X_test, y_test))
         val_loader = make_loaders(X_train, y_train, args.batch_size, (X_val, y_val))[1]
@@ -816,6 +932,14 @@ def main() -> None:
         y_train_eval, train_pred = predict_regressor(mlp, train_loader, device)
         y_val_eval, val_pred = predict_regressor(mlp, val_loader, device)
         y_test_eval, test_pred = predict_regressor(mlp, test_loader, device)
+        binary_threshold = None
+        binary_threshold_source = None
+        if args.target_mode == "binary_any":
+            binary_threshold, binary_threshold_source = resolve_binary_threshold(
+                y_val_eval,
+                val_pred,
+                args.binary_threshold,
+            )
         model_stem = "binary" if args.target_mode == "binary_any" else "fraction"
         torch.save(
             {"model_state_dict": mlp.state_dict(), "feature_names": feature_names},
@@ -823,13 +947,21 @@ def main() -> None:
         )
         save_csv(output_dir / f"mlp_{model_stem}_train_log.csv", history)
         if args.target_mode == "binary_any":
-            save_binary_predictions(output_dir / "mlp_binary_test_predictions.csv", y_test_eval, test_pred)
+            assert binary_threshold is not None and binary_threshold_source is not None
+            save_binary_predictions(
+                output_dir / "mlp_binary_test_predictions.csv",
+                y_test_eval,
+                test_pred,
+                threshold=binary_threshold,
+            )
             save_binary_curves(output_dir / "mlp_binary_test_curves.png", y_test_eval, test_pred, "Task A binary MLP")
             all_metrics["mlp"] = {
                 "fit": fit_info,
-                "train": binary_metrics_from_probs(y_train_eval, train_pred),
-                "val": binary_metrics_from_probs(y_val_eval, val_pred),
-                "test": binary_metrics_from_probs(y_test_eval, test_pred),
+                "threshold": binary_threshold,
+                "threshold_source": binary_threshold_source,
+                "train": binary_metrics_from_probs(y_train_eval, train_pred, threshold=binary_threshold),
+                "val": binary_metrics_from_probs(y_val_eval, val_pred, threshold=binary_threshold),
+                "test": binary_metrics_from_probs(y_test_eval, test_pred, threshold=binary_threshold),
             }
         else:
             save_regression_scatter(output_dir / "mlp_fraction_test_scatter.png", y_test_eval, test_pred, "Task A MLP")
@@ -845,11 +977,14 @@ def main() -> None:
             all_metrics["xgboost"] = run_xgboost_classifier(
                 X_train,
                 y_train,
+                X_val,
+                y_val,
                 X_test,
                 y_test,
                 output_dir,
                 random_state=args.seed,
                 preset=xgb_preset,
+                requested_threshold=args.binary_threshold,
             )
         else:
             all_metrics["xgboost"] = run_xgboost_regressor(

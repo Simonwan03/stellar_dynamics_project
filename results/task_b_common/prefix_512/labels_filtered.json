@@ -1,0 +1,13 @@
+{
+  "source_labels": "results/task_b_prefix_ablation/prefix_512/labels_filtered.csv",
+  "manifest": "dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv",
+  "group_size": 32,
+  "rows": 159936,
+  "cases": 4998,
+  "split_counts": {
+    "train": 111936,
+    "val": 24000,
+    "test": 24000
+  },
+  "split_indices": "results/task_b_common/prefix_512/split_indices.npz"
+}

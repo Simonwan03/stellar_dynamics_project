@@ -118,6 +118,12 @@ def main() -> None:
     parser.add_argument("--feature-cache", type=Path, default=DEFAULT_FEATURE_CACHE)
     parser.add_argument("--prefix-dir", type=Path, default=DEFAULT_PREFIX_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--prefix-steps",
+        type=int,
+        default=None,
+        help="Expected prefix length; defaults to the feature-cache metadata.",
+    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -153,8 +159,12 @@ def main() -> None:
         raise ValueError("Feature cache labels do not match the requested Task B label ordering.")
     if cache_metadata.get("pooling") != "reg":
         raise ValueError(f"Expected a Chronos-2 REG cache, got pooling={cache_metadata.get('pooling')!r}")
-    if int(cache_metadata.get("prefix_steps", -1)) != 96:
-        raise ValueError(f"Expected prefix_steps=96, got {cache_metadata.get('prefix_steps')!r}")
+    prefix_steps = int(cache_metadata.get("prefix_steps", -1))
+    if args.prefix_steps is not None:
+        if args.prefix_steps <= 0:
+            raise ValueError("--prefix-steps must be positive.")
+        if prefix_steps != args.prefix_steps:
+            raise ValueError(f"Expected prefix_steps={args.prefix_steps}, got {prefix_steps!r}")
 
     features = np.load(args.feature_cache, mmap_mode="r")
     expected_shape = (len(labels), 15 * 768)
@@ -249,6 +259,7 @@ def main() -> None:
             "model_state_dict": best_state,
             "feature_dim": int(features.shape[1]),
             "feature_cache": str(args.feature_cache),
+            "prefix_steps": prefix_steps,
             "pooling": "reg",
             "head": "linear",
             "trainable_parameters": trainable_parameters,
@@ -279,10 +290,10 @@ def main() -> None:
     predictions.to_csv(args.output_dir / "predictions_all.csv", index=False)
     test_predictions = predictions.loc[predictions["split"] == "test"]
     time_unbound = test_predictions["time_unbound"]
-    prefix_end_time = 96.0 * 5.0
+    prefix_end_time = float(prefix_steps * 5.0)
     segment_definitions = (
-        ("prefix 96内已 unbound", time_unbound < prefix_end_time, True),
-        ("prefix 96后才 unbound", (time_unbound >= prefix_end_time) & (time_unbound < 10000.0), True),
+        (f"prefix {prefix_steps}内已 unbound", time_unbound < prefix_end_time, True),
+        (f"prefix {prefix_steps}后才 unbound", (time_unbound >= prefix_end_time) & (time_unbound < 10000.0), True),
         ("一直到结束仍稳定", time_unbound >= 10000.0, False),
     )
     segmented_rows = []
@@ -305,6 +316,7 @@ def main() -> None:
             **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
             "feature_cache_metadata": cache_metadata,
             "feature_shape": list(features.shape),
+            "prefix_steps": prefix_steps,
             "trainable_parameters": trainable_parameters,
             "split_counts": {split: int(len(rows)) for split, rows in split_rows.items()},
         },

@@ -458,15 +458,19 @@ def main() -> None:
             dtype=np.int64,
         )
         missing_task_rows = np.flatnonzero(cache_rows < 0)
-        missing_labels = task_labels.iloc[missing_task_rows].copy()
-        supplemental_path = args.supplemental_features
-        if supplemental_path is None:
-            supplemental_path = args.output_dir / "supplemental_test_features.float16.npy"
-        missing_features = extract_missing_features(
-            missing_labels, args.dataset_dir, args.checkpoint, supplemental_path, device
-        )
+        if missing_task_rows.size:
+            missing_labels = task_labels.iloc[missing_task_rows].copy()
+            supplemental_path = args.supplemental_features
+            if supplemental_path is None:
+                supplemental_path = args.output_dir / "supplemental_test_features.float16.npy"
+            missing_features = extract_missing_features(
+                missing_labels, args.dataset_dir, args.checkpoint, supplemental_path, device
+            )
+        else:
+            missing_features = np.empty((0, 15 * 768), dtype=np.float16)
         missing_rows = np.full(len(task_labels), -1, dtype=np.int64)
-        missing_rows[missing_task_rows] = np.arange(len(missing_task_rows), dtype=np.int64)
+        if missing_task_rows.size:
+            missing_rows[missing_task_rows] = np.arange(len(missing_task_rows), dtype=np.int64)
 
     split_membership = np.full(len(task_labels), "", dtype=object)
     for split, rows in split_rows.items():
