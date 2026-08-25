@@ -396,23 +396,57 @@ Task B 有两个模式：
 - `attention`: Transformer encoder over time
 - `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
 
-#### 公共切分下的 frozen encoder probe
+#### 公共切分下的 trajectory/system 两层评估
 
-Panda 和 Chronos-2 的 frozen embedding 都使用相同的 `linear` classification head、
-相同的 `111936/24000/24000` trajectory split 和 `time_horizon=10000`。分类头内部以
-`time_unbound < 10000` 为 unbound-positive 训练，下面统一按 stable-positive 目标报告：
+所有模型使用相同的 `111936/24000/24000` trajectory split、`time_horizon=10000`
+和 750 个 test systems。表格前半部分是 stable-positive trajectory binary 指标；后半
+部分先对每个 system 的 32 个 `prob_stable` 求平均，再与真实 stable fraction 比较，
+因此 MAE、MSE 和 R² 的评估单位都是 system。Dynamical summaries 从 15 个
+`orbital15` 通道分别提取 `initial/final/mean/std/slope/min/max/delta`，得到 120 维
+prefix features，并使用 XGBoost。
 
-| Encoder | Prefix | Accuracy | F1 | AUROC | AUPRC |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Panda | 96 | 0.8640 | 0.8070 | 0.9467 | 0.8911 |
-| Panda | 512 | 0.9217 | 0.8845 | 0.9786 | 0.9550 |
-| Chronos-2 | 96 | 0.8623 | 0.8067 | 0.9531 | 0.9083 |
-| Chronos-2 | 512 | 0.9209 | 0.8848 | 0.9791 | 0.9552 |
+| Prefix | Representation | Model | Trajectory Accuracy | Trajectory F1 | Trajectory AUROC | Trajectory AUPRC | System MAE ↓ | System MSE ↓ | System R² ↑ |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 96 | Panda encoder | Linear | 0.8640 | 0.8070 | 0.9467 | 0.8911 | 0.1031 | 0.0256 | 0.8390 |
+| 96 | Chronos-2 encoder | Linear | 0.8623 | 0.8067 | 0.9531 | 0.9083 | 0.1112 | 0.0281 | 0.8230 |
+| 96 | Dynamical summaries | XGBoost | **0.9000** | **0.8404** | **0.9649** | **0.9319** | **0.0703** | **0.0153** | **0.9040** |
+| 96 | Raw sequence | SVM | 0.7493 | 0.5800 | 0.8135 | 0.6166 | 0.2373 | 0.0927 | 0.4165 |
+| 96 | Raw sequence | CNN | 0.7937 | 0.6092 | 0.8888 | 0.7526 | 0.1759 | 0.0786 | 0.5056 |
+| 96 | Raw sequence | TCN | 0.8167 | 0.7402 | 0.8971 | 0.7523 | 0.1570 | 0.0581 | 0.6347 |
+| 512 | Panda encoder | Linear | 0.9217 | 0.8845 | 0.9786 | 0.9550 | 0.0534 | 0.0071 | 0.9554 |
+| 512 | Chronos-2 encoder | Linear | 0.9209 | 0.8848 | 0.9791 | 0.9552 | 0.0614 | 0.0087 | 0.9452 |
+| 512 | Dynamical summaries | XGBoost | **0.9329** | **0.8960** | **0.9851** | **0.9673** | **0.0398** | **0.0051** | **0.9676** |
+| 512 | Raw sequence | SVM | 0.7590 | 0.5918 | 0.8282 | 0.6232 | 0.2184 | 0.0818 | 0.4855 |
+| 512 | Raw sequence | CNN | 0.8839 | 0.8205 | 0.9470 | 0.8543 | 0.0985 | 0.0278 | 0.8249 |
+| 512 | Raw sequence | TCN | 0.8973 | 0.8411 | 0.9593 | 0.8900 | 0.0765 | 0.0177 | 0.8886 |
 
-结果位于 `experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/`。
-这些结果沿用 Task B 的 early-detection 定义，prefix 内已经 unbound 的样本没有排除；
-因此它们适合比较 encoder 和 prefix，不能直接解释为严格的 future-only 预测，也不应
-直接与 Task A 的 initial-condition 结果混合排名。
+Dynamical summaries + XGBoost 在两个 prefix 和两个评估层级上均为当前最佳。结果文件位于
+`results/task_b_common/two_level_evaluation/`，原始预测位于
+`experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/`。这些结果沿用
+Task B 的 early-detection 定义，prefix 内已经 unbound 的样本没有排除；因此不应把
+trajectory binary 列解释为严格的 future-only 预测。
+
+##### 排除 prefix 内已 unbound systems 的 ablation
+
+为了排除容易样本的影响，进一步按 system 过滤：若 32 个 variations 中任意一条在
+prefix cutoff 前 unbound，就删除整个 system。时间步间隔为 5，因此 prefix 96 和
+prefix 512 分别对应 `t=480` 和 `t=2560`。最终预测目标仍为 `H=10000` 的 system
+stable fraction，模型使用 Task A initial-condition XGBoost 和 Task B dynamical-summary
+XGBoost，且只重新评估、不重新训练。
+
+| At-risk cohort | Available information | Systems | MAE ↓ | MSE ↓ | R² ↑ |
+| --- | --- | ---: | ---: | ---: | ---: |
+| All 32 survive to `t=480` | Initial conditions | 257 | 0.3432 | 0.1551 | -0.8771 |
+| All 32 survive to `t=480` | Prefix 96 | 257 | **0.1103** | **0.0269** | **0.6746** |
+| All 32 survive to `t=2560` | Initial conditions | 174 | 0.3985 | 0.1940 | -35.8425 |
+| All 32 survive to `t=2560` | Prefix 96 | 174 | 0.0897 | 0.0187 | -2.5556 |
+| All 32 survive to `t=2560` | Prefix 512 | 174 | **0.0520** | **0.0079** | **-0.4984** |
+
+在 `t=480` at-risk cohort 中，prefix 96 相对 initial conditions 将 MAE/MSE 分别降低
+67.8%/82.7%；在 `t=2560` cohort 中，prefix 512 相对 prefix 96 将 MAE/MSE 分别
+降低 42.0%/57.9%。两组 paired system-bootstrap 95% CI 均不跨 0。第二组真值均值
+达到 0.9668、方差很小，因此应以 MAE/MSE 和 paired differences 为主，不应重点
+解释负 R²。完整结果位于 `results/task_ab_future_only_ablation/`。
 
 **默认参数规模（`orbital15` 表示）**
 
@@ -2323,6 +2357,26 @@ conda run -n stellar python -m tasks.task_b \
 ```
 
 GRU 默认使用两层单向结构；可通过 `--gru-layers` 和 `--hidden-dim` 调整层数与 hidden width。
+
+基于已保存的 common-split predictions 重算 trajectory binary 与聚合 system stability
+两层指标，并导出 CSV、Markdown 和 LaTeX 表格：
+
+```bash
+conda run -n stellar python scripts/evaluate_task_b_two_level.py
+```
+
+输出目录为 `results/task_b_common/two_level_evaluation/`。该命令只做评估和聚合，
+不会重新训练模型。
+
+运行 Task A/Task B at-risk system ablation，排除任意 variation 已在对应 prefix 内
+unbound 的 systems：
+
+```bash
+conda run -n stellar python scripts/evaluate_task_ab_future_only_ablation.py
+```
+
+输出目录为 `results/task_ab_future_only_ablation/`；该命令同样只读取已保存预测并
+执行 system-level 过滤、指标计算和 paired bootstrap。
 
 Group fraction / set-attention 版本：
 

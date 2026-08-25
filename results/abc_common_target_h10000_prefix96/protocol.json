@@ -1,0 +1,12 @@
+{
+  "target": "mean_j 1[time_unbound_ij >= 10000] over 32 variations",
+  "test_systems": 750,
+  "bootstrap": {
+    "samples": 10000,
+    "seed": 42,
+    "unit": "system"
+  },
+  "strict_raw_comparison": "Predeclared A=MLP, B=raw TCN, C=raw TCN; B/C both use orbital15 prefix=96.",
+  "best_observed_warning": "Descriptive minimum test MSE among available saved models; not validation-selected.",
+  "task_c_architecture_note": "The saved event-survival C models encode variations independently and aggregate their survival curves; they do not use explicit cross-variation attention."
+}

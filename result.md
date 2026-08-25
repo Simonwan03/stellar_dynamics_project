@@ -114,30 +114,83 @@ Sources: [Panda prefix=96 metrics](experiments/panda_threebody/outputs/panda_unb
 
 ### Complete common-split comparison: encoder, physics, and raw-sequence baselines
 
-The following two tables are the complete matched comparison on the new common split.
-All rows use 24,000 test trajectories from the same 750 test systems. `Stable F1` and
-the overall AUROC/AUPRC use the stable-positive target (`time_unbound >= 10000`); the
-future-only table uses the inverse unbound-positive target to match the earlier encoder
-diagnostic. The raw-sequence models use the same `orbital15` channels, normalization,
+The following table is the complete matched comparison on the new common split at two
+evaluation levels. All rows use 24,000 test trajectories from the same 750 test systems.
+The trajectory-binary columns use the stable-positive target
+(`time_unbound >= 10000`). For system stability, the 32 predicted stable probabilities
+within each system are averaged and compared with the empirical stable fraction at
+`H=10000`. Thus MAE, MSE, and R² are computed over 750 systems, not over 24,000
+trajectories. The raw-sequence models use the same `orbital15` channels, normalization,
 seed, 50-epoch maximum, and validation-AUROC early stopping as the historical raw
-baseline. Physics summary uses 120 prefix-summary features and XGBoost.
+baseline. Dynamical summaries use 120 prefix-summary features and XGBoost.
 
-#### Overall test metrics
+#### Trajectory-binary and aggregated system-stability metrics
 
-| Prefix | Representation | Model | Accuracy | Stable F1 | AUROC | AUPRC |
-| ---: | --- | --- | ---: | ---: | ---: | ---: |
-| 96 | Panda frozen encoder | Linear probe | 0.86404 | 0.80696 | 0.94669 | 0.89107 |
-| 96 | Chronos-2 frozen encoder | Linear probe | 0.86229 | 0.80667 | **0.95311** | **0.90827** |
-| 96 | Physics summary | XGBoost | **0.90000** | **0.84043** | **0.96486** | **0.93194** |
-| 96 | Raw `orbital15` | SVM | 0.74929 | 0.58002 | 0.81347 | 0.61662 |
-| 96 | Raw `orbital15` | CNN | 0.79367 | 0.60916 | 0.88876 | 0.75257 |
-| 96 | Raw `orbital15` | TCN | 0.81667 | 0.74020 | 0.89713 | 0.75230 |
-| 512 | Panda frozen encoder | Linear probe | 0.92167 | 0.88451 | 0.97855 | 0.95504 |
-| 512 | Chronos-2 frozen encoder | Linear probe | 0.92087 | 0.88482 | 0.97912 | 0.95524 |
-| 512 | Physics summary | XGBoost | **0.93292** | **0.89605** | **0.98514** | **0.96730** |
-| 512 | Raw `orbital15` | SVM | 0.75900 | 0.59176 | 0.82820 | 0.62324 |
-| 512 | Raw `orbital15` | CNN | 0.88392 | 0.82047 | 0.94698 | 0.85432 |
-| 512 | Raw `orbital15` | TCN | 0.89729 | 0.84108 | 0.95934 | 0.88999 |
+| Prefix | Representation | Model | Trajectory Accuracy | Trajectory F1 | Trajectory AUROC | Trajectory AUPRC | System MAE ↓ | System MSE ↓ | System R² ↑ |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 96 | Panda encoder | Linear | 0.8640 | 0.8070 | 0.9467 | 0.8911 | 0.1031 | 0.0256 | 0.8390 |
+| 96 | Chronos-2 encoder | Linear | 0.8623 | 0.8067 | 0.9531 | 0.9083 | 0.1112 | 0.0281 | 0.8230 |
+| 96 | Dynamical summaries | XGBoost | **0.9000** | **0.8404** | **0.9649** | **0.9319** | **0.0703** | **0.0153** | **0.9040** |
+| 96 | Raw sequence | SVM | 0.7493 | 0.5800 | 0.8135 | 0.6166 | 0.2373 | 0.0927 | 0.4165 |
+| 96 | Raw sequence | CNN | 0.7937 | 0.6092 | 0.8888 | 0.7526 | 0.1759 | 0.0786 | 0.5056 |
+| 96 | Raw sequence | TCN | 0.8167 | 0.7402 | 0.8971 | 0.7523 | 0.1570 | 0.0581 | 0.6347 |
+| 512 | Panda encoder | Linear | 0.9217 | 0.8845 | 0.9786 | 0.9550 | 0.0534 | 0.0071 | 0.9554 |
+| 512 | Chronos-2 encoder | Linear | 0.9209 | 0.8848 | 0.9791 | 0.9552 | 0.0614 | 0.0087 | 0.9452 |
+| 512 | Dynamical summaries | XGBoost | **0.9329** | **0.8960** | **0.9851** | **0.9673** | **0.0398** | **0.0051** | **0.9676** |
+| 512 | Raw sequence | SVM | 0.7590 | 0.5918 | 0.8282 | 0.6232 | 0.2184 | 0.0818 | 0.4855 |
+| 512 | Raw sequence | CNN | 0.8839 | 0.8205 | 0.9470 | 0.8543 | 0.0985 | 0.0278 | 0.8249 |
+| 512 | Raw sequence | TCN | 0.8973 | 0.8411 | 0.9593 | 0.8900 | 0.0765 | 0.0177 | 0.8886 |
+
+Dynamical summaries plus XGBoost are strongest at both evaluation levels and both
+prefix lengths. At prefix 96 the aggregated system-level result is MAE=0.0703,
+MSE=0.0153, and R²=0.9040; at prefix 512 it improves to MAE=0.0398, MSE=0.0051,
+and R²=0.9676.
+
+#### At-risk system ablation: excluding systems already unbound inside the prefix
+
+To test whether the gains from trajectory prefixes are driven only by systems whose
+instability is already visible inside the observed window, this evaluation removes an
+entire system if any of its 32 variations becomes unbound before the relevant cutoff.
+With the dataset cadence of 5 time units per step, prefix 96 ends at `t=480` and prefix
+512 ends at `t=2560`. The prediction target remains the system stable fraction at
+`H=10000`. This is an evaluation-only ablation: the saved Task A initial-condition
+XGBoost and Task B dynamical-summary XGBoost models are not retrained.
+
+For the initial-condition versus prefix-96 comparison, 257 of the 750 test systems have
+all 32 variations survive through `t=480`:
+
+| Available information | Systems | MAE ↓ | MSE ↓ | R² ↑ |
+| --- | ---: | ---: | ---: | ---: |
+| Initial conditions | 257 | 0.3432 | 0.1551 | -0.8771 |
+| Prefix 96 | 257 | **0.1103** | **0.0269** | **0.6746** |
+
+Prefix 96 reduces MAE by 67.8% and MSE by 82.7%. The paired system-bootstrap
+differences (prefix 96 minus initial conditions) are -0.2329 for MAE, with 95% CI
+`[-0.2597, -0.2057]`, and -0.1282 for MSE, with 95% CI
+`[-0.1488, -0.1086]`.
+
+For the prefix-96 versus prefix-512 comparison, 174 test systems have all 32 variations
+survive through `t=2560`:
+
+| Available information | Systems | MAE ↓ | MSE ↓ | R² ↑ |
+| --- | ---: | ---: | ---: | ---: |
+| Initial conditions | 174 | 0.3985 | 0.1940 | -35.8425 |
+| Prefix 96 | 174 | 0.0897 | 0.0187 | -2.5556 |
+| Prefix 512 | 174 | **0.0520** | **0.0079** | **-0.4984** |
+
+Prefix 512 reduces MAE by 42.0% and MSE by 57.9% relative to prefix 96. The paired
+differences (prefix 512 minus prefix 96) are -0.0377 for MAE, with 95% CI
+`[-0.0469, -0.0293]`, and -0.0108 for MSE, with 95% CI
+`[-0.0154, -0.0068]`. Thus both incremental gains remain after removing systems whose
+instability is already visible in the relevant prefix.
+
+The restricted prefix-512 cohort has mean stable fraction 0.9668 and very little target
+variance, so its negative R² values are unstable and should not be used as the primary
+comparison; MAE, MSE, and paired differences are more informative. Machine-readable
+results are available in
+[the at-risk ablation directory](results/task_ab_future_only_ablation/), and the analysis
+is reproduced by
+[evaluate_task_ab_future_only_ablation.py](scripts/evaluate_task_ab_future_only_ablation.py).
 
 #### Future-only test metrics
 
@@ -160,7 +213,12 @@ the unbound-positive target and the default probability threshold of 0.5.
 | 512 | Raw `orbital15` | CNN | 10,193 | 0.71575 | 0.64920 | 0.47488 |
 | 512 | Raw `orbital15` | TCN | 10,193 | 0.76583 | 0.67489 | 0.52768 |
 
-The machine-readable aggregation is [task_b_common_comparison_metrics.csv](results/task_b_common/task_b_common_comparison_metrics.csv); each model's raw metrics and test probabilities are stored under [the common Task B output directory](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/).
+The two-level machine-readable aggregation is
+[task_b_two_level_metrics.csv](results/task_b_common/two_level_evaluation/task_b_two_level_metrics.csv),
+with matching [LaTeX](results/task_b_common/two_level_evaluation/task_b_two_level_table.tex)
+and [Markdown](results/task_b_common/two_level_evaluation/task_b_two_level_table.md) tables.
+Each model's raw metrics and test probabilities are stored under
+[the common Task B output directory](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/).
 
 ### Historical Panda-encoder results: prefix = 512
 
@@ -415,7 +473,11 @@ Sources: [Chronos2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md), [
 ## Overall takeaways
 
 - **Task A:** XGBoost-strong is the strongest regression and ranking model; MLP-base is best when the binary decision is evaluated by F1.
-- **Task B:** The latest paper comparison uses a shared case-level `70/15/15` split and matched linear probes. At prefix=96 Chronos-2 leads Panda in AUROC (0.9531 vs. 0.9467); at prefix=512 they are effectively tied in AUROC (0.9791 vs. 0.9786), while Panda has higher late-unbound recall (0.4517 vs. 0.4006). The older Physics+XGBoost result is retained as a historical baseline but should not be compared directly across split protocols.
+- **Task B:** On the shared case-level `70/15/15` split, dynamical summaries plus
+  XGBoost are strongest at both trajectory and aggregated-system levels. At prefix=96
+  they achieve trajectory AUROC=0.9649 and system R²=0.9040; at prefix=512 these improve
+  to AUROC=0.9851 and system R²=0.9676. Among frozen linear probes, Chronos-2 has
+  slightly higher AUROC than Panda, while Panda has lower system-level MAE and MSE.
 - **Task C:** On the latest prefix=96 common split, Chronos-2 direct frozen embeddings lead overall curve MAE, legacy-horizon MAE, and IBS; PANDA direct has the best final-bin MAE, while raw TCN is the strongest raw-feature baseline.
 - **Task D:** The MLP predicts the Lyapunov-like proxy substantially better than the constant and random-forest baselines. The target remains a discrete observational proxy rather than a strict Lyapunov time.
 - **Task E:** Foundation time-series models are competitive for one-shot forecasting, but recursive rollout still shows clear error accumulation over the 512-step horizon.

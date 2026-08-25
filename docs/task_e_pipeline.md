@@ -9,6 +9,7 @@ python -m tasks.task_e --help
 主要代码位于：
 
 - `tasks/task_e/main.py`：CLI、训练、推理和实验产物保存
+- `tasks/task_e/baselines.py`：非训练的线性外推 baseline
 - `tasks/task_e/data.py`：HDF5 数据读取、特征变换、数据切分、scaler 和滑动窗口
 - `tasks/task_e/models.py`：TCN、PatchTST 和简化 iTransformer
 - `tasks/task_e/transformer.py`：Transformer forecaster
@@ -51,6 +52,12 @@ Task E 现在包含两个共享同一数据切分、窗口和 train-only scaler 
 
 1. **E1 one-shot forecasting**：每个模型直接完成 `512 -> 128` 预测，研究 immediate future trajectory 的预测准确度。
 2. **E2 rolling forecasting**：复用同一个 E1 模型，连续进行四个 `128` 步 recursive blocks，得到最长 `512` 步预测；后续 block 只使用模型自己的预测更新 context，不使用未来 ground truth，研究误差累积速度。
+
+除学习模型外，Task E 还提供 `linear_extrapolation` 基线。它在每个窗口的
+prefix 最后若干步上逐通道拟合最小二乘直线，再一次性外推 `pred_len` 步；默认
+`--linear-fit-window 32`。拟合在 unstandardized transformed coordinates 中进行，
+输出再变回 Task E 的 z-scale。对 orbital15 的 AP/LAN sin/cos pair，默认执行单位圆
+投影，以避免产生不合法的角度表示。
 
 ## 2. 数据来源
 
@@ -337,6 +344,11 @@ system 拆到不同 split，也不会减少 validation/test 中的 variations。
 
 ### 8.1 Baselines
 
+- `linear_extrapolation`：使用 prefix 最后 `--linear-fit-window`（默认 32）步逐通道
+  拟合最小二乘局部趋势，并直接外推完整未来窗口。拟合在 unstandardized transformed
+  coordinates 中进行；对 orbital15 的 AP/LAN sin/cos pair 默认投影回单位圆，可用
+  `--no-linear-angle-projection` 关闭。该 baseline 不训练参数，但与其他模型共享
+  相同的窗口、scaler、system split 和 E1/E2 评价。
 - `ridge`：flatten 整个 context，直接线性回归完整未来窗口。
 
 Ridge 默认限制为 5000 个训练窗口、2000 个 validation 窗口和 2000 个 test 窗口，因为它需要将窗口物化进内存。
@@ -401,7 +413,7 @@ conda run -n stellar python -m tasks.task_e \
   --output-dir runs/task_e_e1_panda_zero_shot
 ```
 
-当前公开的代表性模型包括 `ridge`、`tcn`、`patchtst`、`itransformer`、
+当前公开的代表性模型包括 `linear_extrapolation`、`ridge`、`tcn`、`patchtst`、`itransformer`、
 `chronos2` 和 `panda_zero_shot`。所有模型共享相同的 candidate pool、system split、
 deterministic validation/test windows 和 train-only scaler。
 

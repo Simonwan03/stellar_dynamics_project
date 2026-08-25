@@ -387,6 +387,7 @@ The unified entry supports `orbital15` and `raw_state18`/`trajectory`, with
 base-system group train/validation/test splits, completion-aware windows, and
 train-window-only standardization. Available models are:
 
+- `linear_extrapolation`
 - `ridge`
 - `tcn`, `patchtst`, `transformer`, `itransformer`
 - `chronos2`, `panda_zero_shot`, `tirex2`, `toto2`
@@ -395,6 +396,12 @@ train-window-only standardization. Available models are:
 独立的单变量序列。
 `tirex2` 使用 `NX-AI/TiRex-2` 的原生多目标预测，同样保留 15 个通道的联合建模。
 `toto2` 使用 `Datadog/Toto-2.0-22m` 的原生多变量预测，并选取 0.5 分位数作为点预测。
+
+`linear_extrapolation` 是不训练的局部趋势基线：对 prefix 最后
+`--linear-fit-window`（默认 32）步逐通道拟合最小二乘直线并外推未来；对
+`orbital15` 的 sin/cos 角度通道默认投影回单位圆（可用
+`--no-linear-angle-projection` 关闭）。它与其他模型共享完全相同的数据窗口、scaler、
+system-level split、E1/E2 评估和 bootstrap 协议。
 
 Task E 的主协议包括 E1 one-shot `512 -> 128` 和 E2 四个递归 `128` 步 block
 （最长 horizon `512`）。E2 通过同一次运行的 `--run-rolling --rolling-blocks 4`

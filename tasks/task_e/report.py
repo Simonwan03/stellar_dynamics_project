@@ -17,14 +17,23 @@ import numpy as np
 
 
 MODEL_DISPLAY_NAMES = {
+    "linear_extrapolation": "Linear extrapolation",
     "chronos2": "Chronos2",
     "panda_zero_shot": "PANDA zero-shot",
     "itransformer": "iTransformer",
     "toto2": "TOTO2",
     "tirex2": "TiRex2",
 }
-MODEL_ORDER = ("chronos2", "panda_zero_shot", "itransformer", "toto2", "tirex2")
+MODEL_ORDER = (
+    "linear_extrapolation",
+    "chronos2",
+    "panda_zero_shot",
+    "itransformer",
+    "toto2",
+    "tirex2",
+)
 MODEL_COLORS = {
+    "linear_extrapolation": "#000000",
     "chronos2": "#0072B2",
     "panda_zero_shot": "#D55E00",
     "itransformer": "#E69F00",
@@ -253,7 +262,14 @@ def _plot_one_shot(path: Path, records: list[dict[str, Any]]) -> None:
         values = np.asarray(record["e1_horizon_mae"], dtype=np.float64)
         if values.size == 0:
             continue
-        axis.plot(np.arange(1, values.size + 1), values, linewidth=1.8, label=record["model"])
+        model = record["model"]
+        axis.plot(
+            np.arange(1, values.size + 1),
+            values,
+            color=MODEL_COLORS.get(model),
+            linewidth=1.8,
+            label=MODEL_DISPLAY_NAMES.get(model, model),
+        )
         plotted = True
     axis.set_xlabel("Forecast horizon")
     axis.set_ylabel("MAE_z")

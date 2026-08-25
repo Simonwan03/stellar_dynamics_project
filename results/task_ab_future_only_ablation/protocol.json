@@ -1,0 +1,17 @@
+{
+  "final_target": "mean_j 1[time_unbound_ij >= 10000] over 32 variations",
+  "already_unbound_system_definition": "min_j time_unbound_ij < prefix_steps * 5",
+  "prefix_cutoffs": {
+    "96": 480.0,
+    "512": 2560.0
+  },
+  "models": {
+    "task_a": "initial-condition XGBoost",
+    "task_b": "dynamical-summary XGBoost, independently applied to each trajectory then averaged"
+  },
+  "bootstrap": {
+    "unit": "system",
+    "samples": 10000,
+    "seed_base": 42
+  }
+}

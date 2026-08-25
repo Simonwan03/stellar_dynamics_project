@@ -45,6 +45,7 @@ from tasks.task_e.cache import (  # noqa: E402
     build_preparation_cache_signature,
     load_prepared_cache,
 )
+from tasks.task_e.baselines import forecast_linear_extrapolation_batch  # noqa: E402
 from tasks.task_e.metrics import (  # noqa: E402
     HierarchicalErrorAccumulator,
     bootstrap_block_ci,
@@ -62,8 +63,10 @@ FOUNDATION_MODELS = {"chronos2", "panda_zero_shot", "tirex2", "toto2"}
 # remain import-compatible with historical adapter checkpoints, but the
 # current Task E protocol deliberately does not train or evaluate adapters.
 LEGACY_ADAPTER_MODEL = "panda_adapter"
+LINEAR_EXTRAPOLATION_MODEL = "linear_extrapolation"
 ALL_MODELS = {
     "ridge",
+    LINEAR_EXTRAPOLATION_MODEL,
     *SUPERVISED_MODELS,
     *FOUNDATION_MODELS,
 }
@@ -179,6 +182,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--d_model", type=int, default=256)
     parser.add_argument("--n_heads", type=int, default=8)
     parser.add_argument("--ridge_alpha", type=float, default=1.0)
+    parser.add_argument(
+        "--linear-fit-window",
+        "--linear_fit_window",
+        dest="linear_fit_window",
+        type=int,
+        default=32,
+        help="Number of recent context steps used by the linear-extrapolation baseline.",
+    )
+    parser.add_argument(
+        "--linear-angle-projection",
+        "--linear_angle_projection",
+        dest="linear_angle_projection",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Project orbital sin/cos predictions onto the unit circle (default: enabled).",
+    )
     parser.add_argument(
         "--num_eval_windows",
         type=int,
@@ -310,6 +329,8 @@ def main() -> None:
     args = build_arg_parser().parse_args()
     if args.rolling_blocks <= 0:
         raise ValueError(f"--rolling-blocks must be positive, got {args.rolling_blocks}.")
+    if args.linear_fit_window <= 0:
+        raise ValueError(f"--linear-fit-window must be positive, got {args.linear_fit_window}.")
     if args.run_rolling and args.pred_len <= 0:
         raise ValueError("--pred-len must be positive when running rolling evaluation.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -449,7 +470,39 @@ def main() -> None:
     }
 
     forecast_fn: Callable[[np.ndarray], np.ndarray]
-    if args.model == "ridge":
+    if args.model == LINEAR_EXTRAPOLATION_MODEL:
+        print(
+            f"[task_e] evaluating linear extrapolation baseline with fit_window={args.linear_fit_window} "
+            f"angle_projection={args.linear_angle_projection}",
+            flush=True,
+        )
+        val_pred, val_target, _, val_trajectory_ids, _ = predict_linear_extrapolation(
+            loaders["val"],
+            args.pred_len,
+            args.linear_fit_window,
+            prepared.scaler,
+            feature_names,
+            args.linear_angle_projection,
+            return_metadata=True,
+        )
+        test_pred, test_target, sample_context, test_trajectory_ids, _ = predict_linear_extrapolation(
+            loaders["test"],
+            args.pred_len,
+            args.linear_fit_window,
+            prepared.scaler,
+            feature_names,
+            args.linear_angle_projection,
+            return_metadata=True,
+        )
+        forecast_fn = lambda context: forecast_linear_extrapolation_batch(
+            context,
+            args.pred_len,
+            scaler=prepared.scaler,
+            feature_names=feature_names,
+            fit_window=args.linear_fit_window,
+            project_angle_pairs=args.linear_angle_projection,
+        )
+    elif args.model == "ridge":
         print("[task_e] materializing train windows for ridge", flush=True)
         ridge = Ridge(alpha=args.ridge_alpha)
         train_context, train_target = materialize_dataset(loaders["train"])
@@ -1110,6 +1163,46 @@ def forecast_model_batch(
     if not np.isfinite(prediction).all():
         raise ValueError("Supervised model produced non-finite predictions.")
     return prediction
+
+
+def predict_linear_extrapolation(
+    loader: DataLoader,
+    pred_len: int,
+    fit_window: int,
+    scaler: Any,
+    feature_names: list[str],
+    project_angle_pairs: bool,
+    *,
+    return_metadata: bool = False,
+) -> tuple[Any, ...]:
+    predictions, targets, contexts = [], [], []
+    trajectory_ids, starts = [], []
+    for batch in loader:
+        context = batch["context"].numpy()
+        predictions.append(
+            forecast_linear_extrapolation_batch(
+                context,
+                pred_len,
+                scaler=scaler,
+                feature_names=feature_names,
+                fit_window=fit_window,
+                project_angle_pairs=project_angle_pairs,
+            )
+        )
+        targets.append(batch["target"].numpy())
+        contexts.append(context)
+        if return_metadata:
+            if "trajectory_index" not in batch or "start" not in batch:
+                raise ValueError("Evaluation dataset does not provide trajectory/start metadata.")
+            trajectory_ids.append(batch["trajectory_index"].numpy())
+            starts.append(batch["start"].numpy())
+    return concatenate_predictions(
+        predictions,
+        targets,
+        contexts,
+        trajectory_ids=trajectory_ids if return_metadata else None,
+        starts=starts if return_metadata else None,
+    )
 
 
 def forecast_foundation_batch(
