@@ -2376,7 +2376,12 @@ conda run -n stellar python scripts/evaluate_task_ab_future_only_ablation.py
 ```
 
 输出目录为 `results/task_ab_future_only_ablation/`；该命令同样只读取已保存预测并
-执行 system-level 过滤、指标计算和 paired bootstrap。
+执行过滤与指标计算。System-level 输出保留完整 32-variation system，并提供 paired
+bootstrap；trajectory-level 输出只保留在指定 cutoff 后仍 bound 的轨迹，使用
+stable-positive Accuracy/F1/AUROC/AUPRC。`T>2560` cohort 会在完全相同的 10,189 条
+轨迹上比较 prefix 96 和 prefix 512。对应文件为
+`trajectory_at_risk_metrics.csv`、`trajectory_at_risk_table.md` 和
+`trajectory_at_risk_table.tex`。
 
 Group fraction / set-attention 版本：
 

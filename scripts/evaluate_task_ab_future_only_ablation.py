@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare Task A and Task B after removing systems unbound inside prefixes."""
+"""Evaluate system- and trajectory-level at-risk prefix ablations."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import accuracy_score, average_precision_score, f1_score, roc_auc_score
 
 
 ABC_PREDICTIONS = Path("results/abc_common_target_h10000_prefix96/system_predictions.csv")
@@ -18,6 +19,12 @@ FINAL_HORIZON = 10000.0
 TIME_PER_STEP = 5.0
 BOOTSTRAP_SAMPLES = 10000
 SEED = 42
+
+TRAJECTORY_MODELS = (
+    ("Panda frozen encoder", "Linear probe", "panda_prefix{prefix}_linear"),
+    ("Chronos-2 frozen encoder", "Linear probe", "chronos2_prefix{prefix}_linear"),
+    ("Dynamical summaries", "XGBoost", "physics_summary_xgb_prefix{prefix}"),
+)
 
 
 def regression_metrics(target: np.ndarray, prediction: np.ndarray) -> dict[str, float]:
@@ -104,6 +111,110 @@ def paired_bootstrap(
         output[f"delta_{name}_ci_high"] = float(np.percentile(draws, 97.5))
         output[f"probability_right_improves_{name}"] = float(np.mean(draws < 0.0))
     return output
+
+
+def load_trajectory_predictions(prefix: int, directory_pattern: str) -> pd.DataFrame:
+    path = TASK_B_ROOT / directory_pattern.format(prefix=prefix) / "predictions_all.csv"
+    frame = pd.read_csv(path)
+    required = {"index", "split", "time_unbound", "target_unbound", "prob_stable"}
+    if not required.issubset(frame.columns):
+        raise ValueError(f"Missing columns in {path}: {sorted(required - set(frame.columns))}")
+    frame = frame[frame["split"] == "test"].copy()
+    frame = frame.sort_values("index").reset_index(drop=True)
+    expected_unbound = frame["time_unbound"].to_numpy(dtype=np.float64) < FINAL_HORIZON
+    if not np.array_equal(frame["target_unbound"].to_numpy(dtype=bool), expected_unbound):
+        raise ValueError(f"Inconsistent target_unbound values in {path}.")
+    if len(frame) != 750 * GROUP_SIZE or frame["index"].nunique() != len(frame):
+        raise ValueError(f"Expected 24,000 unique test trajectories in {path}, got {len(frame)}.")
+    return frame[["index", "time_unbound", "prob_stable"]]
+
+
+def trajectory_classification_metrics(frame: pd.DataFrame) -> dict[str, float | int]:
+    target = (frame["time_unbound"].to_numpy(dtype=np.float64) >= FINAL_HORIZON).astype(np.int64)
+    probability = frame["prob_stable"].to_numpy(dtype=np.float64)
+    prediction = probability >= 0.5
+    return {
+        "n_trajectories": int(len(frame)),
+        "stable_fraction": float(target.mean()),
+        "accuracy": float(accuracy_score(target, prediction)),
+        "f1_stable": float(f1_score(target, prediction, zero_division=0)),
+        "auroc_stable": float(roc_auc_score(target, probability)),
+        "auprc_stable": float(average_precision_score(target, probability)),
+    }
+
+
+def build_trajectory_at_risk_table() -> pd.DataFrame:
+    """Evaluate native and matched at-risk cohorts using stable-positive metrics."""
+    specs = ((480.0, (96,)), (2560.0, (96, 512)))
+    rows: list[dict[str, object]] = []
+    cohort_identities: dict[float, np.ndarray] = {}
+    cohort_targets: dict[float, np.ndarray] = {}
+    for cutoff, prefixes in specs:
+        for prefix in prefixes:
+            for representation, model, directory_pattern in TRAJECTORY_MODELS:
+                frame = load_trajectory_predictions(prefix, directory_pattern)
+                # Strictly exclude events at the prefix endpoint because that
+                # state is already visible in the observed prefix.
+                subset = frame[frame["time_unbound"] > cutoff].copy()
+                identities = subset["index"].to_numpy(dtype=np.int64)
+                targets = (subset["time_unbound"].to_numpy(dtype=np.float64) >= FINAL_HORIZON).astype(np.int64)
+                if cutoff in cohort_identities:
+                    if not np.array_equal(identities, cohort_identities[cutoff]):
+                        raise ValueError(f"At-risk cohort T>{cutoff:g} is not aligned across models/prefixes.")
+                    if not np.array_equal(targets, cohort_targets[cutoff]):
+                        raise ValueError(f"At-risk targets T>{cutoff:g} are not aligned across models/prefixes.")
+                else:
+                    cohort_identities[cutoff] = identities
+                    cohort_targets[cutoff] = targets
+                rows.append(
+                    {
+                        "at_risk_cohort": f"T>{cutoff:g}",
+                        "at_risk_time": cutoff,
+                        "prefix": prefix,
+                        "representation": representation,
+                        "model": model,
+                        **trajectory_classification_metrics(subset),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def write_trajectory_tables(metrics: pd.DataFrame) -> None:
+    markdown_lines = [
+        "| At-risk cohort | Prefix | Representation | Model | Trajectories | Stable % | Accuracy | F1 | AUROC | AUPRC |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in metrics.itertuples(index=False):
+        markdown_lines.append(
+            f"| ${row.at_risk_cohort}$ | {row.prefix} | {row.representation} | {row.model} | "
+            f"{row.n_trajectories:,} | {100.0 * row.stable_fraction:.2f} | {row.accuracy:.5f} | "
+            f"{row.f1_stable:.5f} | {row.auroc_stable:.5f} | {row.auprc_stable:.5f} |"
+        )
+    (OUTPUT / "trajectory_at_risk_table.md").write_text("\n".join(markdown_lines) + "\n")
+
+    latex_lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\caption{At-risk trajectory-level stability classification. Evaluation is restricted to trajectories that remain bound through the specified at-risk time. The $T>2560$ cohort enables a matched comparison between 96- and 512-step prefixes on exactly the same trajectories.}",
+        r"\label{tab:trajectory_at_risk}",
+        r"\small",
+        r"\begin{tabular}{ccllrrrrrr}",
+        r"\toprule",
+        r"At-risk cohort & Prefix & Representation & Model & Traj. & Stable \% & Acc. & F1 & AUROC & AUPRC \\",
+        r"\midrule",
+    ]
+    previous_cohort = None
+    for row in metrics.itertuples(index=False):
+        if previous_cohort is not None and row.at_risk_cohort != previous_cohort:
+            latex_lines.append(r"\midrule")
+        latex_lines.append(
+            f"${row.at_risk_cohort}$ & {row.prefix} & {row.representation} & {row.model} & "
+            f"{row.n_trajectories:,} & {100.0 * row.stable_fraction:.2f} & {row.accuracy:.5f} & "
+            f"{row.f1_stable:.5f} & {row.auroc_stable:.5f} & {row.auprc_stable:.5f} \\\\"
+        )
+        previous_cohort = row.at_risk_cohort
+    latex_lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
+    (OUTPUT / "trajectory_at_risk_table.tex").write_text("\n".join(latex_lines) + "\n")
 
 
 def main() -> None:
@@ -199,6 +310,9 @@ def main() -> None:
     pd.DataFrame(comparison_rows).to_csv(OUTPUT / "paired_comparisons.csv", index=False)
     for cohort, subset in cohort_frames.items():
         subset.to_csv(OUTPUT / f"{cohort}_system_predictions.csv", index=False)
+    trajectory_metrics = build_trajectory_at_risk_table()
+    trajectory_metrics.to_csv(OUTPUT / "trajectory_at_risk_metrics.csv", index=False)
+    write_trajectory_tables(trajectory_metrics)
     protocol = {
         "final_target": "mean_j 1[time_unbound_ij >= 10000] over 32 variations",
         "already_unbound_system_definition": "min_j time_unbound_ij < prefix_steps * 5",
@@ -208,11 +322,20 @@ def main() -> None:
             "task_b": "dynamical-summary XGBoost, independently applied to each trajectory then averaged",
         },
         "bootstrap": {"unit": "system", "samples": BOOTSTRAP_SAMPLES, "seed_base": SEED},
+        "trajectory_at_risk": {
+            "eligibility": "time_unbound > at_risk_time (strict; endpoint events are excluded)",
+            "cohorts": {"T>480": [96], "T>2560": [96, 512]},
+            "target": "stable-positive: 1[time_unbound >= 10000]",
+            "threshold": 0.5,
+            "matched_cohort": "All T>2560 rows use exactly the same trajectory indices and targets.",
+        },
     }
     (OUTPUT / "protocol.json").write_text(json.dumps(protocol, indent=2) + "\n")
     print(pd.DataFrame(metric_rows).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
     print("\nPaired comparisons (right minus left):")
     print(pd.DataFrame(comparison_rows).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+    print("\nTrajectory-level at-risk classification:")
+    print(trajectory_metrics.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
     print(f"\nSaved ablation to {OUTPUT}")
 
 

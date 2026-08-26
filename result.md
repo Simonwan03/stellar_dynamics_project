@@ -94,23 +94,11 @@ encoder is uniformly superior at the default probability threshold of 0.5.
 
 The overall metrics include trajectories that have already become unbound within the
 observed prefix: 9,776 test trajectories at prefix=96 and 13,807 at prefix=512. Both
-encoders detect virtually all of these cases. To isolate genuine forward prediction, the
-following table evaluates only trajectories that are still bound at the end of the prefix.
+encoders detect virtually all of these cases. Genuine forward prediction is evaluated
+separately in the trajectory-level at-risk ablation below, including a matched
+`T>2560` cohort that compares 96- and 512-step inputs on exactly the same trajectories.
 
-| Prefix | Encoder | Future-only AUROC | Balanced accuracy | AUPRC |
-| ---: | --- | ---: | ---: | ---: |
-| 96 | Panda | 0.8721 | **0.7614** | 0.8354 |
-| 96 | Chronos-2 | **0.8853** | 0.7565 | **0.8471** |
-| 512 | Panda | **0.8789** | **0.6952** | **0.6495** |
-| 512 | Chronos-2 | 0.8782 | 0.6758 | 0.6490 |
-
-The future-only AUROC is approximately 0.87--0.89, materially below the headline AUROC
-because already-unbound trajectories are easy to identify from the observed state. At
-prefix=512, the future-only positive rate is 24.8%, so balanced accuracy and AUPRC are
-more informative than raw accuracy. These experiments currently use one random seed;
-small encoder differences should therefore not be presented as statistically conclusive.
-
-Sources: [Panda prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix96_linear/metrics.json), [Chronos-2 prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix96_linear/metrics.json), [Panda prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix512_linear/metrics.json), and [Chronos-2 prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix512_linear/metrics.json). The future-only table is recomputed from the corresponding `predictions_all.csv` files after excluding trajectories with `time_unbound < prefix_steps * 5`.
+Sources: [Panda prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix96_linear/metrics.json), [Chronos-2 prefix=96 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix96_linear/metrics.json), [Panda prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/panda_prefix512_linear/metrics.json), and [Chronos-2 prefix=512 metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/chronos2_prefix512_linear/metrics.json).
 
 ### Complete common-split comparison: encoder, physics, and raw-sequence baselines
 
@@ -192,26 +180,43 @@ results are available in
 is reproduced by
 [evaluate_task_ab_future_only_ablation.py](scripts/evaluate_task_ab_future_only_ablation.py).
 
-#### Future-only test metrics
+#### At-risk trajectory-level ablation
 
-Only trajectories still bound when the prefix ends are retained (`time_unbound >=
-prefix_steps * 5`). `N` is 14,224 for prefix=96 and 10,193 for prefix=512. Metrics use
-the unbound-positive target and the default probability threshold of 0.5.
+This ablation asks whether high prefix-based classification performance is explained
+only by trajectories whose instability is already visible in the input. For an at-risk
+time `t_P`, it retains only trajectories with `time_unbound > t_P` and predicts whether
+they remain stable through `H=10000`. The strict inequality excludes trajectories that
+become unbound exactly at the observed endpoint. Metrics use the stable-positive target
+and a fixed probability threshold of 0.5. `Stable %` reports the positive prevalence.
 
-| Prefix | Representation | Model | N | Future-only AUROC | Balanced accuracy | AUPRC |
-| ---: | --- | --- | ---: | ---: | ---: | ---: |
-| 96 | Panda frozen encoder | Linear probe | 14,224 | 0.87214 | 0.76135 | 0.83540 |
-| 96 | Chronos-2 frozen encoder | Linear probe | 14,224 | 0.88533 | 0.75648 | **0.84709** |
-| 96 | Physics summary | XGBoost | 14,224 | **0.91268** | **0.83188** | **0.88737** |
-| 96 | Raw `orbital15` | SVM | 14,224 | 0.66870 | 0.62452 | 0.61321 |
-| 96 | Raw `orbital15` | CNN | 14,224 | 0.74615 | 0.66670 | 0.71170 |
-| 96 | Raw `orbital15` | TCN | 14,224 | 0.75901 | 0.68928 | 0.73999 |
-| 512 | Panda frozen encoder | Linear probe | 10,193 | 0.87887 | 0.69519 | 0.64948 |
-| 512 | Chronos-2 frozen encoder | Linear probe | 10,193 | 0.87825 | 0.67583 | 0.64904 |
-| 512 | Physics summary | XGBoost | 10,193 | **0.90414** | **0.77828** | **0.74362** |
-| 512 | Raw `orbital15` | SVM | 10,193 | 0.60746 | 0.57917 | 0.32109 |
-| 512 | Raw `orbital15` | CNN | 10,193 | 0.71575 | 0.64920 | 0.47488 |
-| 512 | Raw `orbital15` | TCN | 10,193 | 0.76583 | 0.67489 | 0.52768 |
+| At-risk cohort | Prefix | Representation | Model | Trajectories | Stable % | Accuracy | Stable F1 | AUROC | AUPRC |
+| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `T>480` | 96 | Panda frozen encoder | Linear probe | 14,192 | 54.04 | 0.77086 | 0.80748 | 0.87160 | 0.89231 |
+| `T>480` | 96 | Chronos-2 frozen encoder | Linear probe | 14,192 | 54.04 | 0.76719 | 0.80672 | 0.88484 | 0.90879 |
+| `T>480` | 96 | Dynamical summaries | XGBoost | 14,192 | 54.04 | **0.83089** | **0.84043** | **0.91228** | **0.93203** |
+| `T>2560` | 96 | Panda frozen encoder | Linear probe | 10,189 | 75.27 | 0.78771 | 0.86313 | 0.81720 | 0.93007 |
+| `T>2560` | 96 | Chronos-2 frozen encoder | Linear probe | 10,189 | 75.27 | 0.78850 | **0.86485** | 0.83414 | 0.93978 |
+| `T>2560` | 96 | Dynamical summaries | XGBoost | 10,189 | 75.27 | **0.79988** | 0.86109 | **0.86554** | **0.95371** |
+| `T>2560` | 512 | Panda frozen encoder | Linear probe | 10,189 | 75.27 | 0.81804 | 0.88592 | 0.87872 | 0.95782 |
+| `T>2560` | 512 | Chronos-2 frozen encoder | Linear probe | 10,189 | 75.27 | 0.81470 | 0.88541 | 0.87807 | 0.95728 |
+| `T>2560` | 512 | Dynamical summaries | XGBoost | 10,189 | 75.27 | **0.84208** | **0.89611** | **0.90400** | **0.96739** |
+
+The `T>480` rows measure future-stability prediction from the native 96-step input.
+The `T>2560` rows form the stronger matched-cohort comparison: every prefix-96 and
+prefix-512 row contains exactly the same 10,189 trajectories and targets. Increasing
+the observed prefix from 96 to 512 steps improves AUROC from 0.81720 to 0.87872 for
+Panda, from 0.83414 to 0.87807 for Chronos-2, and from 0.86554 to 0.90400 for dynamical
+summaries. Thus the longer-prefix gains cannot be attributed solely to removing
+trajectories that have already become unstable. The full 12-model benchmark above is
+kept separate because this focused ablation is intended to test that methodological
+concern rather than provide another model ranking.
+
+Machine-readable results and ready-to-use tables are available as
+[CSV](results/task_ab_future_only_ablation/trajectory_at_risk_metrics.csv),
+[Markdown](results/task_ab_future_only_ablation/trajectory_at_risk_table.md), and
+[LaTeX](results/task_ab_future_only_ablation/trajectory_at_risk_table.tex). The analysis
+is reproduced by
+[evaluate_task_ab_future_only_ablation.py](scripts/evaluate_task_ab_future_only_ablation.py).
 
 The two-level machine-readable aggregation is
 [task_b_two_level_metrics.csv](results/task_b_common/two_level_evaluation/task_b_two_level_metrics.csv),

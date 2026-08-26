@@ -13,5 +13,20 @@
     "unit": "system",
     "samples": 10000,
     "seed_base": 42
+  },
+  "trajectory_at_risk": {
+    "eligibility": "time_unbound > at_risk_time (strict; endpoint events are excluded)",
+    "cohorts": {
+      "T>480": [
+        96
+      ],
+      "T>2560": [
+        96,
+        512
+      ]
+    },
+    "target": "stable-positive: 1[time_unbound >= 10000]",
+    "threshold": 0.5,
+    "matched_cohort": "All T>2560 rows use exactly the same trajectory indices and targets."
   }
 }

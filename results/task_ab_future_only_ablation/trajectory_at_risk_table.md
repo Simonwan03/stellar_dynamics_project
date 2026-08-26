@@ -1,0 +1,11 @@
+| At-risk cohort | Prefix | Representation | Model | Trajectories | Stable % | Accuracy | F1 | AUROC | AUPRC |
+| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| $T>480$ | 96 | Panda frozen encoder | Linear probe | 14,192 | 54.04 | 0.77086 | 0.80748 | 0.87160 | 0.89231 |
+| $T>480$ | 96 | Chronos-2 frozen encoder | Linear probe | 14,192 | 54.04 | 0.76719 | 0.80672 | 0.88484 | 0.90879 |
+| $T>480$ | 96 | Dynamical summaries | XGBoost | 14,192 | 54.04 | 0.83089 | 0.84043 | 0.91228 | 0.93203 |
+| $T>2560$ | 96 | Panda frozen encoder | Linear probe | 10,189 | 75.27 | 0.78771 | 0.86313 | 0.81720 | 0.93007 |
+| $T>2560$ | 96 | Chronos-2 frozen encoder | Linear probe | 10,189 | 75.27 | 0.78850 | 0.86485 | 0.83414 | 0.93978 |
+| $T>2560$ | 96 | Dynamical summaries | XGBoost | 10,189 | 75.27 | 0.79988 | 0.86109 | 0.86554 | 0.95371 |
+| $T>2560$ | 512 | Panda frozen encoder | Linear probe | 10,189 | 75.27 | 0.81804 | 0.88592 | 0.87872 | 0.95782 |
+| $T>2560$ | 512 | Chronos-2 frozen encoder | Linear probe | 10,189 | 75.27 | 0.81470 | 0.88541 | 0.87807 | 0.95728 |
+| $T>2560$ | 512 | Dynamical summaries | XGBoost | 10,189 | 75.27 | 0.84208 | 0.89611 | 0.90400 | 0.96739 |
