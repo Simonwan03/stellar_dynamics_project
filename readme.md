@@ -241,20 +241,54 @@ python scripts/create_common_case_split.py \
 
 **模型族**
 
-- `binary_any`：`equation2`、`mlp`、`xgboost`
-- `stable_fraction`：`mlp`、`xgboost`
+- `binary_any`：`equation2`、`equation4`、`pretrained_mlp`、`mlp`、`xgboost`
+- `stable_fraction`：`equation2`、`equation4`、`pretrained_mlp`、`mlp`、`xgboost`
 
 其中 `equation2` 直接使用原始初始条件中的半长轴比、外轨偏心率、质量和轨道
 角动量方向，按 Equation (2) 计算每条 variation 的稳定性；system 只有在 32 条
 variation 的 Equation (2) margin 都为正时才预测为 stable。它不训练参数，但仍在
 公共 manifest 的 train/val/test system 上分别报告指标，test 结果可与 MLP 和
-XGBoost 直接比较。
+XGBoost 直接比较。在 `stable_fraction` 模式下，Equation (2) 使用 32 条 variation
+中物理判据为 stable 的比例作为预测值。
+
+`equation4` 实现 Vynatheya et al. (2022) 的 Equations (3)-(4)。它在 MA01
+基础上加入内轨偏心率和非线性互倾角修正，并使用
+`log(Y_tilde / Y_tilde_crit)` 作为 margin。LK 最大偏心率公式在经典 LK 窗口外
+根号项为负时裁剪到 `0`，表示不施加 LK 偏心率修正。`binary_any` 仍要求所有
+variation margin 为正；`stable_fraction` 则使用 32 条 variation 中物理判据为 stable
+的比例。两个物理判据均直接读取原始 `aratios`、`eccs`、`masses` 和 `h_uvecs`，
+不使用训练标签调参。
+
+`pretrained_mlp` 使用 Vynatheya et al. 官方 `triple-stability` 仓库中、与 2022
+论文半长轴变化标签对应的 `mlp_model_trip_v1.2.2.pkl`。模型包含 6 个、每层 50 个
+logistic units 的隐藏层。官方输入顺序为
+`[q_in, q_out, a_in/a_out, e_in, e_out, i_mut/pi]`，class `1` 表示 unstable。
+Task A 的 `binary_any` score 取 32 条 variation 的最小 stable probability，并保留
+官方固定阈值 `0.5`，同时报告一个与本地模型一致、只用 validation F1 选择阈值的
+operating point；`stable_fraction` 取 32 条 stable probability 的均值。权重是
+pickle 文件，因此代码会在反序列化前强制校验官方 SHA-256。该外部权重不纳入 Git，
+使用前下载：
+
+```bash
+mkdir -p external_checkpoints/triple_stability
+curl -L \
+  https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_v1.2.2.pkl \
+  -o external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl
+sha256sum external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl
+```
+
+预期 SHA-256 为
+`f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436`。
+这个模型由 scikit-learn `1.2.2` 保存；当前 `1.8.0` 环境可以推理，版本差异会记录在
+`pretrained_mlp_metadata.json`。
 
 `stable_fraction` 是连续值回归；`binary_any` 是 system-level 的 0/1 分类。
 在 `binary_any` 模式下，MLP 默认使用 `BCEWithLogitsLoss`，XGBoost 使用
 `binary:logistic`，并报告 accuracy、precision、recall、F1、AUROC 和 AUPRC。
 MLP 和 XGBoost 的二分类阈值默认只在 validation set 上选择 F1 最大值，再固定到
-test set；Equation (2) 保持其物理判据 `margin > 0`，不使用标签调阈值。
+test set；Equation (2) 和 Equation (4) 保持各自的物理判据 `margin > 0`，官方
+pretrained MLP 同时报告上游 `0.5` 阈值和 validation-F1 阈值；只有后一个 operating
+point 使用本地 validation 标签，模型权重始终冻结。
 此外，`metrics.json` 还会保存 balanced accuracy、specificity、FPR/FNR、MCC、
 混淆矩阵（TN/FP/FN/TP）、Brier score、log loss，以及 10-bin 的 ECE/MCE，
 便于同时检查类别不平衡、阈值表现和概率校准。`stable_fraction` 回归会额外报告
@@ -299,7 +333,7 @@ conda run -n stellar python -m tasks.task_a \
   --group-size 32 \
   --time-horizon 10000 \
   --target-mode binary_any \
-  --models equation2,mlp,xgboost \
+  --models equation2,equation4,pretrained_mlp,mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
   --train-ratio 0.70 \
@@ -315,16 +349,29 @@ conda run -n stellar python -m tasks.task_a \
 `--time-horizon` 可以直接改成其他判定时刻，例如 `5000`；当前
 `completed_systems_sampling_2.txt` 的 `time_unbound` 最大值是 `10000`，因此不要设置超过
 `10000` 的 horizon。
-二分类输出会保存 `metrics.json`、Equation (2) 的 system 预测、MLP/XGBoost
+二分类输出会保存 `metrics.json`、Equation (2)/(4) 的 system 预测、MLP/XGBoost
 模型文件、测试集预测以及 MLP 的 ROC/PR 曲线。
 
-本次公共切分重跑的 test 结果保存在 `results/task_a_common/binary/metrics.json`：
+本次公共切分下的 test 结果如下；原有模型保存在
+`results/task_a_common/binary/metrics.json`，Equation (4) 保存在下述独立目录：
 
 | Method | Accuracy | F1 | AUROC | AUPRC |
 | --- | ---: | ---: | ---: | ---: |
 | Equation (2) | 0.6187 | 0.4414 | 0.7529 | 0.2810 |
-| MLP-base | 0.7507 | 0.4905 | 0.8416 | **0.5139** |
-| XGBoost-base | **0.8053** | **0.5350** | **0.8525** | 0.5089 |
+| Equation (4) | 0.6600 | 0.4540 | 0.7536 | 0.2887 |
+| Official pretrained MLP（固定 0.5） | 0.6453 | 0.4701 | **0.9124** | **0.6934** |
+| Official pretrained MLP（val 阈值 0.8232） | 0.7933 | **0.5658** | **0.9124** | **0.6934** |
+| MLP-base | 0.7507 | 0.4905 | 0.8416 | 0.5139 |
+| XGBoost-base | **0.8053** | 0.5350 | 0.8525 | 0.5089 |
+
+Equation (4) 和 pretrained MLP 的独立完整运行产物分别位于
+`results/task_a_common/equation4_binary/` 和
+`results/task_a_common/pretrained_mlp_binary/`。pretrained MLP 在固定官方阈值下
+偏向预测 stable，accuracy 不高，但 AUROC/AUPRC 显著领先，说明跨数据集排序能力强而
+阈值校准不匹配；只调整 validation operating point 后，test F1 提升到 0.5658，
+超过本地 MLP/XGBoost。论文原始标签要求存活 100 个外轨周期且
+半长轴变化不超过 10%，本仓库标签仅依据 `time_unbound >= time_horizon`，因此这里是
+同一物理判据在 Task A 标签上的迁移评估，不是对论文 93% accuracy 的复现。
 
 运行 stable-fraction 回归版本：
 
@@ -335,7 +382,7 @@ conda run -n stellar python -m tasks.task_a \
   --group-size 32 \
   --time-horizon 10000 \
   --target-mode stable_fraction \
-  --models mlp,xgboost \
+  --models equation2,equation4,pretrained_mlp,mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
   --train-ratio 0.70 \
@@ -348,13 +395,21 @@ conda run -n stellar python -m tasks.task_a \
   --output-dir results/task_a_common/stable_fraction
 ```
 
-本次 stable-fraction 公共切分重跑的 test 结果保存在
-`results/task_a_common/stable_fraction/metrics.json`：
+本次 stable-fraction 公共切分下的 test 结果如下；原有模型保存在
+`results/task_a_common/stable_fraction/metrics.json`，Equation (4) 保存在下述独立目录：
 
 | Method | MSE | RMSE | MAE | R² |
 | --- | ---: | ---: | ---: | ---: |
+| Equation (2) | 0.2488 | 0.4988 | 0.3073 | -0.5653 |
+| Equation (4) | 0.2268 | 0.4763 | 0.2853 | -0.4269 |
+| Official pretrained MLP | 0.1294 | 0.3597 | 0.2397 | 0.1859 |
 | MLP-base | 0.0901 | 0.3001 | **0.2247** | 0.4335 |
 | XGBoost-base | **0.0884** | **0.2972** | 0.2330 | **0.4442** |
+
+两个解析判据 stable-fraction 的独立完整运行产物分别位于
+`results/task_a_common/equation2_stable_fraction/` 和
+`results/task_a_common/equation4_stable_fraction/`；pretrained MLP 结果位于
+`results/task_a_common/pretrained_mlp_stable_fraction/`。
 
 ### Task B: Prefix-Based Instability Prediction
 

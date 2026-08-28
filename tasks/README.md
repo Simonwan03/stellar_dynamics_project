@@ -41,7 +41,7 @@ variation is unbound before that time, the label is `0`.
 ```bash
 conda run -n stellar python -m tasks.task_a \
   --output-dir results/task_a \
-  --models mlp,xgboost \
+  --models equation2,equation4,mlp,xgboost \
   --epochs 80
 ```
 
@@ -52,7 +52,7 @@ conda run -n stellar python -m tasks.task_a \
   --output-dir results/task_a_binary_any \
   --target-mode binary_any \
   --time-horizon 10000 \
-  --models mlp,xgboost \
+  --models equation2,equation4,mlp,xgboost \
   --epochs 50 \
   --device cuda
 ```
@@ -65,6 +65,31 @@ For `stable_fraction`, regression metrics additionally include median absolute
 error, explained variance, Pearson/Spearman correlation, bias, tolerance
 accuracies, target-bin breakdowns, and the MSE relative to the 32-trial
 binomial sampling-noise estimate.
+
+The non-trainable `equation2` baseline is the Mardling-Aarseth criterion;
+`equation4` implements Vynatheya et al. (2022), Equations (3)-(4), including
+the inner-eccentricity and nonlinear mutual-inclination corrections. For both
+criteria, `binary_any` requires all variation margins to be positive, while
+`stable_fraction` returns the fraction of variations classified stable.
+
+The optional `pretrained_mlp` baseline uses the official Vynatheya et al. 2022
+`mlp_model_trip_v1.2.2.pkl`. It takes
+`[q_in,q_out,a_in/a_out,e_in,e_out,i_mut/pi]`; class 1 is unstable. For
+`binary_any`, Task A uses the minimum stable probability across variations at
+the upstream threshold 0.5 and also reports a validation-F1 operating point
+without changing model weights. For `stable_fraction`, it averages stable
+probabilities. Download the external artifact before selecting this model:
+
+```bash
+mkdir -p external_checkpoints/triple_stability
+curl -L \
+  https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_v1.2.2.pkl \
+  -o external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl
+```
+
+The adapter verifies SHA-256
+`f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436`
+before loading the pickle. The artifact is intentionally not tracked by Git.
 
 MLP presets:
 - `--mlp-size small`: hidden `(64,64,32)`, dropout `0.1`

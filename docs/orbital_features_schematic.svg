@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Orbital features in a hierarchical triple system</title>
+  <desc id="desc">A schematic showing inner and outer orbits, masses, eccentricities, inclinations, arguments of periapsis, longitudes of ascending nodes, and their input-channel encodings.</desc>
+
+  <defs>
+    <marker id="arrow-dark" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/>
+    </marker>
+    <style>
+      .title { font: 700 29px Arial, Helvetica, sans-serif; fill: #172033; }
+      .panel-title { font: 700 20px Arial, Helvetica, sans-serif; fill: #172033; }
+      .subtitle { font: 400 14px Arial, Helvetica, sans-serif; fill: #64748b; }
+      .label { font: 600 15px Arial, Helvetica, sans-serif; fill: #334155; }
+      .small { font: 400 13px Arial, Helvetica, sans-serif; fill: #64748b; }
+      .tiny { font: 400 11px Arial, Helvetica, sans-serif; fill: #64748b; }
+      .formula { font: 600 16px Arial, Helvetica, sans-serif; fill: #1e293b; }
+      .group { font: 700 17px "Courier New", monospace; fill: #172033; }
+      .body-label { font: 700 15px Arial, Helvetica, sans-serif; fill: #172033; }
+      .axis { stroke: #64748b; stroke-width: 1.8; }
+      .dash { stroke-dasharray: 7 6; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#f7f9fc"/>
+  <text x="55" y="49" class="title">Orbital features in a hierarchical triple system</text>
+  <text x="55" y="72" class="subtitle">A visual map from physical orbital quantities to the input representation</text>
+
+  <!-- Left: physical picture -->
+  <rect x="35" y="94" width="920" height="866" rx="22" fill="#ffffff" stroke="#dbe3ee" stroke-width="2"/>
+  <text x="68" y="132" class="panel-title">A. Physical picture</text>
+  <text x="68" y="156" class="subtitle">The outer body orbits the inner-binary barycenter (Jacobi picture).</text>
+
+  <line x1="694" y1="125" x2="738" y2="125" stroke="#2563eb" stroke-width="4"/>
+  <text x="748" y="130" class="small">inner orbit</text>
+  <line x1="694" y1="151" x2="738" y2="151" stroke="#ea580c" stroke-width="4"/>
+  <text x="748" y="156" class="small">outer orbit</text>
+
+  <!-- Reference plane, shown as a floor in perspective -->
+  <polygon points="105,555 566,458 847,543 386,649" fill="#eef2f7" stroke="#a8b4c5" stroke-width="1.5" stroke-dasharray="8 7"/>
+  <text x="657" y="594" class="small">reference plane (x-y)</text>
+
+  <!-- Projected orbital planes -->
+  <polygon points="153,346 630,285 820,373 343,474" fill="#fff1e8" opacity="0.42" stroke="#f59e0b" stroke-width="1.3" stroke-dasharray="7 6"/>
+  <polygon points="319,364 535,337 630,380 414,415" fill="#eaf2ff" opacity="0.62" stroke="#60a5fa" stroke-width="1.3" stroke-dasharray="6 5"/>
+
+  <!-- Outer and inner projected orbits -->
+  <ellipse cx="476" cy="421" rx="318" ry="151" transform="rotate(-16 476 421)" fill="none" stroke="#ea580c" stroke-width="4"/>
+  <ellipse cx="476" cy="421" rx="140" ry="76" transform="rotate(23 476 421)" fill="none" stroke="#2563eb" stroke-width="4"/>
+
+  <!-- Periapsis markers -->
+  <circle cx="178" cy="507" r="7" fill="#ffffff" stroke="#ea580c" stroke-width="3"/>
+  <text x="113" y="535" class="label" fill="#c2410c">P_out</text>
+  <line x1="145" y1="520" x2="174" y2="509" stroke="#ea580c" stroke-width="1.5"/>
+  <circle cx="347" cy="482" r="6" fill="#ffffff" stroke="#2563eb" stroke-width="3"/>
+  <text x="286" y="516" class="label" fill="#1d4ed8">P_in</text>
+  <line x1="325" y1="501" x2="344" y2="485" stroke="#2563eb" stroke-width="1.5"/>
+
+  <!-- Indicative semi-major-axis directions -->
+  <line x1="476" y1="421" x2="765" y2="337" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arrow-orange)"/>
+  <text x="624" y="355" class="label" fill="#c2410c">a_out</text>
+  <line x1="476" y1="421" x2="608" y2="365" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arrow-blue)"/>
+  <text x="555" y="380" class="label" fill="#1d4ed8">a_in</text>
+
+  <!-- Bodies and barycenter -->
+  <line x1="376" y1="401" x2="476" y2="421" stroke="#64748b" stroke-width="1.3" stroke-dasharray="4 4"/>
+  <line x1="554" y1="462" x2="476" y2="421" stroke="#64748b" stroke-width="1.3" stroke-dasharray="4 4"/>
+  <circle cx="376" cy="401" r="17" fill="#60a5fa" stroke="#1d4ed8" stroke-width="3"/>
+  <circle cx="554" cy="462" r="12" fill="#93c5fd" stroke="#1d4ed8" stroke-width="3"/>
+  <text x="347" y="383" class="body-label">m1</text>
+  <text x="561" y="484" class="body-label">m2</text>
+  <circle cx="476" cy="421" r="6" fill="#172033"/>
+  <text x="490" y="416" class="body-label">B_in</text>
+  <text x="490" y="435" class="tiny">inner barycenter</text>
+
+  <circle cx="704" cy="341" r="18" fill="#fb923c" stroke="#c2410c" stroke-width="3"/>
+  <text x="730" y="337" class="body-label">m3</text>
+  <text x="730" y="356" class="tiny">outer body</text>
+
+  <!-- Physical quantity callouts -->
+  <rect x="92" y="666" width="826" height="263" rx="16" fill="#f8fafc" stroke="#dbe3ee"/>
+  <text x="117" y="696" class="panel-title" font-size="17">B. Geometry of the angular variables</text>
+  <text x="117" y="717" class="tiny">Use an oblique view: a flat 2-D view cannot show i, Omega and omega unambiguously.</text>
+
+  <!-- i: inclination -->
+  <text x="138" y="751" class="label">inclination i</text>
+  <line x1="132" y1="866" x2="327" y2="866" stroke="#64748b" stroke-width="2"/>
+  <text x="135" y="885" class="tiny">reference plane</text>
+  <line x1="177" y1="866" x2="278" y2="786" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="177" y1="866" x2="294" y2="827" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M 222 866 A 45 45 0 0 0 210 840" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <path d="M 245 866 A 68 68 0 0 0 238 844" fill="none" stroke="#ea580c" stroke-width="2"/>
+  <text x="197" y="845" class="tiny" fill="#1d4ed8">i_in</text>
+  <text x="251" y="847" class="tiny" fill="#c2410c">i_out</text>
+
+  <!-- Omega: longitude of ascending node -->
+  <text x="380" y="751" class="label">node longitude &#937;</text>
+  <circle cx="466" cy="866" r="3" fill="#172033"/>
+  <line x1="466" y1="866" x2="620" y2="866" stroke="#64748b" stroke-width="2" marker-end="url(#arrow-dark)"/>
+  <text x="551" y="884" class="tiny">reference x-axis</text>
+  <line x1="466" y1="866" x2="583" y2="787" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="466" y1="866" x2="598" y2="821" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M 510 866 A 44 44 0 0 0 503 836" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <path d="M 538 866 A 72 72 0 0 0 532 842" fill="none" stroke="#ea580c" stroke-width="2"/>
+  <text x="498" y="837" class="tiny" fill="#1d4ed8">&#937;_in</text>
+  <text x="548" y="846" class="tiny" fill="#c2410c">&#937;_out</text>
+
+  <!-- omega: argument of periapsis -->
+  <text x="676" y="751" class="label">periapsis angle &#969;</text>
+  <circle cx="732" cy="866" r="3" fill="#172033"/>
+  <line x1="732" y1="866" x2="862" y2="866" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="732" y1="866" x2="831" y2="787" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M 775 866 A 43 43 0 0 0 768 833" fill="none" stroke="#ea580c" stroke-width="2"/>
+  <text x="781" y="838" class="tiny" fill="#c2410c">&#969;_in/out</text>
+  <text x="699" y="886" class="tiny">from ascending node</text>
+  <text x="723" y="903" class="tiny">to periapsis, in its own plane</text>
+
+  <!-- Scale comparison -->
+  <text x="117" y="621" class="label">hierarchy / scale</text>
+  <line x1="117" y1="638" x2="249" y2="638" stroke="#2563eb" stroke-width="5" marker-start="url(#arrow-blue)" marker-end="url(#arrow-blue)"/>
+  <text x="165" y="657" class="small">a_in</text>
+  <line x1="302" y1="638" x2="612" y2="638" stroke="#ea580c" stroke-width="5" marker-start="url(#arrow-orange)" marker-end="url(#arrow-orange)"/>
+  <text x="437" y="657" class="small">a_out</text>
+  <text x="664" y="642" class="formula">aratio = a_in / a_out</text>
+
+  <!-- Right: feature-to-channel map -->
+  <rect x="980" y="94" width="585" height="866" rx="22" fill="#ffffff" stroke="#dbe3ee" stroke-width="2"/>
+  <text x="1012" y="132" class="panel-title">C. Feature groups to input channels</text>
+  <text x="1012" y="156" class="subtitle">Each row corresponds to one group in the table.</text>
+
+  <rect x="1012" y="177" width="521" height="86" rx="12" fill="#f8fafc" stroke="#dbe3ee"/>
+  <rect x="1012" y="177" width="8" height="86" rx="4" fill="#64748b"/>
+  <text x="1034" y="203" class="group">aratio</text>
+  <text x="1150" y="203" class="small">1 channel</text>
+  <text x="1034" y="227" class="formula">a_in / a_out</text>
+  <text x="1034" y="248" class="small">How strongly nested is the orbit hierarchy?</text>
+
+  <rect x="1012" y="276" width="521" height="86" rx="12" fill="#f8fafc" stroke="#dbe3ee"/>
+  <rect x="1012" y="276" width="8" height="86" rx="4" fill="#475569"/>
+  <text x="1034" y="302" class="group">mratios</text>
+  <text x="1150" y="302" class="small">2 channels</text>
+  <text x="1034" y="326" class="formula">q_in, q_out</text>
+  <text x="1034" y="347" class="small">Inner mass balance and m3 relative to m1 + m2.</text>
+
+  <rect x="1012" y="375" width="521" height="86" rx="12" fill="#f8fafc" stroke="#dbe3ee"/>
+  <rect x="1012" y="375" width="8" height="86" rx="4" fill="#16a34a"/>
+  <text x="1034" y="401" class="group">eccs</text>
+  <text x="1150" y="401" class="small">2 channels</text>
+  <text x="1034" y="425" class="formula">e_in, e_out</text>
+  <text x="1034" y="446" class="small">Shape of the inner and outer ellipses.</text>
+
+  <rect x="1012" y="474" width="521" height="86" rx="12" fill="#f8fafc" stroke="#dbe3ee"/>
+  <rect x="1012" y="474" width="8" height="86" rx="4" fill="#8b5cf6"/>
+  <text x="1034" y="500" class="group">incs</text>
+  <text x="1150" y="500" class="small">2 channels</text>
+  <text x="1034" y="524" class="formula">i_in, i_out</text>
+  <text x="1034" y="545" class="small">Tilt of each orbital plane to the reference plane.</text>
+
+  <rect x="1012" y="573" width="521" height="103" rx="12" fill="#fff7ed" stroke="#fed7aa"/>
+  <rect x="1012" y="573" width="8" height="103" rx="4" fill="#ea580c"/>
+  <text x="1034" y="599" class="group">APs</text>
+  <text x="1150" y="599" class="small">4 channels</text>
+  <text x="1034" y="623" class="formula">sin/cos(&#969;_in), sin/cos(&#969;_out)</text>
+  <text x="1034" y="647" class="small">Orientation of periapsis within each orbital plane.</text>
+  <text x="1034" y="666" class="tiny">&#969; = argument of periapsis</text>
+
+  <rect x="1012" y="689" width="521" height="103" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+  <rect x="1012" y="689" width="8" height="103" rx="4" fill="#2563eb"/>
+  <text x="1034" y="715" class="group">LAns</text>
+  <text x="1150" y="715" class="small">4 channels</text>
+  <text x="1034" y="739" class="formula">sin/cos(&#937;_in), sin/cos(&#937;_out)</text>
+  <text x="1034" y="763" class="small">Orientation of the ascending-node line.</text>
+  <text x="1034" y="782" class="tiny">&#937; = longitude of ascending node</text>
+
+  <rect x="1012" y="816" width="521" height="106" rx="12" fill="#172033"/>
+  <text x="1034" y="847" font-size="19" font-family="Arial, Helvetica, sans-serif" font-weight="700" fill="#ffffff">Total: 1 + 2 + 2 + 2 + 4 + 4 = 15 channels</text>
+  <text x="1034" y="875" font-size="14" font-family="Arial, Helvetica, sans-serif" fill="#dbeafe">Angles use sin/cos pairs so the input is continuous</text>
+  <text x="1034" y="897" font-size="14" font-family="Arial, Helvetica, sans-serif" fill="#dbeafe">across the 2*pi wrap-around.</text>
+  <text x="1034" y="916" font-size="11" font-family="Arial, Helvetica, sans-serif" fill="#94a3b8">Confirm the exact q_in / q_out convention in the paper.</text>
+</svg>

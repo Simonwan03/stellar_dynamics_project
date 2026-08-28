@@ -1,0 +1,158 @@
+{
+  "pretrained_mlp": {
+    "train": {
+      "mse": 0.12888135405211115,
+      "rmse": 0.3590004931084512,
+      "mae": 0.24246103329598093,
+      "median_absolute_error": 0.13366450497510515,
+      "r2": 0.17280994878573563,
+      "explained_variance": 0.37125379089593413,
+      "pearson": 0.6755307886715898,
+      "spearman": 0.7102912982102846,
+      "mean_bias_error": 0.17583738132082435,
+      "target_mean": 0.3137507146941109,
+      "prediction_mean": 0.4895880960149353,
+      "within_abs_error_0.05": 0.35820468839336767,
+      "within_abs_error_0.10": 0.45683247570040025,
+      "within_abs_error_0.20": 0.5743281875357347,
+      "binomial_sampling_mse_estimate": 0.0018595307809819897,
+      "mse_over_binomial_noise": 69.30853491118383,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 2194,
+          "mae": 0.2742717637016425,
+          "rmse": 0.4035233380849256,
+          "bias": 0.26273495494940974
+        },
+        "0.25-0.5": {
+          "count": 262,
+          "mae": 0.3675261052102694,
+          "rmse": 0.42129911596626285,
+          "bias": 0.3037821832806209
+        },
+        "0.5-0.75": {
+          "count": 216,
+          "mae": 0.24787593195436677,
+          "rmse": 0.2789115894939779,
+          "bias": 0.12142230692615565
+        },
+        "0.75-1": {
+          "count": 826,
+          "mae": 0.1168806344318447,
+          "rmse": 0.19143090592388431,
+          "bias": -0.08133109154277683
+        }
+      }
+    },
+    "val": {
+      "mse": 0.12721184215403822,
+      "rmse": 0.35666769149172767,
+      "mae": 0.2396905763453251,
+      "median_absolute_error": 0.1427579697938407,
+      "r2": 0.1827425274122747,
+      "explained_variance": 0.3589220167615531,
+      "pearson": 0.6658351263987152,
+      "spearman": 0.7136231513470876,
+      "mean_bias_error": 0.16560063362209426,
+      "target_mean": 0.317125,
+      "prediction_mean": 0.48272563362209425,
+      "within_abs_error_0.05": 0.3546666666666667,
+      "within_abs_error_0.10": 0.44666666666666666,
+      "within_abs_error_0.20": 0.5773333333333334,
+      "binomial_sampling_mse_estimate": 0.0019031168619791667,
+      "mse_over_binomial_noise": 66.84394673574744,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 470,
+          "mae": 0.2689270980580997,
+          "rmse": 0.39906109265958173,
+          "bias": 0.2585163565478609
+        },
+        "0.25-0.5": {
+          "count": 57,
+          "mae": 0.34373891999135614,
+          "rmse": 0.40043225600831933,
+          "bias": 0.2803963352925172
+        },
+        "0.5-0.75": {
+          "count": 43,
+          "mae": 0.23241884235606391,
+          "rmse": 0.27564571832542134,
+          "bias": 0.11266628175974228
+        },
+        "0.75-1": {
+          "count": 180,
+          "mae": 0.1321392639492718,
+          "rmse": 0.21284593746209038,
+          "bias": -0.10071918660147965
+        }
+      }
+    },
+    "test": {
+      "mse": 0.12941447809718254,
+      "rmse": 0.3597422384113138,
+      "mae": 0.2397400543739296,
+      "median_absolute_error": 0.12606813279916215,
+      "r2": 0.18586524197106968,
+      "explained_variance": 0.3918666161334795,
+      "pearson": 0.6869525393307525,
+      "spearman": 0.7314768556096959,
+      "mean_bias_error": 0.180958231412863,
+      "target_mean": 0.31954166666666667,
+      "prediction_mean": 0.5004998980795297,
+      "within_abs_error_0.05": 0.38,
+      "within_abs_error_0.10": 0.4653333333333333,
+      "within_abs_error_0.20": 0.5826666666666667,
+      "binomial_sampling_mse_estimate": 0.0018273518880208334,
+      "mse_over_binomial_noise": 70.82077565112468,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 470,
+          "mae": 0.2795828143807373,
+          "rmse": 0.4090631573861688,
+          "bias": 0.26912557634760575
+        },
+        "0.25-0.5": {
+          "count": 52,
+          "mae": 0.38283838143995275,
+          "rmse": 0.4297065928321973,
+          "bias": 0.2810358580280721
+        },
+        "0.5-0.75": {
+          "count": 41,
+          "mae": 0.2775627293234251,
+          "rmse": 0.3118713840919924,
+          "bias": 0.13658444422412283
+        },
+        "0.75-1": {
+          "count": 187,
+          "mae": 0.09151577692172586,
+          "rmse": 0.16063057115056073,
+          "bias": -0.05873889922126333
+        }
+      }
+    },
+    "metadata": {
+      "artifact_path": "/home/wan/stellar_dynamics/external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl",
+      "artifact_sha256": "f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436",
+      "source_url": "https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_v1.2.2.pkl",
+      "trained_sklearn_version": "1.2.2",
+      "runtime_sklearn_version": "1.8.0",
+      "input_order": [
+        "q_in",
+        "q_out",
+        "alpha",
+        "e_in",
+        "e_out",
+        "i_mut/pi"
+      ],
+      "class_1_semantics": "unstable",
+      "variation_decision": "stable iff probability_unstable < 0.5",
+      "rows": 160000,
+      "rows_inside_training_domain": 159488,
+      "rows_outside_training_domain": 512,
+      "binary_group_score": "minimum variation probability_stable",
+      "stable_fraction_group_score": "mean variation probability_stable"
+    }
+  }
+}

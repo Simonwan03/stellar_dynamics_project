@@ -40,7 +40,16 @@ from tasks.common.case_split import (
     ensure_case_split_manifest,
     missing_case_ids,
 )
-from tasks.common.traditional_stability import load_initial_conditions
+from tasks.common.traditional_stability import (
+    load_initial_conditions,
+    load_vynatheya2022_initial_conditions,
+)
+from tasks.common.pretrained_triple_mlp import (
+    DEFAULT_PRETRAINED_MLP_PATH,
+    PRETRAINED_MLP_SHA256,
+    PRETRAINED_MLP_SOURCE_URL,
+    load_pretrained_mlp_initial_conditions,
+)
 
 
 DEFAULT_FEATURES = ("aratios", "mratios", "eccs", "incs", "APs", "LANs")
@@ -266,20 +275,129 @@ def equation2_group_predictions(
     input_path: str | Path,
     case_ids: np.ndarray,
     group_size: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return Equation (2) all-variation predictions for selected systems."""
+) -> pd.DataFrame:
+    """Return Equation (2) fraction and all-stable predictions for systems."""
 
     predictions = load_initial_conditions(Path(input_path), group_size=group_size)
-    group_margin = predictions.groupby("group_id", sort=True)["stability_margin"].min()
-    selected_margin = group_margin.reindex(np.asarray(case_ids, dtype=np.int64))
-    if selected_margin.isna().any():
-        missing = selected_margin[selected_margin.isna()].index.to_numpy(dtype=np.int64)
+    groups = aggregate_variation_stability(predictions, group_size=group_size)
+    selected = groups.reindex(np.asarray(case_ids, dtype=np.int64))
+    if selected.isna().any(axis=None):
+        missing = selected[selected.isna().any(axis=1)].index.to_numpy(dtype=np.int64)
         raise ValueError(
             "Equation (2) did not produce predictions for all selected systems; "
             f"missing raw_case_id values: {missing[:10].tolist()}"
         )
-    margins = selected_margin.to_numpy(dtype=np.float64)
-    return (margins > 0.0).astype(np.float32), margins
+    return selected
+
+
+def aggregate_variation_stability(
+    predictions: pd.DataFrame,
+    group_size: int,
+) -> pd.DataFrame:
+    """Aggregate hard per-variation criterion outputs to Task A systems."""
+
+    required = {"group_id", "variation_id", "stable", "stability_margin"}
+    missing = sorted(required - set(predictions.columns))
+    if missing:
+        raise ValueError(f"Criterion predictions are missing columns: {missing}")
+    groups = (
+        predictions.groupby("group_id", sort=True)
+        .agg(
+            variations=("variation_id", "size"),
+            unique_variations=("variation_id", "nunique"),
+            predicted_stable_fraction=("stable", "mean"),
+            stability_margin=("stability_margin", "min"),
+        )
+    )
+    incomplete = groups[
+        (groups["variations"] != group_size) | (groups["unique_variations"] != group_size)
+    ]
+    if not incomplete.empty:
+        raise ValueError(
+            f"Expected exactly {group_size} unique variations per system; "
+            f"found {len(incomplete)} incomplete systems."
+        )
+    groups["prediction_stable"] = (groups["stability_margin"] > 0.0).astype(np.int8)
+    return groups
+
+
+def equation4_group_predictions(
+    input_path: str | Path,
+    case_ids: np.ndarray,
+    group_size: int,
+) -> pd.DataFrame:
+    """Return Equation (4) fraction and all-stable predictions for systems."""
+
+    predictions = load_vynatheya2022_initial_conditions(Path(input_path), group_size=group_size)
+    groups = aggregate_variation_stability(predictions, group_size=group_size)
+    selected = groups.reindex(np.asarray(case_ids, dtype=np.int64))
+    if selected.isna().any(axis=None):
+        missing = selected[selected.isna().any(axis=1)].index.to_numpy(dtype=np.int64)
+        raise ValueError(
+            "Equation (4) did not produce predictions for all selected systems; "
+            f"missing raw_case_id values: {missing[:10].tolist()}"
+        )
+    return selected
+
+
+def aggregate_pretrained_mlp_predictions(
+    predictions: pd.DataFrame,
+    group_size: int,
+) -> pd.DataFrame:
+    """Aggregate official per-variation MLP probabilities to Task A systems."""
+
+    required = {
+        "group_id",
+        "variation_id",
+        "stable",
+        "probability_stable",
+        "probability_unstable",
+        "in_training_domain",
+    }
+    missing = sorted(required - set(predictions.columns))
+    if missing:
+        raise ValueError(f"Pretrained MLP predictions are missing columns: {missing}")
+    groups = predictions.groupby("group_id", sort=True).agg(
+        variations=("variation_id", "size"),
+        unique_variations=("variation_id", "nunique"),
+        predicted_stable_fraction=("probability_stable", "mean"),
+        hard_stable_fraction=("stable", "mean"),
+        probability_stable=("probability_stable", "min"),
+        probability_unstable=("probability_unstable", "max"),
+        variations_inside_training_domain=("in_training_domain", "sum"),
+    )
+    incomplete = groups[
+        (groups["variations"] != group_size) | (groups["unique_variations"] != group_size)
+    ]
+    if not incomplete.empty:
+        raise ValueError(
+            f"Expected exactly {group_size} unique variations per system; "
+            f"found {len(incomplete)} incomplete systems."
+        )
+    groups["prediction_stable"] = (groups["probability_unstable"] < 0.5).astype(np.int8)
+    return groups
+
+
+def pretrained_mlp_group_predictions(
+    input_path: str | Path,
+    model_path: str | Path,
+    case_ids: np.ndarray,
+    group_size: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Return official pretrained MLP predictions for selected Task A systems."""
+
+    predictions, metadata = load_pretrained_mlp_initial_conditions(
+        Path(input_path), Path(model_path), group_size=group_size
+    )
+    groups = aggregate_pretrained_mlp_predictions(predictions, group_size=group_size)
+    selected = groups.reindex(np.asarray(case_ids, dtype=np.int64))
+    if selected.isna().any(axis=None):
+        missing = selected[selected.isna().any(axis=1)].index.to_numpy(dtype=np.int64)
+        raise ValueError(
+            "Pretrained MLP did not produce predictions for all selected systems; "
+            f"missing raw_case_id values: {missing[:10].tolist()}"
+        )
+    return selected, metadata
 
 
 def resolve_binary_threshold(
@@ -631,7 +749,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--models",
         type=str,
         default=None,
-        help="Comma-separated methods. Defaults to equation2,mlp,xgboost for binary_any and mlp,xgboost for stable_fraction.",
+        help=(
+            "Comma-separated methods. Defaults to equation2,equation4,mlp,xgboost "
+            "for both target modes."
+        ),
+    )
+    parser.add_argument(
+        "--pretrained-mlp-path",
+        type=Path,
+        default=DEFAULT_PRETRAINED_MLP_PATH,
+        help=(
+            "Official Vynatheya et al. mlp_model_trip_v1.2.2.pkl artifact. "
+            "Required only when --models includes pretrained_mlp."
+        ),
     )
     parser.add_argument(
         "--mlp-size",
@@ -722,15 +852,21 @@ def main() -> None:
     dropout = float(args.dropout if args.dropout is not None else mlp_preset["dropout"])
     early_stopping_patience = args.early_stopping_patience if args.early_stopping_patience > 0 else None
     if args.models is None:
-        models = {"equation2", "mlp", "xgboost"} if args.target_mode == "binary_any" else {"mlp", "xgboost"}
+        models = {"equation2", "equation4", "mlp", "xgboost"}
     else:
         models = set(parse_name_list(args.models))
     if "equation_2" in models:
         models.remove("equation_2")
         models.add("equation2")
-    allowed_models = {"mlp", "xgboost"}
-    if args.target_mode == "binary_any":
-        allowed_models.add("equation2")
+    for alias in ("equation_4", "vynatheya2022"):
+        if alias in models:
+            models.remove(alias)
+            models.add("equation4")
+    for alias in ("paper_mlp", "vynatheya_mlp", "pretrained_paper_mlp"):
+        if alias in models:
+            models.remove(alias)
+            models.add("pretrained_mlp")
+    allowed_models = {"equation2", "equation4", "pretrained_mlp", "mlp", "xgboost"}
     unsupported = sorted(models - allowed_models)
     if unsupported:
         raise ValueError(
@@ -867,16 +1003,60 @@ def main() -> None:
             },
             "split_counts": {name: int(rows.size) for name, rows in split_indices.items()},
             "binary_threshold_policy": (
-                "validation_max_f1"
-                if args.binary_threshold is None
-                else "fixed_cli_value"
+                {
+                    "mlp_xgboost": (
+                        "validation_max_f1"
+                        if args.binary_threshold is None
+                        else "fixed_cli_value"
+                    )
+                    if models & {"mlp", "xgboost"}
+                    else None,
+                    "equation2_equation4": (
+                        "fixed_physics_boundary" if models & {"equation2", "equation4"} else None
+                    ),
+                    "pretrained_mlp": (
+                        "fixed_upstream_0.5_plus_validation_max_f1"
+                        if "pretrained_mlp" in models
+                        else None
+                    ),
+                }
             )
             if args.target_mode == "binary_any"
             else None,
             "binary_threshold_override": args.binary_threshold,
             "equation2_group_rule": (
-                "stable iff the minimum Equation (2) margin across all variations is positive"
+                "binary_any uses the minimum Equation (2) margin; stable_fraction uses the "
+                "mean hard stability decision across variations"
                 if "equation2" in models
+                else None
+            ),
+            "equation4_group_rule": (
+                "binary_any uses the minimum Equation (4) margin; stable_fraction uses the "
+                "mean hard stability decision across variations"
+                if "equation4" in models
+                else None
+            ),
+            "equation4_reference": (
+                "Vynatheya et al. 2022, arXiv:2207.03151, Equations (3)-(4)"
+                if "equation4" in models
+                else None
+            ),
+            "equation4_lk_radicand_policy": (
+                "clip to zero outside the classical LK inclination window"
+                if "equation4" in models
+                else None
+            ),
+            "pretrained_mlp_source": (
+                PRETRAINED_MLP_SOURCE_URL if "pretrained_mlp" in models else None
+            ),
+            "pretrained_mlp_expected_sha256": (
+                PRETRAINED_MLP_SHA256 if "pretrained_mlp" in models else None
+            ),
+            "pretrained_mlp_group_rule": (
+                "binary_any uses the minimum variation stable probability at fixed 0.5; "
+                "a secondary operating point selects the validation-F1 threshold; "
+                "stable_fraction uses the mean variation stable probability"
+                if "pretrained_mlp" in models
                 else None
             ),
         },
@@ -884,32 +1064,169 @@ def main() -> None:
 
     all_metrics: dict[str, Any] = {}
     if "equation2" in models:
-        if args.target_mode != "binary_any":
-            raise ValueError("Equation (2) is only defined for Task A binary_any classification.")
-        equation2_prob, equation2_margin = equation2_group_predictions(
+        equation2_groups = equation2_group_predictions(
             ics_path,
             case_ids,
             group_size=args.group_size,
         )
-        equation2_metrics = {
-            split_name: binary_metrics_from_probs(y[split_rows], equation2_prob[split_rows])
-            for split_name, split_rows in split_indices.items()
-        }
+        equation2_fraction = equation2_groups["predicted_stable_fraction"].to_numpy(
+            dtype=np.float64
+        )
+        equation2_binary = equation2_groups["prediction_stable"].to_numpy(dtype=np.float64)
+        equation2_score = (
+            equation2_binary if args.target_mode == "binary_any" else equation2_fraction
+        )
+        if args.target_mode == "binary_any":
+            equation2_metrics = {
+                split_name: binary_metrics_from_probs(y[split_rows], equation2_score[split_rows])
+                for split_name, split_rows in split_indices.items()
+            }
+        else:
+            equation2_metrics = {
+                split_name: regression_metrics_from_preds(y[split_rows], equation2_score[split_rows])
+                for split_name, split_rows in split_indices.items()
+            }
         all_metrics["equation2"] = equation2_metrics
         equation2_rows = []
         for row, case_id in enumerate(case_ids):
-            split_name = str(split_membership[row])
             equation2_rows.append(
                 {
                     "raw_case_id": int(case_id),
-                    "split": split_name,
-                    "y_true": int(y[row]),
-                    "stability_margin": float(equation2_margin[row]),
-                    "probability_stable": float(equation2_prob[row]),
-                    "prediction_stable": int(equation2_prob[row] >= 0.5),
+                    "split": str(split_membership[row]),
+                    "y_true": float(y[row]),
+                    "predicted_stable_fraction": float(equation2_fraction[row]),
+                    "minimum_stability_margin": float(
+                        equation2_groups.iloc[row]["stability_margin"]
+                    ),
+                    "prediction_stable": int(equation2_binary[row]),
                 }
             )
         save_csv(output_dir / "equation2_predictions.csv", equation2_rows)
+
+    if "equation4" in models:
+        equation4_groups = equation4_group_predictions(
+            ics_path,
+            case_ids,
+            group_size=args.group_size,
+        )
+        equation4_fraction = equation4_groups["predicted_stable_fraction"].to_numpy(
+            dtype=np.float64
+        )
+        equation4_binary = equation4_groups["prediction_stable"].to_numpy(dtype=np.float64)
+        equation4_score = (
+            equation4_binary if args.target_mode == "binary_any" else equation4_fraction
+        )
+        if args.target_mode == "binary_any":
+            equation4_metrics = {
+                split_name: binary_metrics_from_probs(y[split_rows], equation4_score[split_rows])
+                for split_name, split_rows in split_indices.items()
+            }
+        else:
+            equation4_metrics = {
+                split_name: regression_metrics_from_preds(y[split_rows], equation4_score[split_rows])
+                for split_name, split_rows in split_indices.items()
+            }
+        all_metrics["equation4"] = equation4_metrics
+        equation4_rows = []
+        for row, case_id in enumerate(case_ids):
+            equation4_rows.append(
+                {
+                    "raw_case_id": int(case_id),
+                    "split": str(split_membership[row]),
+                    "y_true": float(y[row]),
+                    "predicted_stable_fraction": float(equation4_fraction[row]),
+                    "minimum_stability_margin": float(
+                        equation4_groups.iloc[row]["stability_margin"]
+                    ),
+                    "prediction_stable": int(equation4_binary[row]),
+                }
+            )
+        save_csv(output_dir / "equation4_predictions.csv", equation4_rows)
+
+    if "pretrained_mlp" in models:
+        pretrained_groups, pretrained_metadata = pretrained_mlp_group_predictions(
+            ics_path,
+            args.pretrained_mlp_path,
+            case_ids,
+            group_size=args.group_size,
+        )
+        pretrained_fraction = pretrained_groups["predicted_stable_fraction"].to_numpy(
+            dtype=np.float64
+        )
+        pretrained_binary_probability = pretrained_groups["probability_stable"].to_numpy(
+            dtype=np.float64
+        )
+        pretrained_score = (
+            pretrained_binary_probability
+            if args.target_mode == "binary_any"
+            else pretrained_fraction
+        )
+        if args.target_mode == "binary_any":
+            pretrained_metrics = {
+                split_name: binary_metrics_from_probs(
+                    y[split_rows], pretrained_score[split_rows], threshold=0.5
+                )
+                for split_name, split_rows in split_indices.items()
+            }
+            pretrained_metrics["threshold"] = 0.5
+            pretrained_metrics["threshold_source"] = "fixed_upstream_value"
+            tuned_threshold = select_binary_threshold_by_f1(
+                y[val_idx], pretrained_score[val_idx]
+            )
+            pretrained_metrics["validation_tuned"] = {
+                "threshold": tuned_threshold,
+                "threshold_source": "validation_max_f1",
+                **{
+                    split_name: binary_metrics_from_probs(
+                        y[split_rows], pretrained_score[split_rows], threshold=tuned_threshold
+                    )
+                    for split_name, split_rows in split_indices.items()
+                },
+            }
+        else:
+            pretrained_metrics = {
+                split_name: regression_metrics_from_preds(
+                    y[split_rows], pretrained_score[split_rows]
+                )
+                for split_name, split_rows in split_indices.items()
+            }
+        pretrained_metadata = {
+            **pretrained_metadata,
+            "binary_group_score": "minimum variation probability_stable",
+            "stable_fraction_group_score": "mean variation probability_stable",
+        }
+        pretrained_metrics["metadata"] = pretrained_metadata
+        all_metrics["pretrained_mlp"] = pretrained_metrics
+        pretrained_rows = []
+        for row, case_id in enumerate(case_ids):
+            pretrained_rows.append(
+                {
+                    "raw_case_id": int(case_id),
+                    "split": str(split_membership[row]),
+                    "y_true": float(y[row]),
+                    "predicted_stable_fraction": float(pretrained_fraction[row]),
+                    "hard_stable_fraction": float(
+                        pretrained_groups.iloc[row]["hard_stable_fraction"]
+                    ),
+                    "probability_stable": float(pretrained_binary_probability[row]),
+                    "probability_unstable": float(
+                        pretrained_groups.iloc[row]["probability_unstable"]
+                    ),
+                    "prediction_stable": int(
+                        pretrained_groups.iloc[row]["prediction_stable"]
+                    ),
+                    "prediction_stable_val_tuned": (
+                        int(pretrained_binary_probability[row] >= tuned_threshold)
+                        if args.target_mode == "binary_any"
+                        else None
+                    ),
+                    "variations_inside_training_domain": int(
+                        pretrained_groups.iloc[row]["variations_inside_training_domain"]
+                    ),
+                }
+            )
+        save_csv(output_dir / "pretrained_mlp_predictions.csv", pretrained_rows)
+        save_json(output_dir / "pretrained_mlp_metadata.json", pretrained_metadata)
 
     if "mlp" in models:
         train_loader, test_loader = make_loaders(X_train, y_train, args.batch_size, (X_test, y_test))

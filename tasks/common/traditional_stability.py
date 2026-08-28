@@ -1,4 +1,4 @@
-"""Paper Equation (2) stability criterion for hierarchical triples.
+"""Algebraic stability criteria for hierarchical triples.
 
 This is a direct implementation of Equation (2)::
 
@@ -6,9 +6,10 @@ This is a direct implementation of Equation (2)::
         (1 + q_out) (1 + e_out) / sqrt(1 - e_out)
     ]^(2/5) (1 - 0.3 i_mut / pi)
 
-where ``R_p = a_out (1 - e_out)``.  Stability requires
-``R_p/a_in > R_p,crit/a_in``.  The reported log margin uses exactly these two
-quantities.  No additional inner-eccentricity correction is applied.
+where ``R_p = a_out (1 - e_out)``.  This module also implements the updated
+Vynatheya et al. (2022) Equation (4), which adds inner-eccentricity and
+non-linear mutual-inclination corrections.  Both criteria report a log ratio
+whose strict positivity indicates stability.
 
 Run from the repository root::
 
@@ -90,6 +91,92 @@ def triple_stability(
     }
 
 
+def vynatheya2022_stability(
+    a_in: np.ndarray | float,
+    a_out: np.ndarray | float,
+    e_in: np.ndarray | float,
+    e_out: np.ndarray | float,
+    mutual_inclination: np.ndarray | float,
+    m1: np.ndarray | float,
+    m2: np.ndarray | float,
+    m3: np.ndarray | float,
+) -> dict[str, np.ndarray]:
+    """Evaluate Vynatheya et al. (2022) Equations (3)--(4).
+
+    The quadrupole LK estimate for ``e_in_max`` is real only inside the
+    classical LK inclination window. Outside that window the radicand is
+    clipped to zero, corresponding to no LK-driven eccentricity correction.
+    """
+
+    arrays = np.broadcast_arrays(
+        *[
+            np.asarray(value, dtype=np.float64)
+            for value in (a_in, a_out, e_in, e_out, mutual_inclination, m1, m2, m3)
+        ]
+    )
+    (
+        a_in_array,
+        a_out_array,
+        e_in_array,
+        e_out_array,
+        inclination,
+        mass1,
+        mass2,
+        mass3,
+    ) = arrays
+
+    if np.any(~np.isfinite(np.stack(arrays))):
+        raise ValueError("Criterion inputs must all be finite.")
+    if np.any(a_in_array <= 0.0) or np.any(a_out_array <= 0.0):
+        raise ValueError("Semi-major axes must be positive.")
+    if np.any((e_in_array < 0.0) | (e_in_array >= 1.0)):
+        raise ValueError("Inner eccentricity must satisfy 0 <= e_in < 1.")
+    if np.any((e_out_array < 0.0) | (e_out_array >= 1.0)):
+        raise ValueError("Outer eccentricity must satisfy 0 <= e_out < 1.")
+    if np.any((inclination < 0.0) | (inclination > np.pi)):
+        raise ValueError("Mutual inclination must be in radians and satisfy 0 <= i_mut <= pi.")
+    if np.any(mass1 <= 0.0) or np.any(mass2 <= 0.0) or np.any(mass3 <= 0.0):
+        raise ValueError("All masses must be positive.")
+
+    q_out = mass3 / (mass1 + mass2)
+    lk_radicand = 1.0 - (5.0 / 3.0) * np.cos(inclination) ** 2
+    e_in_max = np.sqrt(np.maximum(lk_radicand, 0.0))
+    e_in_avg = 0.5 * e_in_max**2
+    e_in_tilde = np.maximum(e_in_array, e_in_avg)
+
+    a_ratio_actual = a_out_array / a_in_array
+    y_tilde = a_ratio_actual * (1.0 - e_out_array) / (1.0 + e_in_tilde)
+    inclination_factor = (
+        ((1.0 - 0.2 * e_in_tilde + e_out_array) / 8.0)
+        * (np.cos(inclination) - 1.0)
+        + 1.0
+    )
+    y_crit = (
+        2.4
+        * np.power(
+            (1.0 + q_out) / ((1.0 + e_in_tilde) * np.sqrt(1.0 - e_out_array)),
+            2.0 / 5.0,
+        )
+        * inclination_factor
+    )
+    a_ratio_crit = y_crit * (1.0 + e_in_tilde) / (1.0 - e_out_array)
+    margin = np.log(y_tilde / y_crit)
+    return {
+        "q_out": q_out,
+        "a_out_over_a_in": a_ratio_actual,
+        "e_in_max": e_in_max,
+        "e_in_avg": e_in_avg,
+        "e_in_tilde": e_in_tilde,
+        "Y_tilde": y_tilde,
+        "Y_tilde_crit": y_crit,
+        "inclination_factor": inclination_factor,
+        "a_out_over_a_in_crit": a_ratio_crit,
+        "stability_margin": margin,
+        "distance_to_boundary": np.abs(margin),
+        "stable": margin > 0.0,
+    }
+
+
 def mutual_inclination_from_unit_vectors(h_uvecs: np.ndarray) -> np.ndarray:
     vectors = np.asarray(h_uvecs, dtype=np.float64)
     if vectors.ndim != 3 or vectors.shape[1:] != (2, 3):
@@ -129,6 +216,57 @@ def load_initial_conditions(path: Path, group_size: int) -> pd.DataFrame:
     criterion = triple_stability(
         a_in=np.ones_like(stored_aratio),
         a_out=1.0 / stored_aratio,
+        e_out=eccentricities[:, 1],
+        mutual_inclination=mutual_inclination,
+        m1=masses[:, 0],
+        m2=masses[:, 1],
+        m3=masses[:, 2],
+    )
+    indices = np.arange(stored_aratio.size, dtype=np.int64)
+    frame = pd.DataFrame(
+        {
+            "index": indices,
+            "group_id": indices // group_size,
+            "variation_id": indices % group_size,
+            "e_in": eccentricities[:, 0],
+            "e_out": eccentricities[:, 1],
+            "mutual_inclination": mutual_inclination,
+            **criterion,
+        }
+    )
+    frame["stable"] = frame["stable"].astype(np.int8)
+    return frame
+
+
+def load_vynatheya2022_initial_conditions(path: Path, group_size: int) -> pd.DataFrame:
+    """Load initial conditions and evaluate Equation (4) per variation."""
+
+    if group_size <= 0:
+        raise ValueError(f"group_size must be positive, got {group_size}.")
+    with h5py.File(path, "r") as handle:
+        missing = [key for key in REQUIRED_KEYS if key not in handle]
+        if missing:
+            raise KeyError(f"Missing required HDF5 keys in {path}: {missing}")
+        row_counts = {key: int(handle[key].shape[0]) for key in REQUIRED_KEYS}
+        if len(set(row_counts.values())) != 1:
+            raise ValueError(f"Required HDF5 arrays have inconsistent row counts: {row_counts}")
+
+        stored_aratio = np.asarray(handle["aratios"][:, 0], dtype=np.float64)
+        eccentricities = np.asarray(handle["eccs"][:], dtype=np.float64)
+        masses = np.asarray(handle["masses"][:], dtype=np.float64)
+        mutual_inclination = mutual_inclination_from_unit_vectors(handle["h_uvecs"][:])
+
+    if eccentricities.shape[1:] != (2,):
+        raise ValueError(f"Expected eccs with shape (N, 2), got {eccentricities.shape}.")
+    if masses.shape[1:] != (3,):
+        raise ValueError(f"Expected masses with shape (N, 3), got {masses.shape}.")
+    if np.any(stored_aratio <= 0.0):
+        raise ValueError("Stored a_in/a_out ratios must be positive.")
+
+    criterion = vynatheya2022_stability(
+        a_in=np.ones_like(stored_aratio),
+        a_out=1.0 / stored_aratio,
+        e_in=eccentricities[:, 0],
         e_out=eccentricities[:, 1],
         mutual_inclination=mutual_inclination,
         m1=masses[:, 0],

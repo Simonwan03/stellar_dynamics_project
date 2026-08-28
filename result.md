@@ -1,6 +1,9 @@
 # Latest Results for Tasks A--E
 
-This document consolidates the latest saved experimental results currently available in the repository. No experiments were rerun while preparing this summary. Unless stated otherwise, the reported metrics are test-set metrics.
+This document consolidates the latest saved experimental results currently available in
+the repository. The Equation (2)/(4) and official pretrained-MLP Task A baselines were
+run on the shared split for this update; other sections summarize existing saved runs.
+Unless stated otherwise, the reported metrics are test-set metrics.
 
 ## Common data context
 
@@ -15,15 +18,132 @@ This document consolidates the latest saved experimental results currently avail
 
 ### Protocol
 
-The latest saved expanded experiment uses `seed=42`, an older `70/10/20` system split,
-`orbital15` initial conditions, and a maximum horizon of 10,000. Two targets are
-evaluated. It is retained as a historical result; new runs should use the shared
-`70/15/15` manifest described in `readme.md`.
+The current formal Task A results use `seed=42`, the shared `70/15/15` system split
+(`3498/750/750` systems), `orbital15` initial conditions, and a horizon of 10,000.
+All five methods below use the same 4,998-system universe and the same 750-system test
+set. Two targets are evaluated:
 
 1. `stable_fraction`: the fraction of the 32 variations that remain stable up to the selected horizon.
 2. `binary_any`: a binary target whose positive class is a system for which all 32 variations remain stable within the horizon.
 
-### Stable-fraction regression at horizon 10,000
+Equation (2) is the Mardling-Aarseth criterion. Equation (4) is the updated
+Vynatheya et al. (2022) criterion with inner-eccentricity and nonlinear mutual-inclination
+corrections. For `binary_any`, a physical criterion predicts stable only if all 32
+variation margins are positive. For `stable_fraction`, its prediction is the fraction of
+the 32 hard per-variation decisions that are stable. Neither physical criterion is fitted
+to the train or validation labels. MLP and XGBoost use the 15-dimensional `orbital15`
+representation from the first variation; the physical criteria directly use every
+variation's `aratios`, `eccs`, `masses`, and `h_uvecs` fields.
+The official pretrained MLP is the upstream 2022 `mlp_model_trip_v1.2.2.pkl`, which
+takes `[q_in,q_out,a_in/a_out,e_in,e_out,i_mut/pi]` for every variation and has six
+hidden layers of 50 logistic units. Its class 1 probability means unstable. The
+`binary_any` score is the minimum stable probability
+over 32 variations. Results report both the fixed upstream threshold 0.5 and a secondary
+validation-F1 operating point with frozen weights. The `stable_fraction` score is the
+mean stable probability.
+
+### Current shared-split binary-any results at horizon 10,000
+
+The test positive rate is `119/750 = 15.87%`. The locally trained MLP and XGBoost
+thresholds are selected on the validation split by maximum F1; Equations (2) and (4)
+retain their fixed physical boundary (`margin > 0`), and the official pretrained MLP
+retains its upstream threshold of 0.5 while also reporting a secondary validation-F1
+threshold for a matched operating-point comparison.
+
+#### Thresholded classification
+
+| Model | Accuracy | Balanced acc. | Precision | Recall | F1 | Specificity | MCC | TN / FP / FN / TP |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Equation (2) | 0.6187 | 0.7529 | 0.2875 | 0.9496 | 0.4414 | 0.5563 | 0.3701 | 351 / 280 / 6 / 113 |
+| Equation (4) | 0.6600 | 0.7536 | 0.3046 | 0.8908 | 0.4540 | 0.6165 | 0.3716 | 389 / 242 / 13 / 106 |
+| Official pretrained MLP (fixed 0.5) | 0.6453 | 0.7858 | 0.3081 | **0.9916** | 0.4701 | 0.5800 | 0.4178 | 366 / 265 / 1 / 118 |
+| Official pretrained MLP (val threshold 0.8232) | 0.7933 | **0.8158** | 0.4244 | 0.8487 | **0.5658** | 0.7829 | **0.4958** | 494 / 137 / 18 / 101 |
+| MLP-base | 0.7507 | 0.7530 | 0.3629 | 0.7563 | 0.4905 | 0.7496 | 0.3929 | 473 / 158 / 29 / 90 |
+| XGBoost-base | **0.8053** | 0.7650 | **0.4308** | 0.7059 | 0.5350 | **0.8241** | 0.4414 | 520 / 111 / 35 / 84 |
+
+#### Ranking, prevalence, and calibration diagnostics
+
+| Model | Threshold | Predicted stable rate | AUROC | AUPRC | Brier | Log loss | ECE | MCE |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Equation (2) | 0.5000 | 0.5240 | 0.7529 | 0.2810 | 0.3813 | 6.1464 | 0.3813 | 0.7125 |
+| Equation (4) | 0.5000 | 0.4640 | 0.7536 | 0.2887 | 0.3400 | 5.4802 | 0.3400 | 0.6954 |
+| Official pretrained MLP (fixed 0.5) | 0.5000 | 0.5107 | **0.9124** | **0.6934** | 0.2626 | 0.9168 | 0.3418 | 0.6737 |
+| Official pretrained MLP (val threshold) | 0.8232 | 0.3173 | **0.9124** | **0.6934** | 0.2626 | 0.9168 | 0.3418 | 0.6737 |
+| MLP-base | 0.1613 | 0.3307 | 0.8416 | 0.5139 | 0.1050 | 0.3280 | 0.0315 | **0.1768** |
+| XGBoost-base | 0.2406 | **0.2600** | 0.8525 | 0.5089 | **0.1018** | **0.3200** | **0.0248** | 0.2627 |
+
+The physical criteria output hard decisions rather than calibrated probabilities, so
+their Brier, log-loss, ECE, MCE, AUROC, and AUPRC entries describe a two-level score and
+should not be interpreted as probability calibration. Equation (4) improves on Equation
+(2) in accuracy, precision, F1, specificity, AUPRC, and false-positive count, while losing
+some stable recall. XGBoost-base gives the best accuracy, precision, and specificity.
+The official pretrained MLP has by far the best AUROC and AUPRC and misses
+only one truly stable test system, but its upstream threshold predicts 51.07% of systems
+stable versus the true 15.87%, producing many false positives. This indicates strong
+cross-dataset ranking with substantial threshold/calibration shift. Selecting threshold
+0.8232 on validation raises test accuracy to 0.7933 and F1 to 0.5658, the best F1 in the
+table, without updating pretrained weights.
+
+### Current shared-split stable-fraction results at horizon 10,000
+
+#### Regression and correlation metrics
+
+| Model | MSE | RMSE | MAE | Median AE | R² | Explained var. | Pearson | Spearman | Mean bias |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Equation (2) | 0.2488 | 0.4988 | 0.3073 | 0.0469 | -0.5653 | -0.3023 | 0.5057 | 0.5256 | 0.2045 |
+| Equation (4) | 0.2268 | 0.4763 | 0.2853 | **0.0312** | -0.4269 | -0.2956 | 0.5073 | 0.5400 | 0.1445 |
+| Official pretrained MLP | 0.1294 | 0.3597 | 0.2397 | 0.1261 | 0.1859 | 0.3919 | **0.6870** | **0.7315** | 0.1810 |
+| MLP-base | 0.0901 | 0.3001 | **0.2247** | 0.1644 | 0.4335 | 0.4353 | 0.6599 | 0.6812 | 0.0169 |
+| XGBoost-base | **0.0884** | **0.2972** | 0.2330 | 0.1948 | **0.4442** | **0.4443** | 0.6738 | 0.6928 | **0.0051** |
+
+#### Prediction scale, tolerance, and sampling-noise diagnostics
+
+The common test target mean is 0.3195 and the estimated 32-trial binomial sampling MSE
+is 0.001827 for every row.
+
+| Model | Prediction mean | Within 0.05 | Within 0.10 | Within 0.20 | MSE / binomial-noise MSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Equation (2) | 0.5240 | 0.5000 | 0.5653 | 0.6107 | 136.16 |
+| Equation (4) | 0.4640 | **0.5253** | **0.5893** | **0.6360** | 124.12 |
+| Official pretrained MLP | 0.5005 | 0.3800 | 0.4653 | 0.5827 | 70.82 |
+| MLP-base | 0.3364 | 0.2267 | 0.3427 | 0.5493 | 49.28 |
+| XGBoost-base | **0.3247** | 0.1627 | 0.2933 | 0.5147 | **48.35** |
+
+The physical criteria predict exact multiples of `1/32`, which explains their very low
+median error and high narrow-tolerance rates on systems near exactly 0 or 1. Their much
+higher MSE and negative R² show that they perform poorly on the full stable-fraction
+distribution. Both overpredict the mean stable fraction; Equation (4) reduces the bias
+and improves every main error and correlation metric relative to Equation (2). XGBoost
+has the best MSE, RMSE, R², explained variance, and bias, while MLP has the best MAE.
+The official pretrained MLP substantially outperforms both equations and has the best
+Pearson/Spearman ranking, but its mean prediction of 0.5005 remains far above the target
+mean 0.3195, limiting its MSE and R² relative to locally trained models.
+
+Current machine-readable sources: [binary MLP/XGBoost/Equation (2)](results/task_a_common/binary/metrics.json),
+[binary Equation (4)](results/task_a_common/equation4_binary/metrics.json),
+[binary official pretrained MLP](results/task_a_common/pretrained_mlp_binary/metrics.json),
+[stable-fraction MLP/XGBoost](results/task_a_common/stable_fraction/metrics.json),
+[stable-fraction Equation (2)](results/task_a_common/equation2_stable_fraction/metrics.json),
+[stable-fraction Equation (4)](results/task_a_common/equation4_stable_fraction/metrics.json),
+and [stable-fraction official pretrained MLP](results/task_a_common/pretrained_mlp_stable_fraction/metrics.json).
+
+The official artifact was trained with scikit-learn 1.2.2 and evaluated here with 1.8.0
+after verifying SHA-256
+`f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436`.
+Of 160,000 IC rows, 512 rows (16 complete systems; 2 in the test split) fall below the
+published `q_out >= 0.01` training range. This small extrapolation subset is retained and
+flagged in the saved prediction files.
+
+The source paper defines stability as remaining bound for 100 outer periods while both
+semimajor axes change by no more than 10%. Task A instead uses the repository's
+`time_unbound >= 10000` labels. These results therefore evaluate transfer of the
+published physical criteria to Task A; they do not reproduce the paper's reported 93%
+Equation (4) accuracy.
+
+### Historical stable-fraction regression at horizon 10,000
+
+The expanded experiment below uses the older `70/10/20` split and is retained only as a
+historical result.
 
 | Model | MSE | MAE | R² | Spearman |
 | --- | ---: | ---: | ---: | ---: |
@@ -35,7 +155,7 @@ evaluated. It is retained as a historical result; new runs should use the shared
 
 XGBoost-strong gives the best MSE, R², and rank correlation. MLP-large gives the lowest MAE.
 
-### Binary-any classification at horizon 10,000
+### Historical binary-any classification at horizon 10,000
 
 The positive-class rate in the test set is 15.8%.
 
@@ -50,7 +170,7 @@ The positive-class rate in the test set is 15.8%.
 
 MLP-base has the best thresholded F1, balanced accuracy, and MCC. XGBoost-strong has the best AUROC, AUPRC, Brier score, and therefore the strongest ranking and probability quality overall.
 
-### Horizon trend
+### Historical horizon trend
 
 For the horizon grid from 1,000 to 10,000, the mean stable fraction decreases from 0.4888 to 0.2974. The stable-fraction R² of MLP-base decreases from 0.50121 to 0.38760, while XGBoost-base decreases from 0.49256 to 0.42327. The binary positive rate decreases from 0.289 to 0.158, so F1 and AUPRC should be interpreted together with the changing class balance.
 
@@ -477,7 +597,13 @@ Sources: [Chronos2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md), [
 
 ## Overall takeaways
 
-- **Task A:** XGBoost-strong is the strongest regression and ranking model; MLP-base is best when the binary decision is evaluated by F1.
+- **Task A:** On the current shared split, XGBoost-base has the best binary accuracy and
+  stable-fraction MSE/R². The official pretrained MLP has the best binary AUROC/AUPRC;
+  after validation-only threshold selection it also has the best balanced accuracy, F1,
+  and MCC. It has the best stable-fraction correlations, but its upstream
+  threshold/calibration substantially overpredicts stability on Task A.
+  Equation (4) consistently improves on Equation (2), while both analytic criteria
+  remain weaker than the pretrained and locally trained models.
 - **Task B:** On the shared case-level `70/15/15` split, dynamical summaries plus
   XGBoost are strongest at both trajectory and aggregated-system levels. At prefix=96
   they achieve trajectory AUROC=0.9649 and system R²=0.9040; at prefix=512 these improve
