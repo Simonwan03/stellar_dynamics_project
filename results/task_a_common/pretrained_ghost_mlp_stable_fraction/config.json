@@ -1,0 +1,130 @@
+{
+  "dataset_dir": "dataset_v3",
+  "sampling_id": 2,
+  "group_size": 32,
+  "time_horizon": 10000.0,
+  "target_mode": "stable_fraction",
+  "output_dir": "results/task_a_common/pretrained_ghost_mlp_stable_fraction",
+  "features": "aratios,mratios,eccs,incs,APs,LANs",
+  "regroup": false,
+  "overwrite_tokenized": false,
+  "models": "pretrained_ghost_mlp",
+  "pretrained_mlp_path": "/home/wan/stellar_dynamics/external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl",
+  "pretrained_ghost_mlp_path": "/home/wan/stellar_dynamics/external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl",
+  "mlp_size": "base",
+  "xgb_size": "base",
+  "train_ratio": 0.7,
+  "val_ratio": 0.15,
+  "test_ratio": 0.15,
+  "split_manifest": "dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv",
+  "overwrite_split_manifest": false,
+  "max_cases": null,
+  "seed": 42,
+  "batch_size": 128,
+  "epochs": 20,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "dropout": null,
+  "hidden": null,
+  "early_stopping_patience": 15,
+  "early_stopping_min_delta": 0.0001,
+  "binary_threshold": null,
+  "mlp_loss": "mse",
+  "device": "cuda",
+  "tokenized_path": "dataset_v3/ICs_sampling_2_groupof32_taska_orbital15.hdf5",
+  "tokenized_shapes": {
+    "APs": [
+      5000,
+      32,
+      4
+    ],
+    "LANs": [
+      5000,
+      32,
+      4
+    ],
+    "aratios": [
+      5000,
+      32,
+      1
+    ],
+    "eccs": [
+      5000,
+      32,
+      2
+    ],
+    "incs": [
+      5000,
+      32,
+      2
+    ],
+    "mratios": [
+      5000,
+      32,
+      2
+    ]
+  },
+  "num_cases": 4998,
+  "num_features": 15,
+  "feature_names": [
+    "aratios_first_0",
+    "mratios_first_0",
+    "mratios_first_1",
+    "eccs_first_0",
+    "eccs_first_1",
+    "incs_first_0",
+    "incs_first_1",
+    "APs_first_0",
+    "APs_first_1",
+    "APs_first_2",
+    "APs_first_3",
+    "LANs_first_0",
+    "LANs_first_1",
+    "LANs_first_2",
+    "LANs_first_3"
+  ],
+  "mlp_hidden": [
+    128,
+    128,
+    64
+  ],
+  "mlp_dropout": 0.2,
+  "xgb_preset": {
+    "objective": "reg:squarederror",
+    "n_estimators": 1000,
+    "max_depth": 3,
+    "learning_rate": 0.02,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "reg_lambda": 5.0,
+    "n_jobs": -1
+  },
+  "label_mean": 0.31512606143951416,
+  "label_min": 0.0,
+  "label_max": 1.0,
+  "split_unit": "complete raw_case_id system",
+  "split_horizon": 10000.0,
+  "split_ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "split_counts": {
+    "train": 3498,
+    "val": 750,
+    "test": 750
+  },
+  "binary_threshold_policy": null,
+  "binary_threshold_override": null,
+  "equation2_group_rule": null,
+  "equation4_group_rule": null,
+  "equation4_reference": null,
+  "equation4_lk_radicand_policy": null,
+  "pretrained_mlp_source": null,
+  "pretrained_mlp_expected_sha256": null,
+  "pretrained_mlp_group_rule": null,
+  "pretrained_ghost_mlp_source": "https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_ghost_v1.2.2.pkl",
+  "pretrained_ghost_mlp_expected_sha256": "a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866",
+  "pretrained_ghost_mlp_group_rule": "binary_any uses the minimum variation stable probability at fixed 0.5; a secondary operating point selects the validation-F1 threshold; stable_fraction uses the mean variation stable probability"
+}

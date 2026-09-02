@@ -91,6 +91,18 @@ The adapter verifies SHA-256
 `f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436`
 before loading the pickle. The artifact is intentionally not tracked by Git.
 
+The optional `pretrained_ghost_mlp` baseline has the same input and aggregation
+interface, but uses the official ghost-orbit divergence labels. Download it with:
+
+```bash
+curl -L \
+  https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_ghost_v1.2.2.pkl \
+  -o external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl
+```
+
+Its verified SHA-256 is
+`a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866`.
+
 MLP presets:
 - `--mlp-size small`: hidden `(64,64,32)`, dropout `0.1`
 - `--mlp-size base`: hidden `(128,128,64)`, dropout `0.2`

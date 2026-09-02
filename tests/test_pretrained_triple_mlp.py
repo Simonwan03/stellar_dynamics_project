@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 
 from tasks.common.pretrained_triple_mlp import (
+    PRETRAINED_GHOST_MLP_SHA256,
+    PRETRAINED_MLP_ARTIFACTS,
+    PRETRAINED_MLP_SHA256,
     build_pretrained_mlp_features,
     load_pretrained_mlp_initial_conditions,
 )
@@ -15,6 +18,16 @@ from tasks.task_a.main import aggregate_pretrained_mlp_predictions
 
 
 class PretrainedTripleMlpFeatureTest(unittest.TestCase):
+    def test_both_official_1_2_2_artifacts_are_registered(self) -> None:
+        self.assertEqual(
+            PRETRAINED_MLP_ARTIFACTS[PRETRAINED_MLP_SHA256]["variant"],
+            "semimajor_axis_change",
+        )
+        self.assertEqual(
+            PRETRAINED_MLP_ARTIFACTS[PRETRAINED_GHOST_MLP_SHA256]["variant"],
+            "ghost_orbit_divergence",
+        )
+
     def test_exact_upstream_feature_order_and_inclination_normalization(self) -> None:
         features = build_pretrained_mlp_features(
             q_in=np.asarray([0.25, 0.5]),

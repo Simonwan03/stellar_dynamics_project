@@ -1,0 +1,160 @@
+{
+  "pretrained_ghost_mlp": {
+    "train": {
+      "mse": 0.10388961126237453,
+      "rmse": 0.3223191140195917,
+      "mae": 0.2174023372470489,
+      "median_absolute_error": 0.13033813443355446,
+      "r2": 0.333212678491828,
+      "explained_variance": 0.38314930078351495,
+      "pearson": 0.6674224848707719,
+      "spearman": 0.666386178348012,
+      "mean_bias_error": 0.08820678145980033,
+      "target_mean": 0.3137507146941109,
+      "prediction_mean": 0.4019574961539113,
+      "within_abs_error_0.05": 0.3536306460834763,
+      "within_abs_error_0.10": 0.4556889651229274,
+      "within_abs_error_0.20": 0.5917667238421955,
+      "binomial_sampling_mse_estimate": 0.0018595307809819897,
+      "mse_over_binomial_noise": 55.86872361828397,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 2194,
+          "mae": 0.2074800364616549,
+          "rmse": 0.322172287295265,
+          "bias": 0.19106613890600097
+        },
+        "0.25-0.5": {
+          "count": 262,
+          "mae": 0.30487542378943594,
+          "rmse": 0.35345075321177755,
+          "bias": 0.16397161012873634
+        },
+        "0.5-0.75": {
+          "count": 216,
+          "mae": 0.2715409153887036,
+          "rmse": 0.31532948241102954,
+          "bias": -0.020972540204973283
+        },
+        "0.75-1": {
+          "count": 826,
+          "mae": 0.20185469362774094,
+          "rmse": 0.31405961090106693,
+          "bias": -0.18048702225525332
+        }
+      }
+    },
+    "val": {
+      "mse": 0.10477177930166696,
+      "rmse": 0.3236846911759451,
+      "mae": 0.22005873304033913,
+      "median_absolute_error": 0.13789519888412546,
+      "r2": 0.32690606392668153,
+      "explained_variance": 0.3658013203332391,
+      "pearson": 0.6549994019956179,
+      "spearman": 0.6781081995648921,
+      "mean_bias_error": 0.07780950278658802,
+      "target_mean": 0.317125,
+      "prediction_mean": 0.394934502786588,
+      "within_abs_error_0.05": 0.3426666666666667,
+      "within_abs_error_0.10": 0.44,
+      "within_abs_error_0.20": 0.5946666666666667,
+      "binomial_sampling_mse_estimate": 0.0019031168619791667,
+      "mse_over_binomial_noise": 55.0527302841027,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 470,
+          "mae": 0.20503885626388502,
+          "rmse": 0.31831116297112677,
+          "bias": 0.18698707796881012
+        },
+        "0.25-0.5": {
+          "count": 57,
+          "mae": 0.2710486390777814,
+          "rmse": 0.3353605948414318,
+          "bias": 0.14688424555774363
+        },
+        "0.5-0.75": {
+          "count": 43,
+          "mae": 0.2816273699718493,
+          "rmse": 0.3234910127927888,
+          "bias": -0.020165218389718888
+        },
+        "0.75-1": {
+          "count": 180,
+          "mae": 0.22842243333336293,
+          "rmse": 0.33372556827252464,
+          "bias": -0.20573387311907348
+        }
+      }
+    },
+    "test": {
+      "mse": 0.10556711534996509,
+      "rmse": 0.3249109344881534,
+      "mae": 0.21762536621731812,
+      "median_absolute_error": 0.1238989114862481,
+      "r2": 0.33588684067700825,
+      "explained_variance": 0.3846140339764471,
+      "pearson": 0.6703022753132838,
+      "spearman": 0.6847048463516369,
+      "mean_bias_error": 0.08800938428037726,
+      "target_mean": 0.31954166666666667,
+      "prediction_mean": 0.4075510509470439,
+      "within_abs_error_0.05": 0.36666666666666664,
+      "within_abs_error_0.10": 0.46266666666666667,
+      "within_abs_error_0.20": 0.5973333333333334,
+      "binomial_sampling_mse_estimate": 0.0018273518880208334,
+      "mse_over_binomial_noise": 57.77054547731506,
+      "by_target_bin": {
+        "0-0.25": {
+          "count": 470,
+          "mae": 0.21144837773291697,
+          "rmse": 0.3258258475292892,
+          "bias": 0.19532052674693595
+        },
+        "0.25-0.5": {
+          "count": 52,
+          "mae": 0.3159318998237379,
+          "rmse": 0.3578699156007632,
+          "bias": 0.10093338830861215
+        },
+        "0.5-0.75": {
+          "count": 41,
+          "mae": 0.2907546294895882,
+          "rmse": 0.3293876489745667,
+          "bias": 0.011305598468439669
+        },
+        "0.75-1": {
+          "count": 187,
+          "mae": 0.18978015255941247,
+          "rmse": 0.3117223055310303,
+          "bias": -0.16847954593599374
+        }
+      }
+    },
+    "metadata": {
+      "artifact_path": "/home/wan/stellar_dynamics/external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl",
+      "artifact_sha256": "a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866",
+      "variant": "ghost_orbit_divergence",
+      "source_url": "https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_ghost_v1.2.2.pkl",
+      "upstream_label_definition": "unstable if unbound or a nearby ghost orbit diverges beyond the upstream threshold",
+      "trained_sklearn_version": "1.2.2",
+      "runtime_sklearn_version": "1.8.0",
+      "input_order": [
+        "q_in",
+        "q_out",
+        "alpha",
+        "e_in",
+        "e_out",
+        "i_mut/pi"
+      ],
+      "class_1_semantics": "unstable",
+      "variation_decision": "stable iff probability_unstable < 0.5",
+      "rows": 160000,
+      "rows_inside_training_domain": 159488,
+      "rows_outside_training_domain": 512,
+      "binary_group_score": "minimum variation probability_stable",
+      "stable_fraction_group_score": "mean variation probability_stable"
+    }
+  }
+}

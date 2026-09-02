@@ -241,8 +241,8 @@ python scripts/create_common_case_split.py \
 
 **模型族**
 
-- `binary_any`：`equation2`、`equation4`、`pretrained_mlp`、`mlp`、`xgboost`
-- `stable_fraction`：`equation2`、`equation4`、`pretrained_mlp`、`mlp`、`xgboost`
+- `binary_any`：`equation2`、`equation4`、`pretrained_mlp`、`pretrained_ghost_mlp`、`mlp`、`xgboost`
+- `stable_fraction`：`equation2`、`equation4`、`pretrained_mlp`、`pretrained_ghost_mlp`、`mlp`、`xgboost`
 
 其中 `equation2` 直接使用原始初始条件中的半长轴比、外轨偏心率、质量和轨道
 角动量方向，按 Equation (2) 计算每条 variation 的稳定性；system 只有在 32 条
@@ -281,6 +281,20 @@ sha256sum external_checkpoints/triple_stability/mlp_model_trip_v1.2.2.pkl
 `f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436`。
 这个模型由 scikit-learn `1.2.2` 保存；当前 `1.8.0` 环境可以推理，版本差异会记录在
 `pretrained_mlp_metadata.json`。
+
+`pretrained_ghost_mlp` 使用同一官方仓库的
+`mlp_model_trip_ghost_v1.2.2.pkl`，输入和 Task A 聚合方式不变，但训练标签还会把
+与微扰 ghost 轨道显著发散的束缚系统视为 unstable。下载命令与校验值为：
+
+```bash
+curl -L \
+  https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_ghost_v1.2.2.pkl \
+  -o external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl
+sha256sum external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl
+```
+
+预期 SHA-256 为
+`a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866`。
 
 `stable_fraction` 是连续值回归；`binary_any` 是 system-level 的 0/1 分类。
 在 `binary_any` 模式下，MLP 默认使用 `BCEWithLogitsLoss`，XGBoost 使用
@@ -359,14 +373,17 @@ conda run -n stellar python -m tasks.task_a \
 | --- | ---: | ---: | ---: | ---: |
 | Equation (2) | 0.6187 | 0.4414 | 0.7529 | 0.2810 |
 | Equation (4) | 0.6600 | 0.4540 | 0.7536 | 0.2887 |
-| Official pretrained MLP（固定 0.5） | 0.6453 | 0.4701 | **0.9124** | **0.6934** |
-| Official pretrained MLP（val 阈值 0.8232） | 0.7933 | **0.5658** | **0.9124** | **0.6934** |
+| Official pretrained MLP（固定 0.5） | 0.6453 | 0.4701 | **0.9124** | 0.6934 |
+| Official pretrained MLP（val 阈值 0.8232） | 0.7933 | 0.5658 | **0.9124** | 0.6934 |
+| Official Ghost MLP（固定 0.5） | 0.7267 | 0.5060 | 0.9086 | **0.7184** |
+| Official Ghost MLP（val 阈值 0.6872） | **0.8120** | **0.5841** | 0.9086 | **0.7184** |
 | MLP-base | 0.7507 | 0.4905 | 0.8416 | 0.5139 |
 | XGBoost-base | **0.8053** | 0.5350 | 0.8525 | 0.5089 |
 
 Equation (4) 和 pretrained MLP 的独立完整运行产物分别位于
 `results/task_a_common/equation4_binary/` 和
-`results/task_a_common/pretrained_mlp_binary/`。pretrained MLP 在固定官方阈值下
+`results/task_a_common/pretrained_mlp_binary/`。Ghost 版结果位于
+`results/task_a_common/pretrained_ghost_mlp_binary/`。pretrained MLP 在固定官方阈值下
 偏向预测 stable，accuracy 不高，但 AUROC/AUPRC 显著领先，说明跨数据集排序能力强而
 阈值校准不匹配；只调整 validation operating point 后，test F1 提升到 0.5658，
 超过本地 MLP/XGBoost。论文原始标签要求存活 100 个外轨周期且
@@ -403,13 +420,15 @@ conda run -n stellar python -m tasks.task_a \
 | Equation (2) | 0.2488 | 0.4988 | 0.3073 | -0.5653 |
 | Equation (4) | 0.2268 | 0.4763 | 0.2853 | -0.4269 |
 | Official pretrained MLP | 0.1294 | 0.3597 | 0.2397 | 0.1859 |
-| MLP-base | 0.0901 | 0.3001 | **0.2247** | 0.4335 |
+| Official Ghost MLP | 0.1056 | 0.3249 | **0.2176** | 0.3359 |
+| MLP-base | 0.0901 | 0.3001 | 0.2247 | 0.4335 |
 | XGBoost-base | **0.0884** | **0.2972** | 0.2330 | **0.4442** |
 
 两个解析判据 stable-fraction 的独立完整运行产物分别位于
 `results/task_a_common/equation2_stable_fraction/` 和
 `results/task_a_common/equation4_stable_fraction/`；pretrained MLP 结果位于
 `results/task_a_common/pretrained_mlp_stable_fraction/`。
+Ghost 版结果位于 `results/task_a_common/pretrained_ghost_mlp_stable_fraction/`。
 
 ### Task B: Prefix-Based Instability Prediction
 

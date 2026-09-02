@@ -1,0 +1,24 @@
+{
+  "artifact_path": "/home/wan/stellar_dynamics/external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl",
+  "artifact_sha256": "a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866",
+  "variant": "ghost_orbit_divergence",
+  "source_url": "https://raw.githubusercontent.com/pavanvyn/triple-stability/main/mlp_model_trip_ghost_v1.2.2.pkl",
+  "upstream_label_definition": "unstable if unbound or a nearby ghost orbit diverges beyond the upstream threshold",
+  "trained_sklearn_version": "1.2.2",
+  "runtime_sklearn_version": "1.8.0",
+  "input_order": [
+    "q_in",
+    "q_out",
+    "alpha",
+    "e_in",
+    "e_out",
+    "i_mut/pi"
+  ],
+  "class_1_semantics": "unstable",
+  "variation_decision": "stable iff probability_unstable < 0.5",
+  "rows": 160000,
+  "rows_inside_training_domain": 159488,
+  "rows_outside_training_domain": 512,
+  "binary_group_score": "minimum variation probability_stable",
+  "stable_fraction_group_score": "mean variation probability_stable"
+}

@@ -45,7 +45,10 @@ from tasks.common.traditional_stability import (
     load_vynatheya2022_initial_conditions,
 )
 from tasks.common.pretrained_triple_mlp import (
+    DEFAULT_PRETRAINED_GHOST_MLP_PATH,
     DEFAULT_PRETRAINED_MLP_PATH,
+    PRETRAINED_GHOST_MLP_SHA256,
+    PRETRAINED_GHOST_MLP_SOURCE_URL,
     PRETRAINED_MLP_SHA256,
     PRETRAINED_MLP_SOURCE_URL,
     load_pretrained_mlp_initial_conditions,
@@ -764,6 +767,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--pretrained-ghost-mlp-path",
+        type=Path,
+        default=DEFAULT_PRETRAINED_GHOST_MLP_PATH,
+        help=(
+            "Official Vynatheya et al. mlp_model_trip_ghost_v1.2.2.pkl artifact. "
+            "Required only when --models includes pretrained_ghost_mlp."
+        ),
+    )
+    parser.add_argument(
         "--mlp-size",
         choices=sorted(MLP_PRESETS),
         default="base",
@@ -866,7 +878,18 @@ def main() -> None:
         if alias in models:
             models.remove(alias)
             models.add("pretrained_mlp")
-    allowed_models = {"equation2", "equation4", "pretrained_mlp", "mlp", "xgboost"}
+    for alias in ("ghost_mlp", "paper_ghost_mlp", "vynatheya_ghost_mlp"):
+        if alias in models:
+            models.remove(alias)
+            models.add("pretrained_ghost_mlp")
+    allowed_models = {
+        "equation2",
+        "equation4",
+        "pretrained_mlp",
+        "pretrained_ghost_mlp",
+        "mlp",
+        "xgboost",
+    }
     unsupported = sorted(models - allowed_models)
     if unsupported:
         raise ValueError(
@@ -1019,6 +1042,11 @@ def main() -> None:
                         if "pretrained_mlp" in models
                         else None
                     ),
+                    "pretrained_ghost_mlp": (
+                        "fixed_upstream_0.5_plus_validation_max_f1"
+                        if "pretrained_ghost_mlp" in models
+                        else None
+                    ),
                 }
             )
             if args.target_mode == "binary_any"
@@ -1057,6 +1085,23 @@ def main() -> None:
                 "a secondary operating point selects the validation-F1 threshold; "
                 "stable_fraction uses the mean variation stable probability"
                 if "pretrained_mlp" in models
+                else None
+            ),
+            "pretrained_ghost_mlp_source": (
+                PRETRAINED_GHOST_MLP_SOURCE_URL
+                if "pretrained_ghost_mlp" in models
+                else None
+            ),
+            "pretrained_ghost_mlp_expected_sha256": (
+                PRETRAINED_GHOST_MLP_SHA256
+                if "pretrained_ghost_mlp" in models
+                else None
+            ),
+            "pretrained_ghost_mlp_group_rule": (
+                "binary_any uses the minimum variation stable probability at fixed 0.5; "
+                "a secondary operating point selects the validation-F1 threshold; "
+                "stable_fraction uses the mean variation stable probability"
+                if "pretrained_ghost_mlp" in models
                 else None
             ),
         },
@@ -1143,10 +1188,16 @@ def main() -> None:
             )
         save_csv(output_dir / "equation4_predictions.csv", equation4_rows)
 
-    if "pretrained_mlp" in models:
+    pretrained_model_paths = {
+        "pretrained_mlp": args.pretrained_mlp_path,
+        "pretrained_ghost_mlp": args.pretrained_ghost_mlp_path,
+    }
+    for pretrained_name, pretrained_path in pretrained_model_paths.items():
+        if pretrained_name not in models:
+            continue
         pretrained_groups, pretrained_metadata = pretrained_mlp_group_predictions(
             ics_path,
-            args.pretrained_mlp_path,
+            pretrained_path,
             case_ids,
             group_size=args.group_size,
         )
@@ -1196,7 +1247,7 @@ def main() -> None:
             "stable_fraction_group_score": "mean variation probability_stable",
         }
         pretrained_metrics["metadata"] = pretrained_metadata
-        all_metrics["pretrained_mlp"] = pretrained_metrics
+        all_metrics[pretrained_name] = pretrained_metrics
         pretrained_rows = []
         for row, case_id in enumerate(case_ids):
             pretrained_rows.append(
@@ -1225,8 +1276,8 @@ def main() -> None:
                     ),
                 }
             )
-        save_csv(output_dir / "pretrained_mlp_predictions.csv", pretrained_rows)
-        save_json(output_dir / "pretrained_mlp_metadata.json", pretrained_metadata)
+        save_csv(output_dir / f"{pretrained_name}_predictions.csv", pretrained_rows)
+        save_json(output_dir / f"{pretrained_name}_metadata.json", pretrained_metadata)
 
     if "mlp" in models:
         train_loader, test_loader = make_loaders(X_train, y_train, args.batch_size, (X_test, y_test))

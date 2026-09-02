@@ -938,10 +938,25 @@ def load_completion_metadata(
         with h5py.File(source.path, "r") as handle:
             time_key = "times_complete" if "times_complete" in handle else "times"
             time_grid = np.asarray(handle[time_key][0], dtype=np.float64)
+            source_time_steps = int(handle.attrs.get("source_time_steps", time_grid.size))
+            source_time_end_attr = handle.attrs.get("source_time_end")
         finite_time = time_grid[np.isfinite(time_grid)]
         if finite_time.size == 0:
             raise ValueError(f"No finite time grid in {source.path}")
-        time_scale = float(finite_time[-1] / completion_horizon) if completion_horizon > 0 else 1.0
+        source_time_end = float(finite_time[-1])
+        if source_time_end_attr is not None:
+            candidate_end = float(np.asarray(source_time_end_attr).reshape(-1)[0])
+            if np.isfinite(candidate_end):
+                source_time_end = candidate_end
+        elif source_time_steps > time_grid.size and finite_time.size >= 2:
+            # Prefix files retain the original number of time steps in an
+            # attribute; reconstruct the full endpoint instead of scaling from
+            # the truncated prefix endpoint.
+            deltas = np.diff(finite_time)
+            finite_deltas = deltas[np.isfinite(deltas) & (deltas > 0.0)]
+            if finite_deltas.size:
+                source_time_end = float(finite_time[0] + np.median(finite_deltas) * (source_time_steps - 1))
+        time_scale = float(source_time_end / completion_horizon) if completion_horizon > 0 else 1.0
         event_times = batch[:, 2] * time_scale
         lengths = np.searchsorted(time_grid, event_times, side="right").astype(np.int64)
         lengths = np.clip(lengths, 0, source.time_steps)

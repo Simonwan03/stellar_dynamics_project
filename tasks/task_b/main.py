@@ -157,8 +157,12 @@ def load_aligned_labels(
             "diagnosis": "int64",
         }
     )
-    labels["batch_id"] = labels["index"] // runs_per_batch
-    labels["row_in_batch"] = labels["index"] % runs_per_batch
+    # The completion table already records the output batch.  Derive the row
+    # order within each batch from the global index so shards with a different
+    # row count (for example sampling_3: 4000 instead of 8000) align correctly.
+    labels["batch_id"] = labels["num_batch"]
+    labels = labels.sort_values(["batch_id", "index"]).reset_index(drop=True)
+    labels["row_in_batch"] = labels.groupby("batch_id", sort=False).cumcount()
     frames = []
     for batch_id, row_count in zip(batch_ids, rows_loaded):
         frame = labels[(labels["batch_id"] == batch_id) & (labels["row_in_batch"] < row_count)].copy()

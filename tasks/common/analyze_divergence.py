@@ -277,7 +277,7 @@ def analyze(
         trajectory_times,
         censor_time,
         percentiles,
-        "(a) Trajectory level",
+        "(a) Individual",
         population_label="trajectories",
     )
     plot_population(
@@ -285,7 +285,7 @@ def analyze(
         group_times,
         censor_time,
         percentiles,
-        "(b) System level",
+        "(b) Ensemble",
         population_label="systems",
         show_ylabel=False,
     )

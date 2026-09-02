@@ -2,7 +2,7 @@
 
 The upstream artifact is a scikit-learn pickle. Loading pickle can execute
 arbitrary code, so this adapter refuses to deserialize it unless its SHA-256
-matches the known official ``mlp_model_trip_v1.2.2.pkl`` artifact.
+matches one of the known official scikit-learn 1.2.2 artifacts.
 """
 
 from __future__ import annotations
@@ -26,12 +26,42 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PRETRAINED_MLP_PATH = (
     ROOT / "external_checkpoints" / "triple_stability" / "mlp_model_trip_v1.2.2.pkl"
 )
+DEFAULT_PRETRAINED_GHOST_MLP_PATH = (
+    ROOT
+    / "external_checkpoints"
+    / "triple_stability"
+    / "mlp_model_trip_ghost_v1.2.2.pkl"
+)
 PRETRAINED_MLP_SOURCE_URL = (
     "https://raw.githubusercontent.com/pavanvyn/triple-stability/"
     "main/mlp_model_trip_v1.2.2.pkl"
 )
 PRETRAINED_MLP_SHA256 = "f8bc2f192813145f42683669adaef6448a287523875895343453055b3acf1436"
+PRETRAINED_GHOST_MLP_SOURCE_URL = (
+    "https://raw.githubusercontent.com/pavanvyn/triple-stability/"
+    "main/mlp_model_trip_ghost_v1.2.2.pkl"
+)
+PRETRAINED_GHOST_MLP_SHA256 = (
+    "a260845fc9c5b80ede3ab0028ac582bffa8450dad0c23f3ce78d73987932b866"
+)
 PRETRAINED_MLP_TRAINED_SKLEARN_VERSION = "1.2.2"
+
+PRETRAINED_MLP_ARTIFACTS: dict[str, dict[str, str]] = {
+    PRETRAINED_MLP_SHA256: {
+        "variant": "semimajor_axis_change",
+        "source_url": PRETRAINED_MLP_SOURCE_URL,
+        "label_definition": (
+            "unstable if unbound or either semimajor axis changes by more than 10 percent"
+        ),
+    },
+    PRETRAINED_GHOST_MLP_SHA256: {
+        "variant": "ghost_orbit_divergence",
+        "source_url": PRETRAINED_GHOST_MLP_SOURCE_URL,
+        "label_definition": (
+            "unstable if unbound or a nearby ghost orbit diverges beyond the upstream threshold"
+        ),
+    },
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -95,15 +125,21 @@ def load_pretrained_mlp_initial_conditions(
     if group_size <= 0:
         raise ValueError(f"group_size must be positive, got {group_size}.")
     if not model_path.exists():
+        source_url = (
+            PRETRAINED_GHOST_MLP_SOURCE_URL
+            if "ghost" in model_path.name.lower()
+            else PRETRAINED_MLP_SOURCE_URL
+        )
         raise FileNotFoundError(
             f"Missing pretrained MLP artifact: {model_path}. Download the official file with:\n"
-            f"curl -L {PRETRAINED_MLP_SOURCE_URL} -o {model_path}"
+            f"curl -L {source_url} -o {model_path}"
         )
     artifact_sha256 = sha256_file(model_path)
-    if artifact_sha256 != PRETRAINED_MLP_SHA256:
+    artifact = PRETRAINED_MLP_ARTIFACTS.get(artifact_sha256)
+    if artifact is None:
         raise ValueError(
             "Refusing to load unverified pretrained MLP pickle: "
-            f"expected SHA-256 {PRETRAINED_MLP_SHA256}, got {artifact_sha256}."
+            f"expected one of {sorted(PRETRAINED_MLP_ARTIFACTS)}, got {artifact_sha256}."
         )
 
     required_keys = ("aratios", "eccs", "masses", "h_uvecs")
@@ -186,7 +222,9 @@ def load_pretrained_mlp_initial_conditions(
     metadata: dict[str, Any] = {
         "artifact_path": str(model_path.resolve()),
         "artifact_sha256": artifact_sha256,
-        "source_url": PRETRAINED_MLP_SOURCE_URL,
+        "variant": artifact["variant"],
+        "source_url": artifact["source_url"],
+        "upstream_label_definition": artifact["label_definition"],
         "trained_sklearn_version": PRETRAINED_MLP_TRAINED_SKLEARN_VERSION,
         "runtime_sklearn_version": sklearn.__version__,
         "input_order": ["q_in", "q_out", "alpha", "e_in", "e_out", "i_mut/pi"],
