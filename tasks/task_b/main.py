@@ -416,6 +416,20 @@ class SequenceDataset(Dataset):
         return self.X[index], self.y[index]
 
 
+class MLPClassifier(nn.Module):
+    """Flattened-prefix MLP baseline for trajectory binary classification."""
+    def __init__(self, input_dim: int, hidden: tuple[int, ...] = (256, 128, 64), dropout: float = 0.2):
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_dim = input_dim
+        for width in hidden:
+            layers.extend([nn.Linear(in_dim, width), nn.GELU(), nn.Dropout(dropout)])
+            in_dim = width
+        layers.append(nn.Linear(in_dim, 1))
+        self.net = nn.Sequential(*layers)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x.reshape(x.size(0), -1))
+
 class CNN1DClassifier(nn.Module):
     def __init__(self, input_dim: int, hidden: int = 96, dropout: float = 0.2):
         super().__init__()
@@ -776,10 +790,13 @@ def train_classifier(
     weight_decay: float,
     device: torch.device,
     early_stopping_patience: int = 0,
+    amp: bool = False,
 ) -> tuple[nn.Module, list[dict[str, float]]]:
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.BCEWithLogitsLoss()
+    use_amp = bool(amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=True) if use_amp else None
     history: list[dict[str, float]] = []
     best_state = None
     best_auc = -float("inf")
@@ -789,15 +806,22 @@ def train_classifier(
         loss_sum = 0.0
         count = 0
         for xb, yb in train_loader:
-            logits = model(xb.to(device))
-            yb = yb.to(device)
             optimizer.zero_grad(set_to_none=True)
-            loss = criterion(logits, yb)
-            loss.backward()
-            optimizer.step()
+            xb = xb.to(device, non_blocking=use_amp)
+            yb = yb.to(device, non_blocking=use_amp)
+            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+                logits = model(xb)
+                loss = criterion(logits, yb)
+            if scaler is None:
+                loss.backward()
+                optimizer.step()
+            else:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
             loss_sum += float(loss.item()) * yb.size(0)
             count += yb.size(0)
-        y_val, prob = predict_classifier(model, val_loader, device)
+        y_val, prob = predict_classifier(model, val_loader, device, amp=use_amp)
         metrics = binary_metrics_from_probs(y_val, prob)
         history.append({"epoch": epoch, "loss": loss_sum / max(count, 1), "val_auc": metrics["auc"], "val_f1": metrics["f1"]})
         if is_improved(metrics["auc"], best_auc, mode="max"):
@@ -866,12 +890,19 @@ def train_sequence_regressor(
 
 
 @torch.no_grad()
-def predict_classifier(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+def predict_classifier(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    amp: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
+    use_amp = bool(amp and device.type == "cuda")
     y_all: list[np.ndarray] = []
     p_all: list[np.ndarray] = []
     for xb, yb in loader:
-        logits = model(xb.to(device))
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
+            logits = model(xb.to(device, non_blocking=use_amp))
         y_all.append(yb.numpy().reshape(-1))
         p_all.append(torch.sigmoid(logits).cpu().numpy().reshape(-1))
     return np.concatenate(y_all), np.concatenate(p_all)
@@ -1258,6 +1289,11 @@ def main() -> None:
         save_binary_curves(output_dir / "svm_test_curves.png", y_test, prob, "Task B SVM")
 
     model_factories = {
+        "mlp": lambda: MLPClassifier(
+            X_train.shape[1] * X_train.shape[2],
+            hidden=(256, 128, 64),
+            dropout=args.dropout,
+        ),
         "cnn": lambda: CNN1DClassifier(X_train.shape[-1], hidden=cnn_hidden, dropout=args.dropout),
         "tcn": lambda: TCNClassifier(X_train.shape[-1], hidden=tcn_hidden, levels=tcn_levels, dropout=args.dropout),
         "gru": lambda: GRUClassifier(X_train.shape[-1], hidden=gru_hidden, layers=gru_layers, dropout=args.dropout),

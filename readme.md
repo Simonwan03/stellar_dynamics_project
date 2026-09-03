@@ -567,6 +567,26 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 召回率也由 `0.6101` 提升到 `0.8297`。SVM 的提升较小，说明更长观测
 需要合适的时序归纳偏置才能转化为有效的早期预警信号。
 
+#### 新高分辨率 `sampling_3` 数据集：`prefix=512`
+
+在新高分辨率数据集上重新运行 `trajectory_binary` Task B，仅使用前 `512` 个时间步。
+输入为 `orbital15`，标签 horizon 为 `10000`，并按完整 `raw_case_id` system 做切分。
+过滤无效标签和非有限 prefix 后共有 `159936` 条 trajectory（`4998` 个完整 systems）；
+train/val/test 分别为 `111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。
+以下结果以 stable 为正类、阈值为 `0.5`；三种模型使用相同的 seed `42`、最大 `50` 个
+epochs、early stopping patience `8`、batch size `2048` 和 CUDA AMP。
+
+| Model | Accuracy | Balanced Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MLP | 0.7676 | 0.6845 | 0.6814 | 0.4668 | 0.5540 | 0.8507 | 0.6701 |
+| CNN | **0.8040** | 0.7408 | **0.7335** | 0.5751 | 0.6447 | **0.8837** | **0.7494** |
+| TCN | 0.7771 | **0.7865** | 0.6040 | **0.8109** | **0.6923** | 0.8684 | 0.7124 |
+
+TCN 的 F1、Recall 和 Balanced Accuracy 最高；CNN 的 Accuracy、Precision、AUROC 和
+AUPRC 最高。完整指标与预测产物位于
+[`results/task_b_sampling3_prefix512/`](results/task_b_sampling3_prefix512/)，运行脚本为
+[`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)。
+
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
 入口脚本：[tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
