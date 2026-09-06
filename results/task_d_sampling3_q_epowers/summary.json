@@ -1,0 +1,164 @@
+{
+  "definition": {
+    "observable": "Q = a_in/a_out",
+    "growth": "G(t) = abs(Delta Q(t)) / abs(Delta Q(0))",
+    "thresholds": [
+      2.718281828459045,
+      7.38905609893065,
+      20.085536923187668,
+      54.598150033144236,
+      148.4131591025766,
+      403.4287934927351,
+      1096.6331584284585,
+      2980.9579870417283
+    ],
+    "fit": "OLS: t_cross/P_out,0 = intercept + (T_L,Q/P_out,0)*log(G)",
+    "interpolation": "linear in log G between stored samples",
+    "candidate_quality": {
+      "min_crossings": 3,
+      "r2_min": 0.8,
+      "positive_slope": true
+    },
+    "time_resolved_quality_addition": {
+      "min_crossing_span_periods": 3.0
+    },
+    "system_aggregation": "median pair lambda, then reciprocal",
+    "min_valid_pairs_per_system": 8
+  },
+  "dataset": {
+    "dataset_dir": "/data/dataset_sampling_3_prefix1024_float64",
+    "num_shards": 40,
+    "num_complete_systems": 4998,
+    "num_pairs": 79968,
+    "time_steps": 1024,
+    "time_step_in_initial_outer_periods": 1.0000000000000002
+  },
+  "threshold_crossings": {
+    "2.71828182846": {
+      "pair_crossed": 79958,
+      "pair_crossed_fraction": 0.999874949979992,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "7.38905609893": {
+      "pair_crossed": 79946,
+      "pair_crossed_fraction": 0.9997248899559824,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "20.0855369232": {
+      "pair_crossed": 79921,
+      "pair_crossed_fraction": 0.9994122649059624,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "54.5981500331": {
+      "pair_crossed": 79897,
+      "pair_crossed_fraction": 0.9991121448579432,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "148.413159103": {
+      "pair_crossed": 79825,
+      "pair_crossed_fraction": 0.9982117847138856,
+      "system_any_pair_crossed": 4997,
+      "system_any_pair_crossed_fraction": 0.9997999199679872
+    },
+    "403.428793493": {
+      "pair_crossed": 79494,
+      "pair_crossed_fraction": 0.9940726290516206,
+      "system_any_pair_crossed": 4994,
+      "system_any_pair_crossed_fraction": 0.9991996798719488
+    },
+    "1096.63315843": {
+      "pair_crossed": 77740,
+      "pair_crossed_fraction": 0.9721388555422169,
+      "system_any_pair_crossed": 4962,
+      "system_any_pair_crossed_fraction": 0.992797118847539
+    },
+    "2980.95798704": {
+      "pair_crossed": 74323,
+      "pair_crossed_fraction": 0.9294092637054822,
+      "system_any_pair_crossed": 4911,
+      "system_any_pair_crossed_fraction": 0.982593037214886
+    }
+  },
+  "quality_counts": {
+    "pair_candidates": 68074,
+    "pair_time_resolved": 57739,
+    "system_candidates": 4664,
+    "system_time_resolved": 3935
+  },
+  "pair_candidate_TL_over_Pout": {
+    "count": 68074,
+    "mean": 11.546051120185503,
+    "median": 2.5447410018382746,
+    "min": 0.038521487561171915,
+    "max": 314.377467805628,
+    "quantiles": {
+      "p1": 0.10484786884227416,
+      "p5": 0.19721705497730516,
+      "p10": 0.31302397953836136,
+      "p25": 0.6836340184240144,
+      "p50": 2.5447410018382746,
+      "p75": 11.216474923254559,
+      "p90": 31.68089735945942,
+      "p95": 57.72249506039768,
+      "p99": 117.46902166838976
+    }
+  },
+  "pair_time_resolved_TL_over_Pout": {
+    "count": 57739,
+    "mean": 13.566587272911182,
+    "median": 4.186414420491116,
+    "min": 0.3334042141338946,
+    "max": 314.377467805628,
+    "quantiles": {
+      "p1": 0.4410886412323964,
+      "p5": 0.5317221857247668,
+      "p10": 0.6438436216060331,
+      "p25": 1.1323317518926796,
+      "p50": 4.186414420491116,
+      "p75": 13.914187980205966,
+      "p90": 36.96577106527069,
+      "p95": 64.4385115213086,
+      "p99": 123.28430372357036
+    }
+  },
+  "system_candidate_TL_over_Pout": {
+    "count": 4664,
+    "mean": 9.512401816018782,
+    "median": 2.5173108192506226,
+    "min": 0.050957439400339206,
+    "max": 150.54029391653333,
+    "quantiles": {
+      "p1": 0.17249033797740618,
+      "p5": 0.2562469789518788,
+      "p10": 0.34169245645722723,
+      "p25": 0.6607858279401254,
+      "p50": 2.5173108192506226,
+      "p75": 10.478633194583466,
+      "p90": 25.62703781287357,
+      "p95": 42.29822122293204,
+      "p99": 89.81541215198902
+    }
+  },
+  "system_time_resolved_TL_over_Pout": {
+    "count": 3935,
+    "mean": 11.303035801423333,
+    "median": 4.317766248238632,
+    "min": 0.4575847473360914,
+    "max": 150.54029391653333,
+    "quantiles": {
+      "p1": 0.5098378931173781,
+      "p5": 0.6110276496066271,
+      "p10": 0.7190889977959335,
+      "p25": 1.226701701663724,
+      "p50": 4.317766248238632,
+      "p75": 12.977044517893606,
+      "p90": 29.660467689379576,
+      "p95": 46.577846376340936,
+      "p99": 92.70226346746696
+    }
+  }
+}

@@ -1,1 +1,1 @@
-"""Task F: stability-boundary sensitivity."""
+"""Task F: random-masked high-resolution trajectory stability prediction."""

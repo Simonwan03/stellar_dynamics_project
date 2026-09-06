@@ -1,7 +1,7 @@
 {
   "data_glob": "dataset_v3/results_batch_*_sampling_2.hdf5",
   "completed_systems": "/home/ubuntu/github/stellar_dynamics_project/dataset_v3/completed_systems_sampling_2.txt",
-  "output_dir": "results/task_f_boundary_sensitivity",
+  "output_dir": "results/task_g_boundary_sensitivity",
   "representation": "pair_ic54",
   "models": [
     "constant",

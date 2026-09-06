@@ -1,0 +1,136 @@
+{
+  "definition": {
+    "observable": "Q = a_in/a_out",
+    "growth": "G(t) = abs(Delta Q(t)) / abs(Delta Q(0))",
+    "thresholds": [
+      10.0,
+      30.0,
+      100.0,
+      271.8281828459045
+    ],
+    "fit": "OLS: t_cross/P_out,0 = intercept + (T_L,Q/P_out,0)*log(G)",
+    "interpolation": "linear in log G between stored samples",
+    "candidate_quality": {
+      "min_crossings": 3,
+      "r2_min": 0.8,
+      "positive_slope": true
+    },
+    "time_resolved_quality_addition": {
+      "min_crossing_span_periods": 3.0
+    },
+    "system_aggregation": "median pair lambda, then reciprocal",
+    "min_valid_pairs_per_system": 8
+  },
+  "dataset": {
+    "dataset_dir": "/data/dataset_sampling_3_prefix1024_float64",
+    "num_shards": 40,
+    "num_complete_systems": 4998,
+    "num_pairs": 79968,
+    "time_steps": 1024,
+    "time_step_in_initial_outer_periods": 1.0000000000000002
+  },
+  "threshold_crossings": {
+    "10": {
+      "pair_crossed": 79939,
+      "pair_crossed_fraction": 0.9996373549419768,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "30": {
+      "pair_crossed": 79912,
+      "pair_crossed_fraction": 0.9992997198879552,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "100": {
+      "pair_crossed": 79881,
+      "pair_crossed_fraction": 0.9989120648259304,
+      "system_any_pair_crossed": 4998,
+      "system_any_pair_crossed_fraction": 1.0
+    },
+    "271.828182846": {
+      "pair_crossed": 79682,
+      "pair_crossed_fraction": 0.9964235694277711,
+      "system_any_pair_crossed": 4996,
+      "system_any_pair_crossed_fraction": 0.9995998399359743
+    }
+  },
+  "quality_counts": {
+    "pair_candidates": 71168,
+    "pair_time_resolved": 47435,
+    "system_candidates": 4991,
+    "system_time_resolved": 3361
+  },
+  "pair_candidate_TL_over_Pout": {
+    "count": 71168,
+    "mean": 14.671930247150176,
+    "median": 2.5006936530790096,
+    "min": 0.03852148756117218,
+    "max": 397.75895624601617,
+    "quantiles": {
+      "p1": 0.10005682047168041,
+      "p5": 0.16406370430348663,
+      "p10": 0.2479476955309173,
+      "p25": 0.6137307240077124,
+      "p50": 2.5006936530790096,
+      "p75": 14.974710765334176,
+      "p90": 44.71770324713369,
+      "p95": 69.03112672256752,
+      "p99": 140.01026739449676
+    }
+  },
+  "pair_time_resolved_TL_over_Pout": {
+    "count": 47435,
+    "mean": 21.798444923971925,
+    "median": 8.490889375168049,
+    "min": 0.8402088292850182,
+    "max": 397.75895624601617,
+    "quantiles": {
+      "p1": 0.9296925524638088,
+      "p5": 1.0777396758331874,
+      "p10": 1.2885411365868986,
+      "p25": 2.5039353401419446,
+      "p50": 8.490889375168049,
+      "p75": 27.049845351404507,
+      "p90": 59.210090849494506,
+      "p95": 83.42952648269258,
+      "p99": 167.45756005448993
+    }
+  },
+  "system_candidate_TL_over_Pout": {
+    "count": 4991,
+    "mean": 13.370162195739713,
+    "median": 2.866553679305138,
+    "min": 0.05095743940033922,
+    "max": 345.0748031475136,
+    "quantiles": {
+      "p1": 0.15465115912294794,
+      "p5": 0.21322234436590343,
+      "p10": 0.28287922650199965,
+      "p25": 0.6439959333295043,
+      "p50": 2.866553679305138,
+      "p75": 14.819964567761016,
+      "p90": 40.894751145672984,
+      "p95": 60.71255551338397,
+      "p99": 119.18429362517955
+    }
+  },
+  "system_time_resolved_TL_over_Pout": {
+    "count": 3361,
+    "mean": 19.938246097353115,
+    "median": 9.273428214487842,
+    "min": 0.9932871680865686,
+    "max": 345.0748031475136,
+    "quantiles": {
+      "p1": 1.1634142540378742,
+      "p5": 1.4142791665741121,
+      "p10": 1.69237534755493,
+      "p25": 3.140195506859755,
+      "p50": 9.273428214487842,
+      "p75": 25.668548223393902,
+      "p90": 52.05241385002876,
+      "p95": 71.35934261047811,
+      "p99": 134.45536726891413
+    }
+  }
+}

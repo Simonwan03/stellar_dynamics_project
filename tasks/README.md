@@ -15,7 +15,7 @@ tasks/
 ├── task_c/   # survival prediction
 ├── task_d/   # divergence-time regression
 ├── task_e/   # trajectory forecasting
-└── task_f/   # boundary sensitivity
+└── task_g/   # boundary sensitivity
 ```
 
 Every task can be launched as a package, for example
@@ -322,65 +322,80 @@ trajectory sampling clock uses different units and is not added to the horizons.
 
 ## Task D
 
-Task D now predicts a semimajor-axis Lyapunov proxy by default. For each of the
-16 `(i, i+16)` perturbation pairs, it reads the inner-orbit semimajor axis from
-`smaxes_complete[..., 0]` and computes
-`R_ij(t) = |a_i(t)-a_j(t)| / max(|a_i(0)-a_j(0)|, eps)`.
-The pair proxy is the first sampled time satisfying `R_ij(t) >= threshold`
-(main default `10000`). The system target is the earliest proxy among the 16 pairs,
-`tau_proxy = min_ij tau_ij`, and the regression target is `log(tau_proxy)`.
+Task D uses initial conditions only to predict the conditional 25th, 50th, and
+75th percentiles of a system-level semimajor-axis-ratio Lyapunov-time proxy.
+For pair `(i, i+16)`, define
 
-The first sampled crossing is an upper bound on the continuous crossing time.
-Systems for which no pair crosses are right-censored and excluded from point
-regression, while their fraction is retained in diagnostics. This proxy is not
-a variational-equation maximum Lyapunov time.
+`G_ij(t) = |Q_i(t)-Q_j(t)| / |Q_i(0)-Q_j(0)|`, with `Q=a_in/a_out`.
+
+The default pair label is `T_ij = t_cross(G=e^5)/5`, measured in initial outer
+periods. A system label is the reciprocal of the median valid pair growth rate,
+`T_system = 1 / median_ij(1/T_ij)`, requiring at least eight valid pairs. This
+is an observable finite-time proxy, not a variational-equation maximum
+Lyapunov time.
+
+Inputs are the `orbital15` initial conditions, with angles encoded as sine/cosine.
+The 16 nominal variations have the same physical values for these 15 features;
+their observed differences are only floating-point noise. Tabular models can
+therefore use `--tabular-features first` to take the first variation directly,
+instead of the default redundant mean/std/min/max summary. All models predict
+`log(T_system/P_out,0)` with q25/q50/q75 pinball losses.
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
-  --task-setting initial \
-  --label-observable smax \
-  --target-mode lyapunov_proxy \
-  --threshold 10000 \
-  --aggregation min \
-  --censoring-rule all_pairs \
-  --output-dir results/task_d_initial_lyapunov_proxy \
-  --mlp-epochs 80
-```
-
-`crossing_upper` remains as a backward-compatible alias for `lyapunov_proxy`.
-The former slope-fit target is available explicitly as
-`--target-mode fitted_lyapunov_time --lyapunov-aggregation median`.
-
-Run the full threshold and aggregation sensitivity grid with:
-
-```bash
-conda run -n stellar python -m tasks.task_d.sensitivity \
-  --thresholds 1000 3000 10000 30000 \
-  --aggregations min median \
-  --output-dir results/task_d_proxy_sensitivity \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --threshold-power 5 \
+  --models constant,gbr,mlp,deepsets \
+  --output-dir results/task_d_initial_quantiles \
   --device cuda
 ```
 
+Run the recommended label sensitivity comparison with:
+
 ```bash
-conda run -n stellar python -m tasks.task_d \
-  --task-setting initial \
-  --label-observable smax \
-  --target-mode min_instability \
-  --lyapunov-aggregation max \
-  --output-dir results/task_d_initial \
-  --growth-lower 1 \
-  --growth-upper 100 \
-  --growth-sensitivity-uppers 10 30 100 \
-  --lambda-r2-min 0 \
-  --min-valid-lambda-pairs 1 \
-  --mlp-epochs 80
+conda run -n stellar python -m tasks.task_d.sensitivity \
+  --threshold-powers 4 5 6 \
+  --models constant,gbr \
+  --output-dir results/task_d_initial_quantile_sensitivity
 ```
 
-The prefix setting predicts the same proxy using `cnn_orbital`,
-`cnn_phase_space`, and `set_cnn`. A strict forecasting interpretation requires
-the proxy crossing to occur after the observation prefix.
+Metrics include pinball loss and empirical coverage for every quantile, central
+50% interval coverage and width, median MAE/RMSE/Spearman, factor-two accuracy,
+and quantile-crossing rate. Crossing interpolation is linear in log growth and
+can be disabled with `--no-interpolation`.
 
-The proxy's time precision is limited by the stored trajectory sampling grid.
+### First-variation ablation (2026-09-06)
+
+The first-variation experiment used the same 4,996 systems, seed 42, and
+3,497/750/749 train/validation/test split as the summary-feature experiment.
+It requires XGBoost >= 2.0 for the native quantile objective.
+
+```bash
+conda run --no-capture-output -n stellar python -m tasks.task_d \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --threshold-power 5 \
+  --tabular-features first \
+  --models mlp,xgboost \
+  --output-dir results/task_d_first_variation_mlp_xgboost \
+  --device cuda
+```
+
+| Metric | Summary MLP (60D) | First-variation MLP (15D) | First-variation XGBoost (15D) |
+|---|---:|---:|---:|
+| Mean pinball loss (lower is better) | **0.2760** | 0.2762 | 0.3442 |
+| Median log-MAE (lower is better) | 0.6375 | **0.6349** | 0.7993 |
+| Median log-RMSE (lower is better) | 0.8456 | **0.8295** | 1.0268 |
+| Median Spearman (higher is better) | 0.8186 | **0.8261** | 0.7039 |
+| Median factor-two accuracy (higher is better) | 62.88% | **64.22%** | 53.67% |
+| Central 50% interval coverage | 45.66% | 41.12% | **46.19%** |
+
+Using only the first variation leaves MLP pinball loss effectively unchanged
+and slightly improves its point-prediction and ranking metrics. This supports
+the conclusion that the predictive signal comes from the base system's 15
+physical initial-condition features, rather than across-variation summaries or
+floating-point differences. MLP is more accurate than XGBoost, although its
+central interval is too narrow (41.12% empirical coverage versus the nominal
+50%). Full outputs are in `results/task_d_first_variation_mlp_xgboost/`.
 
 ## Task E
 

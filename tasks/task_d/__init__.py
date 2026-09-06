@@ -1,1 +1,1 @@
-"""Task D: Lyapunov-like divergence regression."""
+"""Task D: initial-condition prediction of Lyapunov-time quantiles."""

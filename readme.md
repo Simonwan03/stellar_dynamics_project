@@ -7,7 +7,7 @@
 - `Task C`: 对完整 32-variation 系统做 multi-horizon survival 预测
 - `Task D`: 用半长轴发散时间定义 Lyapunov-like 回归目标
 - `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
-- `Task F`: 用成对扰动初值预测 stability-boundary sensitivity
+- `Task G`: 用成对扰动初值预测 stability-boundary sensitivity
 
 完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-08-21)；其中会区分正式
 主实验、ablation、历史重跑和没有最终指标的目录。
@@ -829,109 +829,51 @@ Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
 32 条扰动 variation 的集合结构最有效。各模型误差总体随预测 horizon
 增长，符合混沌系统长期可预测性逐渐下降的预期。
 
-### Task D: Lyapunov-Proxy Regression
+### Task D: Initial Conditions → Lyapunov-Time Quantiles
 
-入口脚本：[tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
+入口脚本：[tasks/task_d/main.py](tasks/task_d/main.py)
 
-底层实现：[tasks/task_d/pipeline.py](/home/wan/stellar_dynamics/tasks/task_d/pipeline.py)
+底层实现：[tasks/task_d/quantile.py](tasks/task_d/quantile.py)
 
-**任务定义**
+Task D 现在只使用 system 的初始条件，预测 system-level semi-major-axis-ratio
+Lyapunov-time proxy 的条件 P25/P50/P75。对每个 `(i, i+16)` pair 定义
 
-`Task D` 默认读取 `smaxes_complete[..., 0]` 的内轨道半长轴，构造发散 proxy：
+`G_ij(t)=|Q_i(t)-Q_j(t)|/|Q_i(0)-Q_j(0)|`, `Q=a_in/a_out`。
 
-- 对 16 个 `(i, i+16)` perturbation pairs，读取两条轨迹的内轨道半长轴
-- 计算 `R_ij(t) = |a_i(t)-a_j(t)| / max(|a_i(0)-a_j(0)|, eps)`
-- 定义 pair-level proxy：`tau_ij = min{t: R_ij(t) >= threshold}`；主线默认 `threshold=10000`
-- 对 16 个 pair 取最早 crossing：`tau_proxy = min_ij tau_ij`
-- 主训练目标为 `log(tau_proxy)`
+默认 pair label 为 `T_ij=t_cross(G=e^5)/5`。system label 先对有效 pair 的
+`lambda_ij=1/T_ij` 取中位数，再取倒数；至少要求8个有效 pair。模型训练目标是
+`log(T_system/P_out,0)`。它是基于指定 observable 的 finite-time proxy，不是变分方程
+定义的最大 Lyapunov time。
 
-这表示同组 16 个扰动方向中，只要一个方向达到初始差异的 `threshold` 倍，就把首次
-采样到的 crossing time 作为 system-level proxy。无 crossing 的 system 是
-right-censored 样本，不进入 point-regression 训练，但会保留在诊断统计中。
-
-这是易计算的观测量 proxy，并不是由变分方程得到的严格最大 Lyapunov time。
-首次离散采样 crossing 还是连续 crossing time 的上界，其时间精度受存储采样网格限制。
-
-主实验命令：
+输入由前16个 nominal variations 的 `orbital15` 初始条件组成，角度使用 sin/cos。
+GBR/MLP 使用 permutation-invariant 的 mean/std/min/max 汇总，DeepSets 直接编码16元素
+集合。三个输出使用 pinball loss，并通过有序输出头保证 `q25 <= q50 <= q75`。
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
-  --task-setting initial \
-  --target-mode lyapunov_proxy \
-  --label-observable smax \
-  --threshold 10000 \
-  --aggregation min \
-  --censoring-rule all_pairs \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --group-size 32 \
-  --output-dir results/task_d_initial_lyapunov_proxy \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --threshold-power 5 \
+  --models constant,gbr,mlp,deepsets \
+  --output-dir results/task_d_initial_quantiles \
   --device cuda
 ```
 
-`crossing_upper` 保留为 `lyapunov_proxy` 的兼容别名。原先通过增长段 slope 倒数
-构造的 target 改名为 `--target-mode fitted_lyapunov_time`。
+默认按 system 做 70/15/15 train/validation/test split。评价包括各分位数 pinball
+loss 和 empirical coverage、中心50%区间 coverage/width、P50 MAE/RMSE/Spearman、
+factor-2 accuracy 与 quantile crossing rate。
 
-Threshold 与 pair aggregation 的完整敏感性实验：
+推荐同时运行 `e^4/e^5/e^6` label 敏感性实验：
 
 ```bash
 conda run -n stellar python -m tasks.task_d.sensitivity \
-  --thresholds 1000 3000 10000 30000 \
-  --aggregations min median \
-  --output-dir results/task_d_proxy_sensitivity \
-  --device cuda
+  --threshold-powers 4 5 6 \
+  --models constant,gbr \
+  --output-dir results/task_d_initial_quantile_sensitivity
 ```
 
-每个 cell 使用相同的 system split；汇总结果写入 `summary.csv`。主实验默认
-threshold 已设为 `10000`，`1000/3000/30000` 用于检验结论稳定性。
-
-```bash
-conda run -n stellar python -m tasks.task_d \
-  --task-setting initial \
-  --label-observable smax \
-  --target-mode lyapunov_proxy \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --group-size 32 \
-  --threshold 10000 \
-  --aggregation min \
-  --test-size 0.2 \
-  --seed 42 \
-  --output-dir results/task_d_initial_lyapunov_proxy \
-  --completion-table-name completed_systems_sampling_2.txt \
-  --mlp-epochs 80 \
-  --batch-size 128 \
-  --device cuda
-```
-
-**Task D-IC：initial-condition prediction**
-
-- 默认主实验：`--task-setting initial`
-- 输入只使用 `t=0` 的 masses、质量比、轨道尺度、偏心率、倾角、能量、角动量和周期等初始条件
-- 目标：`log(tau_proxy)`
-- 模型：`constant_median`、`random_forest`、`mlp`
-
-**Task D-Prefix：early-window prediction**
-
-- 显式使用：`--task-setting prefix`
-- 目标与 initial setting 相同，仍为 `log(tau_proxy)`
-- 模型：`cnn_orbital`、`cnn_phase_space`、`set_cnn`
-- prefix 版本应确保 crossing 发生在 `t_obs` 之后，才能解释为严格的未来预测
-
-神经网络默认使用 `SmoothL1Loss(beta=0.5)`。评价报告 log-time MAE/RMSE、
-原始 proxy-time MAE、Spearman、Pearson、factor-2/factor-3 accuracy。
-
-**数据分辨率限制**
-
-`dataset_v3` 的时间采样间隔约为 `50000`。不少 pair 从 `R(0)=1` 在第一个
-非零采样点直接跳到 `R≈400–1500`，因此 proxy 的时间精度由首次 crossing 的
-采样网格决定。
-
-Task D 的已保存结果已经汇总在本文后面的[完整实验结果总汇](#实验结果总汇磁盘产物截至-2026-08-16)中。
-需要注意：`results/task_d_initial_lyapunov_proxy/metrics.json` 是早期
-`threshold=1000, aggregation=min` 运行留下的产物，而当前代码和推荐命令的主线默认值是
-`threshold=10000, aggregation=min`；两者不可直接混作同一个实验。所有 proxy 仍是离散
-采样 crossing time，不能等同于由 variational equations 得到的严格 Lyapunov time。
+默认在相邻存储点之间按 log growth 插值 crossing；使用 `--no-interpolation` 可改为
+首次离散 crossing。旧的 single-target crossing/slope 实现仍保留在
+`tasks/task_d/pipeline.py`，仅用于复核历史结果，不再由 Task D 默认入口调用。
 
 ### Task E: Forecasting Baselines
 
@@ -1766,9 +1708,9 @@ MSE。
   - Panda 源码来自 `experiments/panda_threebody/vendor/panda` submodule
   - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
 
-### Task F: Boundary Sensitivity
+### Task G: Boundary Sensitivity
 
-入口脚本：[tasks/task_f/main.py](/home/wan/stellar_dynamics/tasks/task_f/main.py)
+入口脚本：[tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
 
 **任务定义**
 
@@ -1825,8 +1767,8 @@ XGBoost，但该次运行没有保存 XGBoost 预测或指标，因此不列入�
 
 pair disagreement rate 在 \(t=800\) 附近最高，之后逐渐下降；至少包含一对
 分歧轨道的 system 比例在 \(t=1500\) 达到峰值。原始汇总见
-[Task F summary](results/task_f_boundary_sensitivity/summary.md) 和
-[dataset summary](results/task_f_boundary_sensitivity/dataset_summary.json)。
+[Task G summary](results/task_g_boundary_sensitivity/summary.md) 和
+[dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
 
 ## 实验结果总汇（磁盘产物，截至 2026-08-21）
 
@@ -2263,9 +2205,9 @@ metadata 而没有最终 test metrics 的目录（例如
 <code>runs/task_e_orbital15_ctx64_pred32_panda_gru</code>、
 <code>runs/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
 
-### 6. Task F：stability-boundary sensitivity
+### 6. Task G：stability-boundary sensitivity
 
-Task F 的主实验是 pair_ic54、4998 systems、7 个 horizons；下表是保存的 pair disagreement
+Task G 的主实验是 pair_ic54、4998 systems、7 个 horizons；下表是保存的 pair disagreement
 统计，MLP 的 mean AUPRC/AUROC/F1 = 0.2103/0.7005/0.2982，为四个已保存模型中最高。
 
 | Model | Mean AUPRC | Mean AUROC | Mean F1 |
@@ -2287,8 +2229,8 @@ Task F 的主实验是 pair_ic54、4998 systems、7 个 horizons；下表是保�
 
 pair disagreement 在 horizon=800 附近最高，system-level any-disagreement 在 1500 达到
 峰值。配置请求了 XGBoost，但该次运行没有保存 XGBoost prediction/metrics，因此不能
-把它加入比较。原始文件：[Task F summary](results/task_f_boundary_sensitivity/summary.md)、
-[dataset summary](results/task_f_boundary_sensitivity/dataset_summary.json)。
+把它加入比较。原始文件：[Task G summary](results/task_g_boundary_sensitivity/summary.md)、
+[dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
 
 ### 7. Panda 独立实验区
 
@@ -2359,7 +2301,7 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
   统一 benchmark。
 - <code>runs/panda_temporal_adapter_full</code> 只有配置，没有最终 metrics；只有
   <code>runs/panda_temporal_adapter_full_20k</code> 的指标列入上面的历史 Panda adapter 记录。
-- Task F 的 XGBoost 被请求但没有保存预测/指标。
+- Task G 的 XGBoost 被请求但没有保存预测/指标。
 - 训练日志中的中间 epoch 指标和重复重跑结果都保留在产物目录，但本节只把有明确最终
   test/validation 汇总的运行作为结果。
 
@@ -2370,7 +2312,7 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 - `Task C`: [tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
 - `Task D`: [tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 - `Task E`: [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
-- `Task F`: [tasks/task_f/main.py](/home/wan/stellar_dynamics/tasks/task_f/main.py)
+- `Task G`: [tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
 
 ## Reproducible Commands
 
@@ -2764,15 +2706,15 @@ conda run -n stellar python -m tasks.task_e \
 - `--hf-local-files-only` / `--no-hf-local-files-only`: foundation checkpoint 是否只从本地 cache 读取
 - Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
 
-### Task F
+### Task G
 
-当前 `results/task_f_boundary_sensitivity/config.json` 对应的主实验：
+当前 `results/task_g_boundary_sensitivity/config.json` 对应的主实验：
 
 ```bash
-conda run -n stellar python -m tasks.task_f \
+conda run -n stellar python -m tasks.task_g \
   --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --completed-systems dataset_v3/completed_systems_sampling_2.txt \
-  --output-dir results/task_f_boundary_sensitivity \
+  --output-dir results/task_g_boundary_sensitivity \
   --representation pair_ic54 \
   --models constant logistic random_forest xgboost mlp \
   --horizons 500 800 1500 2500 4000 6500 10000 \

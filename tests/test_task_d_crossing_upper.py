@@ -83,12 +83,16 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertEqual(label["valid_lambda_pair_count"], 1)
         self.assertTrue(label["lyapunov_label_valid"])
 
-    def test_crossing_upper_alias_is_available(self) -> None:
+    def test_new_task_accepts_threshold_power(self) -> None:
+        args = build_arg_parser().parse_args(["--threshold-power", "6"])
+        self.assertEqual(args.threshold_power, 6.0)
+
+    def test_new_task_accepts_first_variation_and_xgboost(self) -> None:
         args = build_arg_parser().parse_args(
-            ["--target-mode", "crossing_upper", "--aggregation", "min"]
+            ["--tabular-features", "first", "--models", "mlp,xgboost"]
         )
-        self.assertEqual(args.target_mode, "crossing_upper")
-        self.assertEqual(args.aggregation, "min")
+        self.assertEqual(args.tabular_features, "first")
+        self.assertEqual(args.models, "mlp,xgboost")
 
     def test_aratio_pair_fits_observable_growth_rate(self) -> None:
         times = np.arange(12, dtype=np.float64)
@@ -148,27 +152,17 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertEqual(tau, 1.0)
         self.assertEqual(ratio[1], 1000.0)
 
-    def test_proxy_is_the_default_task(self) -> None:
+    def test_quantile_prediction_is_the_default_task(self) -> None:
         args = build_arg_parser().parse_args([])
-        self.assertEqual(args.label_observable, "smax")
-        self.assertEqual(args.target_mode, "lyapunov_proxy")
-        self.assertEqual(args.aggregation, "min")
-        self.assertEqual(args.censoring_rule, "all_pairs")
-        self.assertEqual(args.threshold, 1.0e4)
+        self.assertEqual(args.sampling_id, 3)
+        self.assertEqual(args.threshold_power, 5.0)
+        self.assertEqual(args.min_valid_pairs, 8)
+        self.assertEqual(args.models, "constant,gbr,mlp,deepsets")
 
     def test_sensitivity_grid_defaults_cover_requested_comparison(self) -> None:
         args = build_sensitivity_arg_parser().parse_args([])
-        self.assertEqual(args.thresholds, (1.0e3, 3.0e3, 1.0e4, 3.0e4))
-        self.assertEqual(args.aggregations, ("min", "median"))
-
-    def test_fitted_lyapunov_time_compatibility_mode_is_available(self) -> None:
-        args = build_arg_parser().parse_args(["--target-mode", "fitted_lyapunov_time"])
-        self.assertEqual(args.target_mode, "fitted_lyapunov_time")
-
-    def test_lambda_fast_target_is_available(self) -> None:
-        args = build_arg_parser().parse_args(["--target-mode", "lambda_fast"])
-        self.assertEqual(args.target_mode, "lambda_fast")
-
+        self.assertEqual(args.threshold_powers, (4.0, 5.0, 6.0))
+        self.assertEqual(args.models, "constant,gbr")
 
 if __name__ == "__main__":
     unittest.main()
