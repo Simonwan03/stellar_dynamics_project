@@ -4,13 +4,13 @@ from __future__ import annotations
 import numpy as np
 
 
-DEFAULT_MASK_RATIOS = (0.25, 0.50, 0.75)
+DEFAULT_MASK_RATIOS = (0.0, 0.25, 0.50, 0.75)
 
 
 def validate_mask_ratio(mask_ratio: float) -> float:
     ratio = float(mask_ratio)
-    if not 0.0 < ratio < 1.0:
-        raise ValueError(f"mask_ratio must be between 0 and 1, got {mask_ratio}.")
+    if not 0.0 <= ratio < 1.0:
+        raise ValueError(f"mask_ratio must be between 0 (inclusive) and 1, got {mask_ratio}.")
     return ratio
 
 
@@ -31,6 +31,8 @@ def random_observation_mask(
     if num_steps < 2:
         raise ValueError(f"num_steps must be at least 2, got {num_steps}.")
     ratio = validate_mask_ratio(mask_ratio)
+    if ratio == 0.0:
+        return np.ones(num_steps, dtype=bool)
     num_hidden = int(round(num_steps * ratio))
     num_hidden = min(max(num_hidden, 1), num_steps - 1)
     sequence = np.random.SeedSequence(

@@ -73,6 +73,7 @@ class RandomMaskedMemmapDataset(Dataset):
         mask_ratio: float,
         seed: int,
         dynamic: bool,
+        append_mask_channel: bool = True,
     ) -> None:
         self.features = features
         self.rows = np.asarray(rows, dtype=np.int64)
@@ -83,6 +84,7 @@ class RandomMaskedMemmapDataset(Dataset):
         self.mask_ratio = validate_mask_ratio(mask_ratio)
         self.seed = int(seed)
         self.dynamic = bool(dynamic)
+        self.append_mask_channel = bool(append_mask_channel)
         self.epoch = 0
         if not (len(self.rows) == len(self.targets) == len(self.sample_ids)):
             raise ValueError("rows, targets, and sample_ids must have equal length.")
@@ -103,7 +105,7 @@ class RandomMaskedMemmapDataset(Dataset):
             sample_id=int(self.sample_ids[index]),
             epoch=self.epoch if self.dynamic else 0,
         )
-        masked = apply_observation_mask(values, observed)
+        masked = apply_observation_mask(values, observed, append_mask_channel=self.append_mask_channel)
         target = np.asarray([self.targets[index]], dtype=np.float32)
         return torch.from_numpy(masked), torch.from_numpy(target)
 
@@ -122,6 +124,7 @@ def make_loader(
     *,
     train: bool,
     num_workers: int,
+    append_mask_channel: bool = True,
 ) -> tuple[RandomMaskedMemmapDataset, DataLoader]:
     local_indices = np.asarray(local_indices, dtype=np.int64)
     dataset = RandomMaskedMemmapDataset(
@@ -134,6 +137,7 @@ def make_loader(
         mask_ratio,
         seed,
         dynamic=train,
+        append_mask_channel=append_mask_channel,
     )
     generator = torch.Generator().manual_seed(seed)
     loader = DataLoader(
@@ -248,9 +252,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-path", type=Path, default=None)
     parser.add_argument("--rebuild-cache", action="store_true")
     parser.add_argument("--max-shards", type=int, default=None)
-    parser.add_argument("--prefix-len", type=int, default=1024)
+    parser.add_argument("--prefix-len", type=int, default=256)
     parser.add_argument("--time-stride", type=int, default=1)
-    parser.add_argument("--mask-ratios", type=str, default="25,50,75")
+    parser.add_argument(
+        "--mask-ratios",
+        type=str,
+        default=",".join(str(int(round(100 * ratio))) for ratio in DEFAULT_MASK_RATIOS),
+    )
     parser.add_argument("--models", type=str, default="tcn")
     parser.add_argument("--time-horizon", type=float, default=10000.0)
     parser.add_argument("--group-size", type=int, default=32)
@@ -270,6 +278,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--mask-channel",
+        dest="append_mask_channel",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Append observed_mask as an input channel (disable to use all-zero masked tokens).",
+    )
     return parser
 
 
@@ -358,11 +373,15 @@ def main() -> None:
         **vars(args),
         "device": str(device),
         "mask_ratios": ratios,
-        "mask_semantics": "ratio of randomly hidden time positions; all feature channels hidden together",
+        "mask_semantics": (
+            "ratio of randomly hidden time positions; all feature channels hidden together"
+            if args.append_mask_channel
+            else "ratio of randomly hidden time positions; hidden feature vectors are all zero"
+        ),
         "training_mask_policy": "resampled each epoch from seed, sample index, and epoch; label independent",
         "evaluation_mask_policy": "fixed per sample and ratio using epoch zero",
-        "input_shape": [shape[1], shape[2] + 1],
-        "feature_names": [*FEATURE_NAMES, "observed_mask"],
+        "input_shape": [shape[1], shape[2] + int(args.append_mask_channel)],
+        "feature_names": [*FEATURE_NAMES, "observed_mask"] if args.append_mask_channel else list(FEATURE_NAMES),
         "num_samples": len(targets),
         "stable_rate": float(targets.mean()),
         "split_manifest": split_manifest,
@@ -377,14 +396,17 @@ def main() -> None:
         train_ds, train_loader = make_loader(
             features, splits["train"], global_indices, targets, sample_ids, mean, std,
             ratio, args.seed, args.batch_size, train=True, num_workers=args.num_workers,
+            append_mask_channel=args.append_mask_channel,
         )
         _, val_loader = make_loader(
             features, splits["val"], global_indices, targets, sample_ids, mean, std,
             ratio, args.seed + 10_000, args.batch_size, train=False, num_workers=args.num_workers,
+            append_mask_channel=args.append_mask_channel,
         )
         _, test_loader = make_loader(
             features, splits["test"], global_indices, targets, sample_ids, mean, std,
             ratio, args.seed + 20_000, args.batch_size, train=False, num_workers=args.num_workers,
+            append_mask_channel=args.append_mask_channel,
         )
         stable_prior = float(targets[splits["train"]].mean())
         y_test = targets[splits["test"]]
@@ -403,6 +425,7 @@ def main() -> None:
                 attention_heads=args.attention_heads,
                 attention_layers=args.attention_layers,
                 max_len=shape[1],
+                append_mask_channel=args.append_mask_channel,
             )
             model, history = train_model(
                 model, train_ds, train_loader, val_loader,

@@ -1,15 +1,16 @@
 # Stellar Dynamics Research Repo
 
-这个仓库围绕 hierarchical three-body stability 数据集做 6 类任务：
+这个仓库围绕 hierarchical three-body stability 数据集做 7 类任务：
 
 - `Task A`: 只用初始条件做 system-level 稳定性预测
 - `Task B`: 用早期轨道前缀做 instability 分类或 group stable fraction 预测
 - `Task C`: 对完整 32-variation 系统做 multi-horizon survival 预测
 - `Task D`: 用半长轴发散时间定义 Lyapunov-like 回归目标
 - `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
+- `Task F`: 对随机掩码的高分辨率轨道前缀做稳定性预测
 - `Task G`: 用成对扰动初值预测 stability-boundary sensitivity
 
-完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-08-21)；其中会区分正式
+完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)；其中会区分正式
 主实验、ablation、历史重跑和没有最终指标的目录。
 
 当前主线代码在 [scripts](</home/wan/stellar_dynamics/scripts>) 和 [tasks](</home/wan/stellar_dynamics/tasks>)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)。
@@ -71,6 +72,20 @@ unstable。每个 system 内 unstable variation 数量的分布如下：
 | 14 | 37 | 0.74% | 31 | 557 | 11.14% |
 | 15 | 44 | 0.88% | 32 | 1,692 | 33.85% |
 | 16 | 42 | 0.84% |  |  |  |
+
+### Empirical Stability Boundary in Initial-Condition Space
+
+[![Mardling--Aarseth margin versus mutual inclination](figures/ma_margin_vs_mutual_inclination.png)](figures/ma_margin_vs_mutual_inclination.pdf)
+
+图中每个点对应一个完整的 32-variation base system：横轴是自然对数形式的
+Mardling--Aarseth margin δ_MA，纵轴是 mutual inclination，颜色表示 32 条
+variations 在 `time_horizon=10000` 时的 `stable_fraction`。竖直虚线标出
+δ_MA = 0 的传统 MA 理论边界。
+
+该图由 [`analysis/plot_ma_boundary.py`](analysis/plot_ma_boundary.py) 生成。当前可用的
+`sampling_3` 数据没有单独保存 base IC，因此坐标使用每个系统的 variation 0 的
+`t=0` 初始条件；不对角度变量做平均。完整输出为
+[`ma_margin_vs_mutual_inclination.pdf`](figures/ma_margin_vs_mutual_inclination.pdf)。
 
 ### Indexing Convention
 
@@ -1708,6 +1723,21 @@ MSE。
   - Panda 源码来自 `experiments/panda_threebody/vendor/panda` submodule
   - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
 
+### Task F: Random-Masked High-Resolution Stability
+
+入口脚本：[tasks/task_f/main.py](/home/ubuntu/github/stellar_dynamics_project/tasks/task_f/main.py)
+
+Task F 从 `sampling_3` 高分辨率轨道数据的前 `256` 个时间步预测单条 trajectory
+是否在 `time_horizon=10000` 时保持稳定。输入使用 `orbital15` 的 15 个通道，并追加
+一个 `observed_mask` 通道；每条样本随机隐藏 `0%/25%/50%/75%` 的时间位置，隐藏时
+所有 feature channels 同时置零。训练阶段每个 epoch 重采样掩码，验证和测试使用固定的
+epoch-zero 掩码，掩码生成与标签独立。
+
+默认运行使用 40 个 shard、159,936 条有效 trajectory，system-level split 为
+`111,936/24,000/24,000`（train/validation/test），seed=`42`、batch size=`512`、
+最多 `50` epochs、early stopping patience=`8`、CUDA 和 mixed precision。已保存的
+TCN 与 attention 结果见下方[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)。
+
 ### Task G: Boundary Sensitivity
 
 入口脚本：[tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
@@ -1770,7 +1800,7 @@ pair disagreement rate 在 \(t=800\) 附近最高，之后逐渐下降；至少�
 [Task G summary](results/task_g_boundary_sensitivity/summary.md) 和
 [dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
 
-## 实验结果总汇（磁盘产物，截至 2026-08-21）
+## 实验结果总汇（磁盘产物，截至 2026-09-07）
 
 本节是仓库现有实验的结果审计索引。指标以各实验目录中实际保存的
 <code>metrics.json</code>、<code>summary.csv</code>、<code>test_metrics.json</code> 和
@@ -2205,7 +2235,36 @@ metadata 而没有最终 test metrics 的目录（例如
 <code>runs/task_e_orbital15_ctx64_pred32_panda_gru</code>、
 <code>runs/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
 
-### 6. Task G：stability-boundary sensitivity
+### 6. Task F：随机掩码高分辨率前缀稳定性预测
+
+Task F 使用 `dataset_sampling_3_prefix1024`、`prefix_len=256`、`time_stride=1`、
+`time_horizon=10000`、`group_size=32` 和相同的 `70/15/15` system-level split。
+过滤后有 `159,936` 条 trajectory，stable rate 为 `31.1187%`；模型输入形状为
+`[256, 16]`（15 个 `orbital15` channels 加 `observed_mask`）。TCN 使用
+`706,881` 个参数（hidden=160、levels=5），attention 使用 `597,505` 个参数
+（hidden=128、heads=4、layers=3）。
+
+下表中的 `F1@val-thr` 使用 validation set 选择的阈值；其余测试分类指标使用固定
+阈值 `0.5`。AUROC/AUPRC 分别对应脚本输出中的 `auc`/`average_precision`。
+
+| Model | Mask | Best epoch / val AUROC | Val F1 threshold | Test accuracy | Test balanced accuracy | Test F1@0.5 | Test F1@val-thr | Test AUROC | Test AUPRC | Test Brier |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TCN | 0% | 5 / 0.8889 | 0.2524 | 0.7928 | 0.7447 | 0.6487 | 0.6628 | 0.8559 | 0.7146 | 0.1526 |
+| TCN | 25% | 4 / 0.8891 | 0.2905 | 0.7874 | 0.7466 | 0.6504 | 0.6692 | 0.8549 | 0.6944 | 0.1493 |
+| TCN | 50% | 4 / 0.8755 | 0.3660 | 0.7777 | 0.7555 | 0.6599 | 0.6671 | 0.8494 | 0.6867 | 0.1543 |
+| TCN | 75% | 10 / 0.8738 | 0.1753 | 0.7764 | 0.7095 | 0.5963 | 0.6536 | 0.8395 | 0.6816 | 0.1638 |
+| Attention | 0% | 9 / 0.8719 | 0.0873 | 0.7701 | 0.6775 | 0.5391 | 0.6752 | 0.8534 | 0.6976 | 0.1680 |
+| Attention | 25% | 5 / 0.8725 | 0.1787 | 0.7930 | 0.7418 | 0.6448 | 0.7016 | 0.8725 | 0.7191 | 0.1442 |
+| Attention | 50% | 3 / 0.8722 | 0.2084 | 0.7930 | 0.7437 | 0.6474 | 0.6860 | 0.8658 | 0.7132 | 0.1437 |
+| Attention | 75% | 3 / 0.8673 | 0.3870 | 0.7779 | 0.7540 | 0.6581 | 0.6683 | 0.8563 | 0.6973 | 0.1479 |
+
+完整指标（precision、recall、specificity、FPR/FNR、MCC、log loss、ECE/MCE 及
+confusion matrix counts）保存在 [TCN metrics](results/task_f_masked_prefix/metrics.json)
+和 [attention metrics](results/task_f_masked_prefix_attention/metrics.json)；训练日志、
+预测 CSV、曲线和模型权重也分别保留在
+`results/task_f_masked_prefix/` 与 `results/task_f_masked_prefix_attention/`。
+
+### 7. Task G：stability-boundary sensitivity
 
 Task G 的主实验是 pair_ic54、4998 systems、7 个 horizons；下表是保存的 pair disagreement
 统计，MLP 的 mean AUPRC/AUROC/F1 = 0.2103/0.7005/0.2982，为四个已保存模型中最高。
@@ -2232,7 +2291,7 @@ pair disagreement 在 horizon=800 附近最高，system-level any-disagreement �
 把它加入比较。原始文件：[Task G summary](results/task_g_boundary_sensitivity/summary.md)、
 [dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
 
-### 7. Panda 独立实验区
+### 8. Panda 独立实验区
 
 以下结果来自 <code>experiments/panda_threebody</code> 的历史/隔离 pipeline，和主项目
 Task E 的统一窗口 benchmark 分开记录。
@@ -2271,7 +2330,7 @@ stable-positive）如下。这里的 head 以各目录的 <code>run_config.json<
 [Panda classifier metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/panda_unbound_orbital15_dataset/metrics.json)
 及各 <code>panda_task_b_split_*</code> 子目录。
 
-### 8. Historical notebook-only 结果
+### 9. Historical notebook-only 结果
 
 这些结果来自 notebook 的已保存输出，标签和 split 与当前 production runner 不完全相同，
 所以只作为历史记录，不与上面的正式表直接排序。
@@ -2288,7 +2347,7 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 [task_c.ipynb](jupyter_notebook/task_c.ipynb)、
 [task_d.ipynb](jupyter_notebook/task_d.ipynb)。
 
-### 9. 未完成、部分完成与不纳入正式排名的运行
+### 10. 未完成、部分完成与不纳入正式排名的运行
 
 - Task A 的 <code>fraction_mlp_base_cuda</code>、<code>fraction_mlp_cuda_smoke</code> 没有
   可用最终 metrics；<code>h=20000</code> 只属于超出数据有效范围的边界测试。
@@ -2312,6 +2371,7 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 - `Task C`: [tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
 - `Task D`: [tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
 - `Task E`: [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
+- `Task F`: [tasks/task_f/main.py](/home/ubuntu/github/stellar_dynamics_project/tasks/task_f/main.py)
 - `Task G`: [tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
 
 ## Reproducible Commands
@@ -2706,6 +2766,32 @@ conda run -n stellar python -m tasks.task_e \
 - `--hf-local-files-only` / `--no-hf-local-files-only`: foundation checkpoint 是否只从本地 cache 读取
 - Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
 
+### Task F
+
+两次已保存运行的可复现命令（TCN 和 attention 使用独立 output directories）：
+
+```bash
+conda run --no-capture-output -n stellar python -m tasks.task_f \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --sampling-id 3 \
+  --prefix-len 256 \
+  --time-stride 1 \
+  --mask-ratios 0,25,50,75 \
+  --models tcn \
+  --output-dir results/task_f_masked_prefix \
+  --device cuda
+
+conda run --no-capture-output -n stellar python -m tasks.task_f \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --sampling-id 3 \
+  --prefix-len 256 \
+  --time-stride 1 \
+  --mask-ratios 0,25,50,75 \
+  --models attention \
+  --output-dir results/task_f_masked_prefix_attention \
+  --device cuda
+```
+
 ### Task G
 
 当前 `results/task_g_boundary_sensitivity/config.json` 对应的主实验：
@@ -2781,3 +2867,9 @@ conda run -n stellar python -m tasks.task_g \
 - **Orbital Transformer-Base**: `context=256, pred=64, d_model=256, layers=4` — params ~3M–4M
 - **Raw Transformer-Base**: `context=128, pred=16, d_model=192, layers=3` — params ~1M–2M
 - **Panda / Chronos / TimesFM / PatchTST** as foundation baselines
+
+### Task F
+- **Masked TCN**: hidden=160, levels=5 — `706,881` parameters
+- **Masked Attention**: hidden=128, heads=4, layers=3 — `597,505` parameters
+- Input: `orbital15` 15 channels plus `observed_mask`; prefix length `256`
+- Mask ratios: `0%`, `25%`, `50%`, `75%`; hidden time positions are pooled out during encoding
