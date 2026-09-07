@@ -93,6 +93,8 @@ variations 在 `time_horizon=10000` 时的 `stable_fraction`。竖直虚线标�
 
 [![Distribution of local stable-fraction disagreement](figures/local_disagreement_histogram.png)](figures/local_disagreement_histogram.pdf)
 
+[![Local stable-fraction disagreement versus mean 20-NN distance](figures/local_disagreement_vs_neighbor_distance.png)](figures/local_disagreement_vs_neighbor_distance.pdf)
+
 该图在原始标准化 `orbital15` 特征空间中，对每个 base system 的 20 个最近邻计算
 local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表示按
 `delta_MA` 分箱后的均值及 bootstrap 95% 区间；每个点仍是一个实际 base system。
@@ -107,6 +109,11 @@ local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表�
 相关系数仅为 `0.058`，说明该现象不主要由稀疏区域造成。另有 `26.45%` 的系统与其
 最近邻的 stable fraction 差异超过 `0.5`。这些结果对“模糊稳定边界并非纯粹由二维投影
 造成”的假设提供了中等支持，但不能单独证明分形边界或确定性混沌。
+
+密度效应诊断的结果为 `Spearman(L_i, mean_neighbor_distance_k20) = 0.0583`。
+最近邻 stable fraction 差异超过 `0.25` 的系统为 `1,931/4,998 = 38.64%`，超过 `0.5` 的系统为
+`1,322/4,998 = 26.45%`。最近邻距离的中位数为 `2.0386`（标准化 orbital15
+欧氏距离），因此局部 outcome disagreement 并不是简单由极稀疏区域驱动的。
 
 ### Indexing Convention
 
