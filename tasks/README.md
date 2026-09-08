@@ -364,6 +364,27 @@ Metrics include pinball loss and empirical coverage for every quantile, central
 and quantile-crossing rate. Crossing interpolation is linear in log growth and
 can be disabled with `--no-interpolation`.
 
+### Label-threshold sensitivity ablation (2026-09-08)
+
+Using the same seed (`42`), feature representation, split protocol, and models,
+we compared crossing thresholds `e^4`, `e^5`, and `e^6`. The table reports the
+main test metrics for GBR; the complete constant baseline, per-quantile
+coverage, predictions, and plots are summarized in
+`results/task_d_initial_quantile_sensitivity/summary.md`.
+
+| Threshold | Valid systems | Target P25/P50/P75 | GBR mean pinball ↓ | GBR P50 log-MAE ↓ | Central 50% coverage | Spearman ↑ | Factor-two accuracy ↑ |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| `e^4` | 4,997 | 0.9544 / 3.4319 / 9.1262 | **0.3227** | **0.7559** | 0.4827 | 0.6589 | **54.13%** |
+| `e^5` | 4,996 | 0.9113 / 3.4091 / 11.2786 | 0.3611 | 0.8475 | 0.4780 | 0.6686 | 51.27% |
+| `e^6` | 4,988 | 0.8811 / 3.3414 / 12.0871 | 0.3930 | 0.9139 | 0.4920 | **0.6810** | 48.13% |
+
+GBR outperforms the constant quantile baseline at all three thresholds.
+Increasing the threshold widens the upper tail of the target distribution and
+steadily increases GBR pinball loss and absolute error, while central 50%
+coverage remains close to nominal. The valid system membership changes slightly
+because of the minimum-eight-valid-pairs filter, so these are label-sensitivity
+trends rather than a strictly paired comparison.
+
 ### First-variation ablation (2026-09-06)
 
 The first-variation experiment used the same 4,996 systems, seed 42, and

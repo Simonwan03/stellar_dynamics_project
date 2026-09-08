@@ -914,6 +914,23 @@ conda run -n stellar python -m tasks.task_d.sensitivity \
   --output-dir results/task_d_initial_quantile_sensitivity
 ```
 
+#### Label-threshold sensitivity ablation (2026-09-08)
+
+在相同 seed=42、特征表示和模型配置下，比较 crossing threshold 为 `e^4`、`e^5`、
+`e^6` 的结果。下表报告 GBR 的主要测试集指标；完整的 constant baseline、逐分位数
+coverage 和预测文件见 [`results/task_d_initial_quantile_sensitivity/summary.md`](results/task_d_initial_quantile_sensitivity/summary.md)。
+
+| Threshold | 有效 systems | Target P25/P50/P75 | GBR mean pinball ↓ | GBR P50 log-MAE ↓ | Central 50% coverage | Spearman ↑ | Factor-2 accuracy ↑ |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| `e^4` | 4,997 | 0.9544 / 3.4319 / 9.1262 | **0.3227** | **0.7559** | 0.4827 | 0.6589 | **54.13%** |
+| `e^5` | 4,996 | 0.9113 / 3.4091 / 11.2786 | 0.3611 | 0.8475 | 0.4780 | 0.6686 | 51.27% |
+| `e^6` | 4,988 | 0.8811 / 3.3414 / 12.0871 | 0.3930 | 0.9139 | 0.4920 | **0.6810** | 48.13% |
+
+GBR 在三个 threshold 下都优于 constant quantile baseline。threshold 增大后目标分布的
+上尾变宽，GBR 的 pinball loss 和绝对误差逐步上升，而中心 50% 区间 coverage 仍接近
+名义值。由于“至少 8 个有效 pair”的过滤，三组有效 system 并非完全相同，因此趋势应
+解释为 label sensitivity，而不是严格配对比较。
+
 默认在相邻存储点之间按 log growth 插值 crossing；使用 `--no-interpolation` 可改为
 首次离散 crossing。旧的 single-target crossing/slope 实现仍保留在
 `tasks/task_d/pipeline.py`，仅用于复核历史结果，不再由 Task D 默认入口调用。
@@ -1766,6 +1783,11 @@ epoch-zero 掩码，掩码生成与标签独立。
 最多 `50` epochs、early stopping patience=`8`、CUDA 和 mixed precision。已保存的
 TCN 与 attention 结果见下方[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)。
 
+另外，`prefix_len=256` 的 mixed-mask robustness benchmark 见下方
+[Task F mixed-mask 结果](#task-f-mixed-mask-robustness-benchmark-prefix256-seed42)。该实验
+使用同一个模型覆盖 clean、random point、single-block 和 multi-block corruption，
+并额外测试 `60%/70%` 的 OOD missing ratio 以及 `25%` Early/Middle/Late block location。
+
 ### Task G: Boundary Sensitivity
 
 入口脚本：[tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
@@ -2291,6 +2313,118 @@ confusion matrix counts）保存在 [TCN metrics](results/task_f_masked_prefix/m
 和 [attention metrics](results/task_f_masked_prefix_attention/metrics.json)；训练日志、
 预测 CSV、曲线和模型权重也分别保留在
 `results/task_f_masked_prefix/` 与 `results/task_f_masked_prefix_attention/`。
+
+
+#### Task F mixed-mask robustness benchmark（prefix=256, seed=42）
+
+这是在同一 Task-F split 上运行的完整 partial-observation benchmark。过滤后仍为
+`159,936` 条 trajectory，stable rate 为 `31.1187%`。每个 training regime 为每个模型
+只训练一个 checkpoint，然后在固定 corruption grid 上评估；因此测试结果衡量的是
+robustness，而不是针对每个 mask ratio 重新适应后的性能。
+
+训练 regime 为：
+
+| Regime | Training mask distribution |
+| --- | --- |
+| `clean_only` | 100% complete trajectory |
+| `random_only` | 10% clean；其余为 `0–50%` exact-count random point mask |
+| `mixed` | 10% clean；corrupted samples 中 single-block/multi-block/random = `50%/30%/20%` |
+
+连续 mask 的总隐藏长度为 `round(256r)`，block 最小长度为 4、不同 block 间至少保留
+4 个 observed timestamps。测试 ratio 为 `0%, 10%, ..., 70%`；非零 ratio 分别测试
+random point、single block 和 multi block，因此每个 regime/model 有 `22` 个 ratio/mask
+cells，另加 `25%` single-block 的 Early `[0,64)`、Middle `[96,160)`、Late `[192,256)`
+三个 location cells，共 `25` 个 cells。TCN 和 Attention 输入为 `[256,16]`；XGBoost
+使用 Task-B 的 `120` 个 dynamical summary features，训练阶段对 corrupted trajectory
+使用 4 个固定 views。
+
+下表给出 proposed `mixed` regime 的完整 AUROC 结果。`random_60/70`、
+`single_block_60/70` 和 `multi_block_60/70` 属于 OOD corruption，因为训练最大
+missing ratio 为 `50%`。
+
+| Cell | TCN | Attention | Summary + XGBoost |
+| --- | ---: | ---: | ---: |
+| clean 0% | 0.8576 | 0.8683 | 0.9543 |
+| random 10% | 0.8563 | 0.8675 | 0.9541 |
+| single block 10% | 0.8572 | 0.8671 | 0.9540 |
+| multi block 10% | 0.8556 | 0.8677 | 0.9538 |
+| random 20% | 0.8544 | 0.8666 | 0.9541 |
+| single block 20% | 0.8562 | 0.8658 | 0.9537 |
+| multi block 20% | 0.8538 | 0.8666 | 0.9537 |
+| random 30% | 0.8515 | 0.8651 | 0.9538 |
+| single block 30% | 0.8552 | 0.8644 | 0.9535 |
+| multi block 30% | 0.8508 | 0.8643 | 0.9531 |
+| random 40% | 0.8470 | 0.8633 | 0.9533 |
+| single block 40% | 0.8531 | 0.8627 | 0.9530 |
+| multi block 40% | 0.8470 | 0.8617 | 0.9525 |
+| random 50% | 0.8398 | 0.8605 | 0.9531 |
+| single block 50% | 0.8497 | 0.8609 | 0.9525 |
+| multi block 50% | 0.8417 | 0.8585 | 0.9520 |
+| random 60% (OOD) | 0.8286 | 0.8575 | 0.9522 |
+| single block 60% (OOD) | 0.8428 | 0.8589 | 0.9518 |
+| multi block 60% (OOD) | 0.8330 | 0.8547 | 0.9513 |
+| random 70% (OOD) | 0.8073 | 0.8520 | 0.9524 |
+| single block 70% (OOD) | 0.8315 | 0.8554 | 0.9505 |
+| multi block 70% (OOD) | 0.8210 | 0.8485 | 0.9502 |
+| single block 25% Early | 0.8453 | 0.8297 | 0.9486 |
+| single block 25% Middle | 0.8584 | 0.8667 | 0.9541 |
+| single block 25% Late | 0.8466 | 0.8594 | 0.9502 |
+
+不同 training regime 的代表性 AUROC 对比如下：
+
+| Regime | Model | Clean | Random 50% | Single 50% | Multi 50% | Random 70% | Single 70% | Multi 70% |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| clean-only | TCN | 0.8559 | 0.6884 | 0.8342 | 0.8165 | 0.6560 | 0.8058 | 0.7824 |
+| clean-only | Attention | 0.8633 | 0.8562 | 0.8510 | 0.8470 | 0.8478 | 0.8392 | 0.8330 |
+| clean-only | Summary + XGBoost | 0.9541 | 0.9519 | 0.9516 | 0.9509 | 0.9502 | 0.9483 | 0.9480 |
+| random-only | TCN | 0.8540 | 0.8486 | 0.8331 | 0.8224 | 0.8309 | 0.8098 | 0.7980 |
+| random-only | Attention | 0.8626 | 0.8547 | 0.8372 | 0.8368 | 0.8444 | 0.8181 | 0.8157 |
+| random-only | Summary + XGBoost | 0.9550 | 0.9539 | 0.9533 | 0.9529 | 0.9528 | 0.9509 | 0.9508 |
+| mixed | TCN | 0.8576 | 0.8398 | 0.8497 | 0.8417 | 0.8073 | 0.8315 | 0.8210 |
+| mixed | Attention | 0.8683 | 0.8605 | 0.8609 | 0.8585 | 0.8520 | 0.8554 | 0.8485 |
+| mixed | Summary + XGBoost | 0.9543 | 0.9531 | 0.9525 | 0.9520 | 0.9524 | 0.9505 | 0.9502 |
+
+`clean_only` TCN 在 random-50% 时从 `0.8559` 降至 `0.6884`；random-only training
+将其恢复至 `0.8486`，而 mixed training 对连续缺失更有利：single-block-50% 为
+`0.8497`、multi-block-50% 为 `0.8417`。Attention 的 mixed model 在 70% OOD
+corruption 下仍保持 `0.8485–0.8554` AUROC。Summary + XGBoost 在所有 topology 下
+均保持约 `0.95` AUROC，说明这组 Task-B summaries 对 timestamp-level mask 很有韧性。
+
+**结果解读**
+
+- **全局 dynamical summaries 对 mask 高度不敏感。** Summary + XGBoost 在 clean、
+  random、single-block 和 multi-block mask 下都保持约 `0.95` AUROC；在训练未覆盖的
+  `70%` OOD missing ratio 下仍约为 `0.9502–0.9524`。因此当前 Task F 更明显地测量了
+  全局动力学统计量是否保留 stability information，而不是局部轨迹是否可以被恢复。
+- **对 TCN 而言，random point mask 比连续 block 更困难。** Clean-only TCN 的 AUROC
+  从 clean 的 `0.8559` 降到 random-50% 的 `0.6884`，但 single-block-50% 和
+  multi-block-50% 分别为 `0.8342` 和 `0.8165`。相同缺失比例下，散点缺失会在整个
+  prefix 中制造大量局部卷积断裂；连续 block 则保留较长的完整 observed segments。
+- **mixed-mask training 提升了连续 observation gap 的鲁棒性，但不是所有 topology
+  上都最优。** TCN 在 single-block-50%/multi-block-50% 上从 random-only 的
+  `0.8331/0.8224` 提升到 `0.8497/0.8417`，但 random-50% 从 `0.8486` 变为 `0.8398`。
+  这说明训练分布会带来 topology-specific trade-off，而不是普遍的性能提升。
+- **Attention 对 corruption topology 更稳健。** Mixed Attention 在 `50%` 缺失下的
+  random/single/multi AUROC 为 `0.8605/0.8609/0.8585`，在 `70%` OOD 下仍为
+  `0.8520/0.8554/0.8485`，说明显式 attention mask 对 partial observation 更适合。
+- **location 结果暂时不支持“Late block 最重要”。** Mixed model 在 Early/Middle/Late
+  的结果分别为：TCN `0.8453/0.8584/0.8466`、Attention `0.8297/0.8667/0.8594`、
+  XGBoost `0.9486/0.9541/0.9502`。当前更明显的是 Middle 最好、Early 往往最差，
+  可能因为 Middle mask 两侧仍保留 observed context；是否存在 late instability
+  precursor 需要 sliding-window location sweep 和更多 seeds 验证。
+
+因此，当前实验支持的主要结论是：**全局动力学统计量具有很强的 partial-observation
+robustness，而 sequence model 的性能取决于缺失模式；加入与真实 observation gap 匹配的
+mixed-mask augmentation 可以改善连续缺失鲁棒性，但会与 random-mask 性能形成 trade-off。**
+以上数值来自 `seed=42` 的单次运行，尚不包含 multi-seed 置信区间。
+
+完整的 `225` 行结果（包含 accuracy、balanced accuracy、F1@0.5、F1@validation
+threshold、AUROC、AUPRC 和 Brier）见 [mixed-mask comparison CSV](results/task_f_mixed_mask_benchmark_seed42/comparison.csv)、
+[mixed-mask comparison Markdown](results/task_f_mixed_mask_benchmark_seed42/comparison.md)
+和原始嵌套指标 [metrics.json](results/task_f_mixed_mask_benchmark_seed42/metrics.json)。
+配置、checkpoint、训练日志和每个 cell 的 prediction arrays 均保存在
+`results/task_f_mixed_mask_benchmark_seed42/`；可复现实验入口为
+[run_task_f_mixed_mask_benchmark.py](scripts/run_task_f_mixed_mask_benchmark.py)。
 
 ### 7. Task G：stability-boundary sensitivity
 
