@@ -196,6 +196,7 @@ def extract_task_features(
     output_path: Path,
     device: torch.device,
     batch_size: int,
+    sampling_id: int,
 ) -> np.ndarray:
     """Stream exact Task B rows through frozen Panda and cache 15x768 features."""
     if prefix_steps < 16 or prefix_steps % 16:
@@ -210,6 +211,7 @@ def extract_task_features(
             "rows": len(task_labels),
             "feature_dim": 15 * 768,
             "prefix_steps": prefix_steps,
+            "sampling_id": sampling_id,
             "checkpoint": checkpoint,
             "label_fingerprint": fingerprint,
             "dtype": "float16",
@@ -224,7 +226,7 @@ def extract_task_features(
     features = np.lib.format.open_memmap(temp_path, mode="w+", dtype=np.float16, shape=expected_shape)
     keys = required_keys_for_representation("orbital15")
     labels_all = pd.read_csv(
-        dataset_dir / "completed_systems_sampling_2.txt",
+        dataset_dir / f"completed_systems_sampling_{sampling_id}.txt",
         sep=r"\s+",
         header=None,
         names=["index", "num_batch", "time_unbound", "wall_time", "diagnosis"],
@@ -255,7 +257,7 @@ def extract_task_features(
                 )
             read_order = np.argsort(local_rows)
             restore_order = np.argsort(read_order)
-            shard = dataset_dir / f"results_batch_{int(batch_id):02d}_sampling_2.hdf5"
+            shard = dataset_dir / f"results_batch_{int(batch_id):02d}_sampling_{sampling_id}.hdf5"
             data: dict[str, np.ndarray] = {}
             with h5py.File(shard, "r") as handle:
                 for key in keys:
@@ -290,6 +292,7 @@ def extract_task_features(
             "rows": len(task_labels),
             "feature_dim": 15 * 768,
             "prefix_steps": prefix_steps,
+            "sampling_id": sampling_id,
             "num_patches": prefix_steps // 16,
             "patch_length": 16,
             "patch_stride": 16,
@@ -397,6 +400,8 @@ def main() -> None:
     )
     parser.add_argument("--checkpoint", default="GilpinLab/panda-72M")
     parser.add_argument("--prefix-steps", type=int, default=512)
+    parser.add_argument("--sampling-id", type=int, default=2)
+    parser.add_argument("--time-horizon", type=float, default=10000.0)
     parser.add_argument(
         "--feature-cache",
         type=Path,
@@ -427,7 +432,9 @@ def main() -> None:
     task_labels = pd.read_csv(args.prefix_dir / "labels_filtered.csv")
     split_file = np.load(args.prefix_dir / "split_indices.npz")
     split_rows = {name: split_file[f"{name}_idx"] for name in ("train", "val", "test")}
-    target_unbound = (task_labels["time_unbound"].to_numpy(dtype=np.float32) < 10000.0).astype(np.float32)
+    target_unbound = (
+        task_labels["time_unbound"].to_numpy(dtype=np.float32) < args.time_horizon
+    ).astype(np.float32)
 
     if args.feature_cache is not None:
         feature_cache = extract_task_features(
@@ -438,6 +445,7 @@ def main() -> None:
             output_path=args.feature_cache,
             device=device,
             batch_size=args.feature_batch_size,
+            sampling_id=args.sampling_id,
         )
         cache_rows = np.arange(len(task_labels), dtype=np.int64)
         missing_task_rows = np.zeros(0, dtype=np.int64)
@@ -605,10 +613,10 @@ def main() -> None:
         (f"prefix {args.prefix_steps}内已 unbound", time_unbound < prefix_end_time, True),
         (
             f"prefix {args.prefix_steps}后才 unbound",
-            (time_unbound >= prefix_end_time) & (time_unbound < 10000.0),
+            (time_unbound >= prefix_end_time) & (time_unbound < args.time_horizon),
             True,
         ),
-        ("一直到结束仍稳定", time_unbound >= 10000.0, False),
+        ("一直到结束仍稳定", time_unbound >= args.time_horizon, False),
     )
     segmented_rows = []
     for segment, mask, expected_unbound in segment_definitions:

@@ -74,11 +74,12 @@ def load_batch(
     batch_id: int,
     positions: np.ndarray,
     prefix_steps: int,
+    sampling_id: int,
 ) -> np.ndarray:
     local_rows = resolve_local_rows(labels, full_labels, positions)
     read_order = np.argsort(local_rows)
     restore_order = np.argsort(read_order)
-    shard = dataset_dir / f"results_batch_{int(batch_id):02d}_sampling_2.hdf5"
+    shard = dataset_dir / f"results_batch_{int(batch_id):02d}_sampling_{sampling_id}.hdf5"
     data: dict[str, np.ndarray] = {}
     with h5py.File(shard, "r") as handle:
         for key in required_keys_for_representation("orbital15"):
@@ -125,6 +126,7 @@ def main() -> None:
     parser.add_argument("--dataset-dir", type=Path, default=REPO_ROOT / "dataset_v3")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--prefix-steps", type=int, default=96)
+    parser.add_argument("--sampling-id", type=int, default=2)
     parser.add_argument("--pooling", choices=["reg", "mean", "full"], default="reg")
     parser.add_argument("--sample-batch-size", type=int, default=32)
     parser.add_argument(
@@ -174,6 +176,7 @@ def main() -> None:
         "rows": expected_rows,
         "feature_dim": expected_dim,
         "prefix_steps": args.prefix_steps,
+        "sampling_id": args.sampling_id,
         "pooling": args.pooling,
         "label_fingerprint": fingerprint,
         "dtype": "float16",
@@ -230,7 +233,10 @@ def main() -> None:
                 processed += len(positions)
                 continue
             batch_start = time.perf_counter()
-            x = load_batch(labels, labels_all, args.dataset_dir, batch_id, positions, args.prefix_steps)
+            x = load_batch(
+                labels, labels_all, args.dataset_dir, batch_id, positions,
+                args.prefix_steps, args.sampling_id,
+            )
             for start in range(0, len(x), args.sample_batch_size):
                 stop = min(start + args.sample_batch_size, len(x))
                 context = torch.from_numpy(np.transpose(x[start:stop], (0, 2, 1)))

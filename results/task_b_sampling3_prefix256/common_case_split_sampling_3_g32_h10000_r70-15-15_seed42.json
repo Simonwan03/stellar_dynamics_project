@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "group_size": 32,
+  "time_horizon": 10000.0,
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "num_cases": 4998,
+  "split_counts": {
+    "train": 3498,
+    "val": 750,
+    "test": 750
+  },
+  "labels_path": "dataset_sampling_3_prefix1024/completed_systems_sampling_3.txt"
+}

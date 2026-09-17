@@ -175,6 +175,7 @@ def load_task_labels(prefix_dir: Path) -> tuple[pd.DataFrame, dict[str, np.ndarr
 def extract_feature_cache(
     labels: pd.DataFrame,
     dataset_dir: Path,
+    sampling_id: int,
     prefix_steps: int,
     cache_path: Path,
     batch_size: int,
@@ -190,6 +191,7 @@ def extract_feature_cache(
         "rows": len(labels),
         "feature_dim": expected_shape[1],
         "prefix_steps": prefix_steps,
+        "sampling_id": sampling_id,
         "representation": "orbital15",
         "statistics": list(STAT_NAMES),
         "slope_time": "normalized_prefix_0_to_1",
@@ -222,7 +224,7 @@ def extract_feature_cache(
             read_order = np.argsort(local_rows)
             restore_order = np.argsort(read_order)
             sorted_rows = local_rows[read_order]
-            shard_path = dataset_dir / f"results_batch_{batch_id:02d}_sampling_2.hdf5"
+            shard_path = dataset_dir / f"results_batch_{batch_id:02d}_sampling_{sampling_id}.hdf5"
             if not shard_path.exists():
                 raise FileNotFoundError(shard_path)
             with h5py.File(shard_path, "r") as handle:
@@ -280,8 +282,11 @@ def train_and_evaluate(
     reg_lambda: float,
     n_jobs: int,
     early_stopping_rounds: int,
+    time_horizon: float,
 ) -> dict[str, Any]:
-    target_unbound = (labels["time_unbound"].to_numpy(dtype=np.float32) < 10000.0).astype(np.int8)
+    target_unbound = (
+        labels["time_unbound"].to_numpy(dtype=np.float32) < time_horizon
+    ).astype(np.int8)
     model = XGBClassifier(
         objective="binary:logistic",
         eval_metric="auc",
@@ -295,6 +300,7 @@ def train_and_evaluate(
         tree_method="hist",
         n_jobs=n_jobs,
         random_state=seed,
+        early_stopping_rounds=early_stopping_rounds if early_stopping_rounds > 0 else None,
         verbosity=1,
     )
     print(
@@ -306,8 +312,6 @@ def train_and_evaluate(
         "eval_set": [(np.asarray(features[split_rows["val"]]), target_unbound[split_rows["val"]])],
         "verbose": True,
     }
-    if early_stopping_rounds > 0:
-        fit_kwargs["early_stopping_rounds"] = early_stopping_rounds
     model.fit(np.asarray(features[split_rows["train"]]), target_unbound[split_rows["train"]], **fit_kwargs)
 
     metrics: dict[str, Any] = {
@@ -315,7 +319,7 @@ def train_and_evaluate(
         "representation": "orbital15_summary",
         "prefix_steps": int(prefix_steps),
         "feature_dim": int(features.shape[1]),
-        "target": "time_unbound < 10000",
+        "target": f"time_unbound < {time_horizon:g}",
         "best_iteration": int(getattr(model, "best_iteration", n_estimators - 1)),
         "splits": {split: int(rows.size) for split, rows in split_rows.items()},
     }
@@ -369,6 +373,8 @@ def main() -> None:
     parser.add_argument("--prefix-dir", type=Path, default=DEFAULT_PREFIX_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--prefix-steps", type=int, default=96)
+    parser.add_argument("--sampling-id", type=int, default=2)
+    parser.add_argument("--time-horizon", type=float, default=10000.0)
     parser.add_argument("--read-batch-size", type=int, default=512)
     parser.add_argument("--n-estimators", type=int, default=800)
     parser.add_argument("--max-depth", type=int, default=4)
@@ -400,6 +406,7 @@ def main() -> None:
     features, metadata = extract_feature_cache(
         labels=labels,
         dataset_dir=args.dataset_dir,
+        sampling_id=args.sampling_id,
         prefix_steps=args.prefix_steps,
         cache_path=cache_path,
         batch_size=args.read_batch_size,
@@ -421,6 +428,7 @@ def main() -> None:
         reg_lambda=args.reg_lambda,
         n_jobs=args.n_jobs,
         early_stopping_rounds=args.early_stopping_rounds,
+        time_horizon=args.time_horizon,
     )
     write_json(
         args.output_dir / "run_config.json",
@@ -429,6 +437,8 @@ def main() -> None:
             "prefix_dir": str(args.prefix_dir),
             "output_dir": str(args.output_dir),
             "prefix_steps": args.prefix_steps,
+            "sampling_id": args.sampling_id,
+            "time_horizon": args.time_horizon,
             "statistics": list(STAT_NAMES),
             "feature_dim": int(features.shape[1]),
             "xgboost": {

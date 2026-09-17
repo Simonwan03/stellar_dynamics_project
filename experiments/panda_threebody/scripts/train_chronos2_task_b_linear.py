@@ -124,6 +124,7 @@ def main() -> None:
         default=None,
         help="Expected prefix length; defaults to the feature-cache metadata.",
     )
+    parser.add_argument("--time-horizon", type=float, default=10000.0)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -188,7 +189,9 @@ def main() -> None:
                 path.unlink()
 
     set_seed(args.seed)
-    target_unbound = (labels["time_unbound"].to_numpy(dtype=np.float32) < 10000.0).astype(np.float32)
+    target_unbound = (
+        labels["time_unbound"].to_numpy(dtype=np.float32) < args.time_horizon
+    ).astype(np.float32)
     loaders = {
         split: DataLoader(
             CachedFeatureDataset(features, target_unbound, rows),
@@ -293,8 +296,8 @@ def main() -> None:
     prefix_end_time = float(prefix_steps * 5.0)
     segment_definitions = (
         (f"prefix {prefix_steps}内已 unbound", time_unbound < prefix_end_time, True),
-        (f"prefix {prefix_steps}后才 unbound", (time_unbound >= prefix_end_time) & (time_unbound < 10000.0), True),
-        ("一直到结束仍稳定", time_unbound >= 10000.0, False),
+        (f"prefix {prefix_steps}后才 unbound", (time_unbound >= prefix_end_time) & (time_unbound < args.time_horizon), True),
+        ("一直到结束仍稳定", time_unbound >= args.time_horizon, False),
     )
     segmented_rows = []
     for segment, mask, expected_unbound in segment_definitions:

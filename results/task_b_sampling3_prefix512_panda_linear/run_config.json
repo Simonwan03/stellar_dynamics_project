@@ -1,0 +1,33 @@
+{
+  "prefix_dir": "results/task_b_sampling3_prefix512",
+  "dataset_dir": "dataset_sampling_3_prefix1024",
+  "panda_cache_dir": "/home/ubuntu/github/stellar_dynamics_project/experiments/panda_threebody/outputs/panda_unbound_dataset/panda_unbound_orbital15_patch_mean_keep_channels",
+  "output_dir": "results/task_b_sampling3_prefix512_panda_linear",
+  "checkpoint": "/home/ubuntu/.cache/huggingface/hub/models--GilpinLab--panda-72M/snapshots/0d18042be8f259788fcf62b68ec904b27f20cc8c",
+  "prefix_steps": 512,
+  "sampling_id": 3,
+  "time_horizon": 10000.0,
+  "feature_cache": "results/task_b_sampling3_prefix512_panda_linear/panda_features.float16.npy",
+  "feature_batch_size": 128,
+  "epochs": 20,
+  "batch_size": 2048,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "head": "linear",
+  "hidden": 128,
+  "dropout": 0.2,
+  "attention_heads": 4,
+  "attention_layers": 2,
+  "supplemental_features": null,
+  "seed": 42,
+  "device": "cuda",
+  "representation": "orbital15 -> Panda patch mean keep channels (15x768)",
+  "num_patches": 32,
+  "trainable_parameters": 11521,
+  "split_counts": {
+    "train": 111936,
+    "val": 24000,
+    "test": 24000
+  },
+  "supplemental_feature_count": 0
+}

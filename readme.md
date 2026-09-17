@@ -610,25 +610,75 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 召回率也由 `0.6101` 提升到 `0.8297`。SVM 的提升较小，说明更长观测
 需要合适的时序归纳偏置才能转化为有效的早期预警信号。
 
-#### 新高分辨率 `sampling_3` 数据集：`prefix=512`
+#### 新高分辨率 `sampling_3` 数据集：`prefix=256/512`
 
-在新高分辨率数据集上重新运行 `trajectory_binary` Task B，仅使用前 `512` 个时间步。
-输入为 `orbital15`，标签 horizon 为 `10000`，并按完整 `raw_case_id` system 做切分。
-过滤无效标签和非有限 prefix 后共有 `159936` 条 trajectory（`4998` 个完整 systems）；
-train/val/test 分别为 `111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。
-以下结果以 stable 为正类、阈值为 `0.5`；三种模型使用相同的 seed `42`、最大 `50` 个
-epochs、early stopping patience `8`、batch size `2048` 和 CUDA AMP。
+在新高分辨率数据集上重新运行 `trajectory_binary` Task B，输入为 `orbital15`，标签
+horizon 为 `10000`，并比较前 `256` 和 `512` 个时间步。过滤无效标签和非有限 prefix 后
+共有 `159936` 条 trajectory（`4998` 个完整 systems）；train/val/test 分别为
+`111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。两个 prefix 逐字节复用
+相同的标签顺序和完整 `raw_case_id` system split，避免同一 system 的 32 条扰动发生数据泄漏。
+以下结果以 stable 为正类、阈值为 `0.5`，测试集正类比例为 `30.92%`。
+
+MLP、CNN、TCN 使用 seed `42`、最多 `50` epochs、early-stopping patience `8`、
+batch size `2048` 和 CUDA AMP。Panda-72M 与 Chronos-2 均冻结 foundation encoder，
+分别使用每个通道的 Panda patch-mean embedding 和 Chronos-2 REG embedding（均为
+`15 x 768 = 11520` 维）训练 linear probe；probe 训练 `20` epochs 并按 validation AUROC
+选择 checkpoint。Stats XGBoost 对每个 `orbital15` 通道提取
+`initial/final/mean/std/slope/min/max/delta` 八种统计量，共 `120` 维。
+
+**Prefix 256**
+
+| Model | Accuracy | Balanced Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MLP | 0.7618 | 0.6615 | 0.7025 | 0.3985 | 0.5085 | 0.8238 | 0.6520 |
+| CNN | 0.7908 | 0.7364 | 0.6871 | 0.5937 | 0.6370 | 0.8547 | 0.7034 |
+| TCN | 0.7803 | 0.7459 | 0.6415 | 0.6560 | 0.6486 | 0.8562 | 0.7008 |
+| Panda-72M + linear | 0.8633 | 0.8619 | 0.7408 | 0.8582 | 0.7952 | 0.9392 | 0.8686 |
+| Chronos-2 + linear | 0.8584 | **0.8676** | 0.7184 | **0.8917** | 0.7957 | 0.9458 | 0.8908 |
+| Stats XGBoost | **0.8891** | 0.8603 | **0.8454** | 0.7848 | **0.8140** | **0.9550** | **0.9023** |
+
+**Prefix 512**
 
 | Model | Accuracy | Balanced Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | MLP | 0.7676 | 0.6845 | 0.6814 | 0.4668 | 0.5540 | 0.8507 | 0.6701 |
-| CNN | **0.8040** | 0.7408 | **0.7335** | 0.5751 | 0.6447 | **0.8837** | **0.7494** |
-| TCN | 0.7771 | **0.7865** | 0.6040 | **0.8109** | **0.6923** | 0.8684 | 0.7124 |
+| CNN | 0.8040 | 0.7408 | 0.7335 | 0.5751 | 0.6447 | 0.8837 | 0.7494 |
+| TCN | 0.7771 | 0.7865 | 0.6040 | 0.8109 | 0.6923 | 0.8684 | 0.7124 |
+| Panda-72M + linear | 0.8826 | 0.8807 | 0.7741 | 0.8759 | 0.8218 | 0.9563 | 0.9079 |
+| Chronos-2 + linear | 0.8695 | 0.8818 | 0.7312 | **0.9140** | 0.8125 | 0.9582 | 0.9164 |
+| Stats XGBoost | **0.9036** | **0.8821** | **0.8573** | 0.8258 | **0.8412** | **0.9651** | **0.9205** |
 
-TCN 的 F1、Recall 和 Balanced Accuracy 最高；CNN 的 Accuracy、Precision、AUROC 和
-AUPRC 最高。完整指标与预测产物位于
-[`results/task_b_sampling3_prefix512/`](results/task_b_sampling3_prefix512/)，运行脚本为
-[`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)。
+Stats XGBoost 在两个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPRC 均最高，
+是综合最强的模型；Chronos-2 则在 `prefix=256` 的 Balanced Accuracy 和两个 prefix 的
+stable Recall 上最高。Panda 和 Chronos-2 在 `prefix=256` 的 F1 几乎相同
+（`0.7952` vs. `0.7957`）。时序神经网络中，TCN 在两个 prefix 上均取得最高的
+Balanced Accuracy、Recall 和 F1。
+
+从 `512` 缩短到 `256` 后，所有模型的 F1 和 AUROC 都下降：
+
+| Model | Delta F1 (`256-512`) | Delta AUROC (`256-512`) |
+| --- | ---: | ---: |
+| MLP | -0.0455 | -0.0269 |
+| CNN | **-0.0077** | -0.0291 |
+| TCN | -0.0437 | -0.0122 |
+| Panda-72M + linear | -0.0267 | -0.0171 |
+| Chronos-2 + linear | -0.0168 | -0.0124 |
+| Stats XGBoost | -0.0273 | **-0.0100** |
+
+完整指标、模型、逐样本预测和配置位于：
+
+- `prefix=256`：[MLP/CNN/TCN](results/task_b_sampling3_prefix256/)、
+  [Panda-72M](results/task_b_sampling3_prefix256_panda_linear/)、
+  [Chronos-2](results/task_b_sampling3_prefix256_chronos2/)、
+  [Stats XGBoost](results/task_b_sampling3_prefix256_stats_xgboost/)
+- `prefix=512`：[MLP/CNN/TCN](results/task_b_sampling3_prefix512/)、
+  [Panda-72M](results/task_b_sampling3_prefix512_panda_linear/)、
+  [Chronos-2](results/task_b_sampling3_prefix512_chronos2/)、
+  [Stats XGBoost](results/task_b_sampling3_prefix512_stats_xgboost/)
+
+MLP/CNN/TCN 的运行脚本为 [`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)；
+foundation embedding 与 Stats XGBoost runner 位于
+[`experiments/panda_threebody/scripts/`](experiments/panda_threebody/scripts/)。
 
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
@@ -2513,7 +2563,8 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 
 - Task A 的 <code>fraction_mlp_base_cuda</code>、<code>fraction_mlp_cuda_smoke</code> 没有
   可用最终 metrics；<code>h=20000</code> 只属于超出数据有效范围的边界测试。
-- Task B prefix=512 当前只有 SVM/CNN/TCN 的 metrics，GRU/Attention 未完成。
+- Task B 的新高分辨率 `sampling_3`、`prefix=256/512` 目前已有 MLP、CNN、TCN、
+  Panda-72M、Chronos-2 和 Stats XGBoost 的可复核结果；GRU/Attention 仍未完成。
 - Task B 的 group_fraction / group_attention 入口在代码中存在，但本仓库当前没有可复核的
   最终结果文件，因此不虚构其测试指标。
 - Task D prefix 运行的 censoring fraction 为 0.886154，说明它更像高 censoring

@@ -1,0 +1,14 @@
+{
+  "rows": 159936,
+  "feature_dim": 11520,
+  "prefix_steps": 512,
+  "sampling_id": 3,
+  "num_patches": 32,
+  "patch_length": 16,
+  "patch_stride": 16,
+  "checkpoint": "/home/ubuntu/.cache/huggingface/hub/models--GilpinLab--panda-72M/snapshots/0d18042be8f259788fcf62b68ec904b27f20cc8c",
+  "pooling": "patch_mean_keep_channels",
+  "label_fingerprint": "c6bb88cbcc643a8d8eb30b95fe36916e28807ed99d8e18f745979e297ad0398e",
+  "dtype": "float16",
+  "extraction_batch_size": 128
+}
