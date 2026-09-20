@@ -1,0 +1,441 @@
+{
+  "actual_source_keys": {
+    "dataset_sampling_3_prefix1024/results_batch_00_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_01_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_02_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_03_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_04_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_05_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_06_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_07_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_08_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_09_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_10_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_11_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_12_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_13_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_14_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_15_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_16_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_17_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_18_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_19_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_20_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_21_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_22_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_23_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_24_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_25_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_26_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_27_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_28_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_29_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_30_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_31_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_32_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_33_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_34_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_35_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_36_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_37_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_38_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    },
+    "dataset_sampling_3_prefix1024/results_batch_39_sampling_3.hdf5": {
+      "APs": "APs_complete",
+      "LANs": "LANs_complete",
+      "aratios": "aratios_complete",
+      "eccs": "eccs_complete",
+      "incs": "incs_complete",
+      "mratios": "mratios_complete"
+    }
+  },
+  "channel_names": [
+    "aratios_0",
+    "mratios_0",
+    "mratios_1",
+    "eccs_0",
+    "eccs_1",
+    "incs_0",
+    "incs_1",
+    "APs_sin_0",
+    "APs_sin_1",
+    "APs_cos_0",
+    "APs_cos_1",
+    "LANs_sin_0",
+    "LANs_sin_1",
+    "LANs_cos_0",
+    "LANs_cos_1"
+  ],
+  "completion_filter": {
+    "completion_horizon": 10000.0,
+    "enabled": true,
+    "path": "dataset_sampling_3_prefix1024/completed_systems_sampling_3.txt",
+    "require_complete_systems": true,
+    "valid_systems": 4998,
+    "valid_trajectories": 159936
+  },
+  "groups": [
+    {
+      "channel_end": 1,
+      "channel_names": [
+        "aratios_0"
+      ],
+      "channel_start": 0,
+      "name": "aratios",
+      "source_key": "aratios_complete",
+      "source_shape": [
+        1
+      ],
+      "transform": "log1p"
+    },
+    {
+      "channel_end": 3,
+      "channel_names": [
+        "mratios_0",
+        "mratios_1"
+      ],
+      "channel_start": 1,
+      "name": "mratios",
+      "source_key": "mratios_complete",
+      "source_shape": [
+        2
+      ],
+      "transform": "log1p"
+    },
+    {
+      "channel_end": 5,
+      "channel_names": [
+        "eccs_0",
+        "eccs_1"
+      ],
+      "channel_start": 3,
+      "name": "eccs",
+      "source_key": "eccs_complete",
+      "source_shape": [
+        2
+      ],
+      "transform": "identity"
+    },
+    {
+      "channel_end": 7,
+      "channel_names": [
+        "incs_0",
+        "incs_1"
+      ],
+      "channel_start": 5,
+      "name": "incs",
+      "source_key": "incs_complete",
+      "source_shape": [
+        2
+      ],
+      "transform": "identity"
+    },
+    {
+      "channel_end": 11,
+      "channel_names": [
+        "APs_sin_0",
+        "APs_sin_1",
+        "APs_cos_0",
+        "APs_cos_1"
+      ],
+      "channel_start": 7,
+      "name": "APs",
+      "source_key": "APs_complete",
+      "source_shape": [
+        2
+      ],
+      "transform": "sin_cos"
+    },
+    {
+      "channel_end": 15,
+      "channel_names": [
+        "LANs_sin_0",
+        "LANs_sin_1",
+        "LANs_cos_0",
+        "LANs_cos_1"
+      ],
+      "channel_start": 11,
+      "name": "LANs",
+      "source_key": "LANs_complete",
+      "source_shape": [
+        2
+      ],
+      "transform": "sin_cos"
+    }
+  ],
+  "num_features": 15,
+  "representation": "orbital15",
+  "split_unit": "system_group_of_32"
+}

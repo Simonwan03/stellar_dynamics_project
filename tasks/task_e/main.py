@@ -54,6 +54,7 @@ from tasks.task_e.metrics import (  # noqa: E402
     summarize_horizon_trends,
 )
 from tasks.task_e.models import build_supervised_model  # noqa: E402
+from tasks.task_e.masking import MaskedForecastWindowDataset  # noqa: E402
 from tasks.task_e.panda_dependency import panda_dependency_metadata  # noqa: E402
 
 
@@ -177,6 +178,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--kernel_size", type=int, default=3)
     parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument(
+        "--mask-regime", "--mask_regime", dest="mask_regime",
+        choices=["none", "clean_only", "random_only", "mixed", "fixed"],
+        default="none",
+        help="Task-F-compatible context masking regime; targets remain unmasked.",
+    )
+    parser.add_argument(
+        "--mask-eval-ratio", "--mask_eval_ratio", dest="mask_eval_ratio",
+        type=float, default=0.5,
+        help="Hidden timestamp fraction used for fixed validation/test masks.",
+    )
+    parser.add_argument(
+        "--mask-kind", "--mask_kind", dest="mask_kind",
+        choices=["random", "single_block", "multi_block"], default="random",
+        help="Mask geometry for fixed validation/test masks.",
+    )
     parser.add_argument("--patch_len", type=int, default=16)
     parser.add_argument("--patch_stride", type=int, default=8)
     parser.add_argument("--d_model", type=int, default=256)
@@ -385,6 +402,20 @@ def main() -> None:
         raise ValueError("Per-trajectory window counts must be non-negative.")
     if args.bootstrap_samples < 0:
         raise ValueError("--bootstrap-samples must be non-negative.")
+    mask_enabled = args.mask_regime != "none"
+    if not 0.0 <= float(args.mask_eval_ratio) < 1.0:
+        raise ValueError("--mask-eval-ratio must be in [0, 1).")
+    if mask_enabled and args.model not in SUPERVISED_MODELS | FOUNDATION_MODELS:
+        raise ValueError(
+            "Context masking is currently implemented for supervised and native foundation models only."
+        )
+    if mask_enabled and args.run_rolling:
+        raise ValueError("Masked Task E1 currently does not support --run-rolling; run unmasked E2 separately.")
+    if args.eval_only:
+        if args.model not in SUPERVISED_MODELS:
+            raise ValueError("--eval_only is currently supported for supervised models only.")
+        if args.resume_from is None:
+            raise ValueError("--eval_only requires --resume_from pointing to a model checkpoint.")
 
     # Legacy global caps are applied to the candidate pools first.  The new
     # protocol then samples train/validation/test windows from those pools;
@@ -420,6 +451,34 @@ def main() -> None:
     if args.num_eval_windows > 0:
         datasets["val"] = cap_dataset(datasets["val"], args.num_eval_windows, args.seed + 4)
         datasets["test"] = cap_dataset(datasets["test"], args.num_eval_windows, args.seed + 5)
+
+    # Mask only the context. The target remains the original 15-channel
+    # physical forecast, while the model receives a 16th observed-indicator
+    # channel. Validation and test masks are fixed per sample; training masks
+    # follow the Task-F policy and are re-sampled each epoch.
+    if mask_enabled:
+        if args.model in SUPERVISED_MODELS:
+            datasets["train"] = MaskedForecastWindowDataset(
+                datasets["train"],
+                regime=args.mask_regime,
+                seed=args.seed,
+                mask_ratio=args.mask_eval_ratio,
+                mask_kind=args.mask_kind,
+            )
+        datasets["val"] = MaskedForecastWindowDataset(
+            datasets["val"],
+            regime="fixed",
+            seed=args.seed + 10000,
+            mask_ratio=args.mask_eval_ratio,
+            mask_kind=args.mask_kind,
+        )
+        datasets["test"] = MaskedForecastWindowDataset(
+            datasets["test"],
+            regime="fixed",
+            seed=args.seed + 20000,
+            mask_ratio=args.mask_eval_ratio,
+            mask_kind=args.mask_kind,
+        )
 
     rolling_candidate_dataset: Dataset = candidate_datasets["test"]
     if args.num_eval_windows > 0:
@@ -457,12 +516,18 @@ def main() -> None:
     save_json(args.output_dir / "config.json", config)
     print_dataset_summary(config, feature_names, prepared)
     print("[task_e] building DataLoaders", flush=True)
+    loader_num_workers = int(args.num_workers)
+    if mask_enabled and args.model == "toto2" and loader_num_workers > 0:
+        # Toto-2 switches torch multiprocessing to spawn; ForecastWindowDataset
+        # owns HDF5 thread handles that are intentionally not picklable.
+        print("[task_e] Toto-2 masked evaluation forces num_workers=0 for HDF5 safety.", flush=True)
+        loader_num_workers = 0
 
     loaders = {
         name: build_loader(
             dataset,
             args.batch_size if args.model not in FOUNDATION_MODELS else args.foundation_batch_size,
-            args.num_workers,
+            loader_num_workers,
             shuffle=name == "train" and args.model in SUPERVISED_MODELS,
             device=device,
         )
@@ -532,8 +597,18 @@ def main() -> None:
             patch_stride=args.patch_stride,
             d_model=args.d_model,
             n_heads=args.n_heads,
+            input_features=num_features + (1 if mask_enabled else 0),
+            output_features=num_features,
         ).to(device)
-        train_model(model, loaders, args, config, prepared, device, amp_enabled)
+        if args.eval_only:
+            checkpoint_path = args.resume_from.expanduser().resolve()
+            if not checkpoint_path.is_file():
+                raise FileNotFoundError(f"Evaluation checkpoint does not exist: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+            load_checkpoint_state(model, checkpoint)
+            print(f"[task_e] evaluation-only: loaded checkpoint {checkpoint_path}", flush=True)
+        else:
+            train_model(model, loaders, args, config, prepared, device, amp_enabled)
         val_pred, val_target, _, val_trajectory_ids, _ = predict_model(
             model,
             loaders["val"],
@@ -552,7 +627,9 @@ def main() -> None:
             "test",
             return_metadata=True,
         )
-        forecast_fn = lambda context: forecast_model_batch(model, context, device, amp_enabled)
+        forecast_fn = lambda context: forecast_model_batch(
+            model, context, device, amp_enabled, output_features=num_features
+        )
     elif args.model == LEGACY_ADAPTER_MODEL:
         raise ValueError(
             "panda_adapter is disabled in the current Task E protocol; "
@@ -571,6 +648,7 @@ def main() -> None:
             "val",
             return_metadata=True,
             context_limit=1,
+            output_features=num_features,
         )
         print("[task_e] evaluating test split", flush=True)
         test_pred, test_target, sample_context, test_trajectory_ids, _ = predict_foundation(
@@ -582,9 +660,10 @@ def main() -> None:
             "test",
             return_metadata=True,
             context_limit=max(int(args.prediction_samples), 1),
+            output_features=num_features,
         )
         forecast_fn = lambda context: forecast_foundation_batch(
-            predictor, context, args.pred_len, multivariate
+            predictor, context, args.pred_len, multivariate, output_features=num_features
         )
 
     print("[task_e] saving validation/test metrics and prediction sample", flush=True)
@@ -619,14 +698,20 @@ def main() -> None:
         bootstrap_samples=args.bootstrap_samples,
         bootstrap_seed=args.seed + 7001,
     )
+    sample_mask = (
+        sample_context[..., num_features:].astype(np.float32, copy=False)
+        if mask_enabled and sample_context.shape[-1] > num_features
+        else None
+    )
     save_prediction_sample(
         args.output_dir / "predictions_sample.npz",
-        sample_context,
+        sample_context[..., :num_features],
         test_target,
         test_pred,
         prepared,
         feature_names,
         args.prediction_samples,
+        context_mask=sample_mask,
     )
     del test_pred, test_target, sample_context, test_trajectory_ids
     rolling_metrics: dict[str, Any] | None = None
@@ -722,7 +807,19 @@ def build_config(
         "resolved_source_paths": prepared.source_paths,
         "resolved_representation": prepared.feature_metadata["representation"],
         "num_features": prepared.feature_metadata["num_features"],
+        "input_features": int(prepared.feature_metadata["num_features"]) + (1 if args.mask_regime != "none" else 0),
+        "output_features": prepared.feature_metadata["num_features"],
         "feature_names": prepared.feature_metadata["channel_names"],
+        "masking": {
+            "enabled": bool(args.mask_regime != "none"),
+            "regime": args.mask_regime,
+            "eval_ratio": float(args.mask_eval_ratio),
+            "kind": args.mask_kind,
+            "mask_channel": "observed_flag" if args.mask_regime != "none" else None,
+            "target_channels": "physical_only",
+            "validation_seed": int(args.seed + 10000),
+            "test_seed": int(args.seed + 20000),
+        },
         "trajectory_count": prepared.trajectory_count,
         "time_steps": prepared.time_steps,
         "split_trajectory_counts": {
@@ -855,7 +952,7 @@ def build_loader(
         # DynamicTrajectoryWindowDataset changes its selected indices in the
         # parent process at every epoch, so persistent worker copies would
         # retain stale indices.
-        persistent_workers=num_workers > 0 and not isinstance(dataset, DynamicTrajectoryWindowDataset),
+        persistent_workers=num_workers > 0 and not bool(getattr(dataset, "dynamic_per_epoch", False)),
     )
 
 
@@ -1146,6 +1243,7 @@ def forecast_model_batch(
     context: np.ndarray,
     device: torch.device,
     amp_enabled: bool,
+    output_features: int | None = None,
 ) -> np.ndarray:
     context = np.asarray(context, dtype=np.float32)
     if context.ndim != 3:
@@ -1156,9 +1254,11 @@ def forecast_model_batch(
     with autocast():
         prediction = model(context_tensor)
     prediction = prediction.detach().cpu().float().numpy()
-    if prediction.ndim != 3 or prediction.shape[0] != context.shape[0] or prediction.shape[2] != context.shape[2]:
+    expected_features = context.shape[2] if output_features is None else int(output_features)
+    if prediction.ndim != 3 or prediction.shape[0] != context.shape[0] or prediction.shape[2] != expected_features:
         raise ValueError(
-            f"Supervised model returned shape {prediction.shape} for context {context.shape}."
+            f"Supervised model returned shape {prediction.shape}; expected batch={context.shape[0]} "
+            f"and channels={expected_features}."
         )
     if not np.isfinite(prediction).all():
         raise ValueError("Supervised model produced non-finite predictions.")
@@ -1210,6 +1310,7 @@ def forecast_foundation_batch(
     context: np.ndarray,
     pred_len: int,
     multivariate: bool,
+    output_features: int | None = None,
 ) -> np.ndarray:
     context = np.asarray(context, dtype=np.float32)
     if context.ndim != 3:
@@ -1222,7 +1323,12 @@ def forecast_foundation_batch(
         flat_prediction = predictor(flattened, pred_len)
         prediction = flat_prediction.reshape(batch_count, channels, pred_len).transpose(0, 2, 1)
     prediction = np.asarray(prediction, dtype=np.float32)
-    expected = (context.shape[0], pred_len, context.shape[2])
+    expected_features = context.shape[2] if output_features is None else int(output_features)
+    if prediction.ndim == 3 and prediction.shape[2] > expected_features:
+        # Foundation models forecast every supplied channel, including the
+        # synthetic observed-mask channel. Discard that channel before metrics.
+        prediction = prediction[..., :expected_features]
+    expected = (context.shape[0], pred_len, expected_features)
     if prediction.shape != expected:
         raise ValueError(f"Foundation predictor returned shape {prediction.shape}, expected {expected}.")
     if not np.isfinite(prediction).all():
@@ -1327,6 +1433,7 @@ def predict_foundation(
     split: str = "eval",
     return_metadata: bool = False,
     context_limit: int | None = None,
+    output_features: int | None = None,
 ) -> tuple[Any, ...]:
     predictions, targets, contexts = [], [], []
     trajectory_ids, starts = [], []
@@ -1336,7 +1443,11 @@ def predict_foundation(
     total_batches = len(loader)
     for batch_idx, batch in enumerate(loader, start=1):
         context = batch["context"].numpy()
-        predictions.append(forecast_foundation_batch(predictor, context, pred_len, multivariate))
+        predictions.append(
+            forecast_foundation_batch(
+                predictor, context, pred_len, multivariate, output_features=output_features
+            )
+        )
         targets.append(batch["target"].numpy())
         if context_limit is None:
             contexts.append(context)
@@ -1739,6 +1850,7 @@ def save_prediction_sample(
     prepared: PreparedForecastData,
     feature_names: list[str],
     limit: int,
+    context_mask: np.ndarray | None = None,
 ) -> None:
     count = min(max(limit, 1), pred_z.shape[0])
     np.savez_compressed(
@@ -1750,6 +1862,7 @@ def save_prediction_sample(
         target_z=target_z[:count],
         pred_z=pred_z[:count],
         feature_names=np.asarray(feature_names, dtype=object),
+        **({"context_mask": context_mask[:count]} if context_mask is not None else {}),
     )
 
 

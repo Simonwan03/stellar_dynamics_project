@@ -45,21 +45,24 @@ class TCNForecaster(nn.Module):
         num_layers: int,
         kernel_size: int,
         dropout: float,
+        output_features: int | None = None,
     ) -> None:
         super().__init__()
+        output_features = num_features if output_features is None else int(output_features)
         blocks = []
         in_channels = num_features
         for layer in range(num_layers):
             blocks.append(TemporalBlock(in_channels, hidden_dim, kernel_size, 2**layer, dropout))
             in_channels = hidden_dim
         self.network = nn.Sequential(*blocks)
-        self.head = nn.Linear(hidden_dim, pred_len * num_features)
+        self.head = nn.Linear(hidden_dim, pred_len * output_features)
         self.pred_len = pred_len
         self.num_features = num_features
+        self.output_features = output_features
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         encoded = self.network(x.transpose(1, 2))[:, :, -1]
-        return self.head(encoded).view(x.shape[0], self.pred_len, self.num_features)
+        return self.head(encoded).view(x.shape[0], self.pred_len, self.output_features)
 
 
 class PatchTSTForecaster(nn.Module):
@@ -74,6 +77,7 @@ class PatchTSTForecaster(nn.Module):
         n_heads: int,
         num_layers: int,
         dropout: float,
+        output_features: int | None = None,
     ) -> None:
         super().__init__()
         if patch_len > context_len:
@@ -81,6 +85,7 @@ class PatchTSTForecaster(nn.Module):
         if d_model % n_heads:
             raise ValueError("d_model must be divisible by n_heads.")
         self.num_features = num_features
+        self.output_features = num_features if output_features is None else int(output_features)
         self.pred_len = pred_len
         self.patch_len = patch_len
         self.patch_stride = patch_stride
@@ -107,7 +112,7 @@ class PatchTSTForecaster(nn.Module):
         tokens = self.patch_embedding(tokens) + self.position
         encoded = self.encoder(tokens).reshape(batch * channels, -1)
         prediction = self.head(encoded).view(batch, channels, self.pred_len)
-        return prediction.transpose(1, 2)
+        return prediction[:, : self.output_features, :].transpose(1, 2)
 
 
 class ITransformerForecaster(nn.Module):
@@ -131,13 +136,18 @@ class ITransformerForecaster(nn.Module):
         n_heads: int,
         num_layers: int,
         dropout: float,
+        output_features: int | None = None,
     ) -> None:
         super().__init__()
+        output_features = num_features if output_features is None else int(output_features)
+        if output_features <= 0 or output_features > num_features:
+            raise ValueError("output_features must be in [1, num_features].")
         if num_features <= 0 or context_len <= 0 or pred_len <= 0:
             raise ValueError("num_features, context_len, and pred_len must be positive.")
         if d_model % n_heads:
             raise ValueError("d_model must be divisible by n_heads.")
         self.num_features = int(num_features)
+        self.output_features = int(output_features)
         self.context_len = int(context_len)
         self.pred_len = int(pred_len)
         self.normalization_epsilon = 1e-5
@@ -185,7 +195,7 @@ class ITransformerForecaster(nn.Module):
         forecast = self.projector(encoded).transpose(1, 2)
 
         # Return to the same coordinates as the Task E input/scaler.
-        return forecast * stdev + means
+        return (forecast * stdev + means)[..., : self.output_features]
 
 
 def build_supervised_model(
@@ -201,21 +211,28 @@ def build_supervised_model(
     patch_stride: int,
     d_model: int,
     n_heads: int,
+    input_features: int | None = None,
+    output_features: int | None = None,
 ) -> nn.Module:
+    input_features = num_features if input_features is None else int(input_features)
+    output_features = num_features if output_features is None else int(output_features)
+    if input_features <= 0 or output_features <= 0 or output_features > input_features:
+        raise ValueError("Expected 1 <= output_features <= input_features.")
     if model_name == "tcn":
-        return TCNForecaster(num_features, pred_len, hidden_dim, num_layers, kernel_size, dropout)
+        return TCNForecaster(input_features, pred_len, hidden_dim, num_layers, kernel_size, dropout, output_features=output_features)
     if model_name == "patchtst":
         return PatchTSTForecaster(
-            num_features, context_len, pred_len, patch_len, patch_stride,
-            d_model, n_heads, num_layers, dropout,
+            input_features, context_len, pred_len, patch_len, patch_stride,
+            d_model, n_heads, num_layers, dropout, output_features=output_features,
         )
     if model_name == "itransformer":
         return ITransformerForecaster(
-            num_features, context_len, pred_len, d_model, n_heads, num_layers, dropout
+            input_features, context_len, pred_len, d_model, n_heads, num_layers, dropout,
+            output_features=output_features
         )
     if model_name == "transformer":
         return TransformerForecaster(
-            num_features=num_features,
+            num_features=input_features,
             context_len=context_len,
             pred_len=pred_len,
             d_model=d_model,
@@ -223,5 +240,6 @@ def build_supervised_model(
             num_layers=num_layers,
             dim_feedforward=4 * d_model,
             dropout=dropout,
+            output_features=output_features,
         )
     raise ValueError(f"Unsupported supervised model: {model_name}")

@@ -943,12 +943,19 @@ def load_completion_metadata(
         finite_time = time_grid[np.isfinite(time_grid)]
         if finite_time.size == 0:
             raise ValueError(f"No finite time grid in {source.path}")
-        source_time_end = float(finite_time[-1])
+        prefix_time_end = float(finite_time[-1])
+        source_time_end = prefix_time_end
+        source_time_end_is_valid = False
         if source_time_end_attr is not None:
             candidate_end = float(np.asarray(source_time_end_attr).reshape(-1)[0])
-            if np.isfinite(candidate_end):
+            # A full-source endpoint cannot precede the endpoint already
+            # present in a truncated prefix.  Older sampling_3 prefix files
+            # contain a corrupt value here because the downloader used the
+            # wrong byte stride; reject it and reconstruct the endpoint below.
+            if np.isfinite(candidate_end) and candidate_end >= prefix_time_end:
                 source_time_end = candidate_end
-        elif source_time_steps > time_grid.size and finite_time.size >= 2:
+                source_time_end_is_valid = True
+        if not source_time_end_is_valid and source_time_steps > time_grid.size and finite_time.size >= 2:
             # Prefix files retain the original number of time steps in an
             # attribute; reconstruct the full endpoint instead of scaling from
             # the truncated prefix endpoint.

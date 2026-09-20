@@ -39,12 +39,17 @@ class TransformerForecaster(nn.Module):
         num_layers: int = 4,
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
+        output_features: int | None = None,
     ) -> None:
         super().__init__()
+        output_features = num_features if output_features is None else int(output_features)
+        if output_features <= 0 or output_features > num_features:
+            raise ValueError("output_features must be in [1, num_features].")
         if d_model % n_heads != 0:
             raise ValueError(f"d_model must be divisible by n_heads, got {d_model=} {n_heads=}")
 
         self.num_features = int(num_features)
+        self.output_features = int(output_features)
         self.context_len = int(context_len)
         self.pred_len = int(pred_len)
         self.d_model = int(d_model)
@@ -66,7 +71,7 @@ class TransformerForecaster(nn.Module):
             nn.Linear(d_model, d_model),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_model, pred_len * num_features),
+            nn.Linear(d_model, pred_len * output_features),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -83,4 +88,4 @@ class TransformerForecaster(nn.Module):
         encoded = self.encoder(encoded)
         final_state = encoded[:, -1, :]
         forecast = self.forecast_head(final_state)
-        return forecast.view(x.size(0), self.pred_len, self.num_features)
+        return forecast.view(x.size(0), self.pred_len, self.output_features)

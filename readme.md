@@ -610,12 +610,12 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 召回率也由 `0.6101` 提升到 `0.8297`。SVM 的提升较小，说明更长观测
 需要合适的时序归纳偏置才能转化为有效的早期预警信号。
 
-#### 新高分辨率 `sampling_3` 数据集：`prefix=256/512`
+#### 新高分辨率 `sampling_3` 数据集：`prefix=64/128/256/512`
 
 在新高分辨率数据集上重新运行 `trajectory_binary` Task B，输入为 `orbital15`，标签
-horizon 为 `10000`，并比较前 `256` 和 `512` 个时间步。过滤无效标签和非有限 prefix 后
+horizon 为 `10000`，并比较前 `64`、`128`、`256` 和 `512` 个时间步。过滤无效标签和非有限 prefix 后
 共有 `159936` 条 trajectory（`4998` 个完整 systems）；train/val/test 分别为
-`111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。两个 prefix 逐字节复用
+`111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。四个 prefix 逐字节复用
 相同的标签顺序和完整 `raw_case_id` system split，避免同一 system 的 32 条扰动发生数据泄漏。
 以下结果以 stable 为正类、阈值为 `0.5`，测试集正类比例为 `30.92%`。
 
@@ -625,6 +625,33 @@ batch size `2048` 和 CUDA AMP。Panda-72M 与 Chronos-2 均冻结 foundation en
 `15 x 768 = 11520` 维）训练 linear probe；probe 训练 `20` epochs 并按 validation AUROC
 选择 checkpoint。Stats XGBoost 对每个 `orbital15` 通道提取
 `initial/final/mean/std/slope/min/max/delta` 八种统计量，共 `120` 维。
+
+Panda 和 Chronos-2 的 patch size/stride 均为 `16`。因此 `prefix=64` 和 `128` 分别精确形成
+每变量 `4` 和 `8` 个上下文 patch，不需要 padding 或 truncation。Panda 对 encoder 输出沿 patch
+维求均值，保留 `15 x 768` 表征；Chronos-2 为每个变量保留 REG token，再拼接为同样的
+`15 x 768` 表征。两者都在 encoder 内进行序列尺度归一化，foundation encoder 均保持冻结。
+
+**Prefix 64**
+
+| Model | Accuracy | Balanced Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MLP | 0.7468 | 0.6545 | 0.6406 | 0.4126 | 0.5019 | 0.7961 | 0.6152 |
+| CNN | 0.7614 | 0.7140 | 0.6199 | 0.5899 | 0.6046 | 0.8149 | 0.6631 |
+| TCN | 0.7585 | 0.7040 | 0.6211 | 0.5611 | 0.5896 | 0.8092 | 0.6600 |
+| Panda-72M + linear | 0.8177 | 0.7973 | 0.6906 | 0.7438 | 0.7162 | 0.8906 | 0.7554 |
+| Chronos-2 + linear | 0.8225 | 0.8195 | 0.6779 | **0.8115** | 0.7387 | 0.9061 | 0.8034 |
+| Stats XGBoost | **0.8657** | **0.8322** | **0.8063** | 0.7444 | **0.7741** | **0.9349** | **0.8663** |
+
+**Prefix 128**
+
+| Model | Accuracy | Balanced Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MLP | 0.7470 | 0.6451 | 0.6582 | 0.3781 | 0.4803 | 0.8025 | 0.6265 |
+| CNN | 0.7747 | 0.7120 | 0.6647 | 0.5476 | 0.6005 | 0.8317 | 0.6745 |
+| TCN | 0.7628 | 0.7350 | 0.6068 | 0.6619 | 0.6332 | 0.8375 | 0.6848 |
+| Panda-72M + linear | 0.8322 | 0.8338 | 0.6877 | 0.8379 | 0.7554 | 0.9157 | 0.8207 |
+| Chronos-2 + linear | 0.8450 | **0.8511** | 0.7019 | **0.8670** | 0.7758 | 0.9320 | 0.8601 |
+| Stats XGBoost | **0.8724** | 0.8428 | **0.8114** | 0.7651 | **0.7876** | **0.9437** | **0.8875** |
 
 **Prefix 256**
 
@@ -648,11 +675,12 @@ batch size `2048` 和 CUDA AMP。Panda-72M 与 Chronos-2 均冻结 foundation en
 | Chronos-2 + linear | 0.8695 | 0.8818 | 0.7312 | **0.9140** | 0.8125 | 0.9582 | 0.9164 |
 | Stats XGBoost | **0.9036** | **0.8821** | **0.8573** | 0.8258 | **0.8412** | **0.9651** | **0.9205** |
 
-Stats XGBoost 在两个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPRC 均最高，
-是综合最强的模型；Chronos-2 则在 `prefix=256` 的 Balanced Accuracy 和两个 prefix 的
-stable Recall 上最高。Panda 和 Chronos-2 在 `prefix=256` 的 F1 几乎相同
-（`0.7952` vs. `0.7957`）。时序神经网络中，TCN 在两个 prefix 上均取得最高的
-Balanced Accuracy、Recall 和 F1。
+Stats XGBoost 在四个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPRC 均最高，
+是综合最强的模型；Chronos-2 在四个 prefix 上的 stable Recall 均最高，并在
+`prefix=128/256` 取得最高 Balanced Accuracy。Panda 与 Chronos-2 在短前缀下已明显优于
+从头训练的 MLP/CNN/TCN，说明冻结 foundation encoder 的表征在早期轨道判别上有效。
+从 `64` 增加到 `128` 时，Panda、Chronos-2 和 Stats XGBoost 的 F1 分别提升
+`0.0392`、`0.0371` 和 `0.0135`；TCN 也提升 `0.0436`，而 MLP/CNN 有小幅波动。
 
 从 `512` 缩短到 `256` 后，所有模型的 F1 和 AUROC 都下降：
 
@@ -667,6 +695,14 @@ Balanced Accuracy、Recall 和 F1。
 
 完整指标、模型、逐样本预测和配置位于：
 
+- `prefix=64`：[MLP/CNN/TCN](results/task_b_sampling3_prefix64/)、
+  [Panda-72M](results/task_b_sampling3_prefix64_panda_linear/)、
+  [Chronos-2](results/task_b_sampling3_prefix64_chronos2/)、
+  [Stats XGBoost](results/task_b_sampling3_prefix64_stats_xgboost/)
+- `prefix=128`：[MLP/CNN/TCN](results/task_b_sampling3_prefix128/)、
+  [Panda-72M](results/task_b_sampling3_prefix128_panda_linear/)、
+  [Chronos-2](results/task_b_sampling3_prefix128_chronos2/)、
+  [Stats XGBoost](results/task_b_sampling3_prefix128_stats_xgboost/)
 - `prefix=256`：[MLP/CNN/TCN](results/task_b_sampling3_prefix256/)、
   [Panda-72M](results/task_b_sampling3_prefix256_panda_linear/)、
   [Chronos-2](results/task_b_sampling3_prefix256_chronos2/)、
@@ -675,6 +711,10 @@ Balanced Accuracy、Recall 和 F1。
   [Panda-72M](results/task_b_sampling3_prefix512_panda_linear/)、
   [Chronos-2](results/task_b_sampling3_prefix512_chronos2/)、
   [Stats XGBoost](results/task_b_sampling3_prefix512_stats_xgboost/)
+
+为节省磁盘，`prefix=64/128` 的 Panda/Chronos embedding `.npy` 和基线输入临时 cache
+在 probe 训练及产物校验后已清理；embedding 元数据、最佳 checkpoint、完整指标和逐样本预测均保留，
+特征 cache 可由对应 runner 重新生成。
 
 MLP/CNN/TCN 的运行脚本为 [`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)；
 foundation embedding 与 Stats XGBoost runner 位于
@@ -1051,6 +1091,110 @@ Ridge、TCN、PatchTST 和 Transformer 的已有数字属于下面的历史
 - [iTransformer summary](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md)
 - [TiRex-2 summary](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md)
 - [Toto-2.0 summary](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md)
+
+#### E.current.0 新高分辨率 `sampling_3`：固定前 512 步（2026-09-20）
+
+这组结果使用修复时间轴后的 `sampling_3` 高分辨率数据和同一个 prepared cache。每条
+trajectory 只取一个固定的 `start=0` 窗口，即输入为完整轨迹的前 `512` 步，预测接下来的
+`128` 步；这不是滑动窗口平均。所有模型共享同一份 system-level split、train-only
+scaler 和 completion filter：train/validation/test 分别为 `62,375/12,713/13,674`
+个窗口，system 数为 `3,037/650/652`。E2 使用同一模型递归预测四个 `128` 步 block，
+最终 horizon 为 `512`；过滤后实际有 `12,535` 个 rolling windows。
+
+表中 MSE/MAE/RMSE 是 test system-balanced 的 z-space 指标；E1 的 Pearson 和
+sMAPE 在 test 上计算，E2 的 amplification 是 `block_4_MAE / block_1_MAE`。
+本表与上面的旧 `E.current` 不直接混排：旧表使用不同数据版本和窗口采样数量。
+
+**E1 one-shot test（512 -> 128）**
+
+| Model | Training | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Toto-2](runs/task_e_sampling3_first512_toto2/summary.json) | zero-shot | **0.217659** | 0.222297 | **0.466539** | **0.873670** | 30.1662% | 0.182041 |
+| [Chronos-2](runs/task_e_sampling3_first512_chronos2/summary.json) | zero-shot | 0.226219 | **0.221723** | **0.475625** | **0.870241** | **29.6257%** | 0.171653 |
+| [TiRex-2](runs/task_e_sampling3_first512_tirex2/summary.json) | zero-shot | 0.237418 | 0.232584 | 0.487255 | 0.863216 | 31.0279% | 0.173224 |
+| [Panda-72M](runs/task_e_sampling3_first512_panda/summary.json) | zero-shot | 0.231738 | 0.239895 | 0.481392 | 0.863981 | 33.5534% | 0.244699 |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_ep25/summary.json) | supervised, 25 epochs | 0.226875 | 0.260282 | 0.476313 | 0.867887 | 37.7547% | 0.288506 |
+| [TCN](runs/task_e_sampling3_first512_tcn_ep25_continued/summary.json) | supervised, 25 epochs | 0.347537 | 0.382849 | 0.589523 | 0.787813 | 57.9286% | 0.547491 |
+| [Linear extrapolation](runs/task_e_sampling3_first512_linear/summary.json) | no training | 1.466162 | 0.573974 | 1.210852 | 0.584784 | 53.7090% | 0.000000 |
+
+**E2 recursive rolling（最长 horizon 512）**
+
+| Model | MSE-z | MAE-z | RMSE-z | Block MAE（1 -> 4） | Error amplification |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| [Toto-2](runs/task_e_sampling3_first512_toto2/e2_metrics.json) | 0.366338 | **0.325192** | 0.605259 | 0.216279 -> 0.399839 | 1.848718 |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_ep25/e2_metrics.json) | **0.362589** | 0.346581 | **0.602153** | 0.255137 -> 0.409072 | **1.603344** |
+| [Panda-72M](runs/task_e_sampling3_first512_panda/e2_metrics.json) | 0.371580 | 0.341082 | 0.609574 | 0.231064 -> 0.403988 | 1.748379 |
+| [TiRex-2](runs/task_e_sampling3_first512_tirex2/e2_metrics.json) | 0.396369 | 0.336787 | 0.629578 | 0.227547 -> 0.407478 | 1.790741 |
+| [Chronos-2](runs/task_e_sampling3_first512_chronos2/e2_metrics.json) | 0.384154 | 0.326271 | 0.619802 | 0.214891 -> 0.400641 | 1.864397 |
+| [TCN](runs/task_e_sampling3_first512_tcn_ep25_continued/e2_metrics.json) | 0.444356 | 0.474394 | 0.666600 | 0.383775 -> 0.554580 | **1.445064** |
+| [Linear extrapolation](runs/task_e_sampling3_first512_linear/e2_metrics.json) | 11.933765 | 1.210531 | 3.454528 | 0.579115 -> 1.817169 | 3.137837 |
+
+在 E1 上 Toto-2 的 system-balanced MSE、RMSE 和 Pearson 最好；Chronos-2 的 MAE 和 sMAPE 最低，TiRex-2 的单位圆误差与其接近。Linear 的单位圆误差接近零是因为显式做了 sin/cos 投影，不能直接当作模型优势。E2 中 iTransformer 的总体 MSE/RMSE 和误差放大比最好，Toto-2 的总体 MAE 最低；不同 foundation model 在 one-shot 与长程递归上的优势并不完全一致。监督模型均从第 25 epoch 的最佳验证
+checkpoint 评估；foundation models 不训练参数，只执行 zero-shot 推理。
+
+#### E.current.masked Task E1：Task F 风格部分观测扩展（2026-09-20）
+
+这组实验把 Task F 的时间掩码迁移到 E1 的 `sampling_3` 高分辨率协议。每个窗口仍是
+`context=512 -> pred=128`，每条 trajectory 只取 `start=0`；scaler 先在完整 train
+window 上拟合，再在 z-space 对 context 做掩码。隐藏时间点的 15 个物理通道全部置零，
+并追加第 16 个 `observed_flag` 通道（1=观测、0=隐藏）；未来 128 步 target 始终保持
+15 个物理通道，不做掩码。因此监督模型实际学习的是 `[B,512,16] -> [B,128,15]`。
+验证集和测试集使用按 sample 固定、互不重叠 seed 的 random mask；mixed 训练集每个
+epoch 动态采样 clean/single-block/multi-block/random 掩码，clean-only 对照训练集始终
+使用完整 context。当前扩展只做 E1，未把 masked context 递归带入 E2。
+
+**50% 随机掩码主压力测试（test system-balanced）**
+
+| Model | Training / input | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | **0.321402** | **0.396725** | **0.566923** | **0.831395** | **54.9716%** | **0.546901** |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
+| [Panda-72M](runs/task_e_sampling3_first512_panda_masked_r50/summary.json) | zero-shot, 16-channel input | 0.464034 | 0.566025 | 0.681200 | 0.838396 | 73.1123% | 0.826506 |
+| [TiRex-2](runs/task_e_sampling3_first512_tirex2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.490926 | 0.587055 | 0.700661 | 0.832026 | 77.7291% | 0.843680 |
+| [Chronos-2](runs/task_e_sampling3_first512_chronos2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.554911 | 0.621384 | 0.744923 | 0.807168 | 82.6103% | 0.869868 |
+| [Toto-2.0](runs/task_e_sampling3_first512_toto2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.586839 | 0.630204 | 0.766054 | 0.764037 | 88.5850% | 0.861010 |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.470040 | 0.555433 | 0.685595 | 0.799928 | 71.0869% | 0.764429 |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.683660 | 0.658510 | 0.826837 | 0.588171 | 87.9430% | 0.786339 |
+
+**Foundation fixed-mask sensitivity（test MSE-z）**
+
+| Model | 25% hidden | 50% hidden | 75% hidden |
+| --- | ---: | ---: | ---: |
+| [Panda-72M](runs/task_e_sampling3_first512_panda_masked_r25/summary.json) | 0.312909 | **0.464034** | **0.726548** |
+| [Chronos-2](runs/task_e_sampling3_first512_chronos2_masked_r25/summary.json) | **0.234933** | 0.554911 | 1.058969 |
+| [Toto-2.0](runs/task_e_sampling3_first512_toto2_masked_r25/summary.json) | 0.239602 | 0.586839 | 1.066093 |
+| [TiRex-2](runs/task_e_sampling3_first512_tirex2_masked_r25/summary.json) | 0.236252 | 0.490926 | 1.055153 |
+
+**Supervised mixed-checkpoint fixed-mask sensitivity（test MSE-z；不重新训练）**
+
+| Model | 25% hidden | 50% hidden | 75% hidden |
+| --- | ---: | ---: | ---: |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | **0.264421** | **0.321402** | 0.620715 |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 0.372196 | 0.404719 | **0.530433** |
+
+这两行均加载原先 50% mixed 训练得到的 `best_model.pt`，只把验证/测试 context 的固定随机掩码比例改为 25% 或 75%；因此反映的是同一 mask-aware checkpoint 的缺失率敏感性，而不是比例专用重训练结果。
+
+**Supervised mixed-checkpoint full metrics（test system-balanced）**
+
+| Model | Context mask | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | 25% | 0.264421 | 0.319646 | 0.514219 | 0.846761 | 45.9250% | 0.385172 |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | 50% | 0.321402 | 0.396725 | 0.566923 | 0.831395 | 54.9716% | 0.546901 |
+| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r75/summary.json) | 75% | 0.620715 | 0.655630 | 0.787855 | 0.775324 | 86.4697% | 0.868959 |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 25% | 0.372196 | 0.412514 | 0.610079 | 0.773248 | 62.0649% | 0.589304 |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | 50% | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
+| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r75/summary.json) | 75% | 0.530433 | 0.561069 | 0.728309 | 0.695288 | 80.0520% | 0.783927 |
+
+这些敏感性结果说明：25% 缺测时四个 foundation model 都仍可用，其中 Chronos-2、TiRex-2 和 Toto-2 的 MSE-z 接近完整 context；
+50% 后误差明显上升；75% 时 foundation model 大多接近失效。监督模型中 mixed 训练
+相对于 clean-only 在 50% 缺测下显著更稳，支持“训练时必须见到缺测形态”的设计判断。
+
+实现和复现实验入口：
+
+- [masked dataset wrapper](tasks/task_e/masking.py)
+- [Task E runner](tasks/task_e/main.py)
+- [mask wrapper tests](tests/test_task_e_masking.py)
+- 各 run 目录中的 `config.json` 记录 `input_features=16`、`output_features=15`、掩码比例、seed 和 mask geometry；`predictions_sample.npz` 额外保存 `context_mask`。
 
 #### E.current.1 逐步 horizon metrics
 

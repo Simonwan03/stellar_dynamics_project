@@ -132,5 +132,48 @@ class PreparedCacheTest(unittest.TestCase):
             np.testing.assert_array_equal(lengths, np.asarray([2, 3, 4, 4], dtype=np.int64))
 
 
+    def test_corrupt_prefix_time_metadata_falls_back_to_reconstructed_end(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result_path = root / "results_batch_00_sampling_3.hdf5"
+            with h5py.File(result_path, "w") as handle:
+                handle.create_dataset(
+                    "times_complete",
+                    data=np.tile(np.asarray([0.0, 10.0, 20.0, 30.0]), (4, 1)),
+                )
+                handle.attrs["source_time_steps"] = 11
+                handle.attrs["source_time_end"] = 1.5
+            completion_path = root / "completed.txt"
+            np.savetxt(
+                completion_path,
+                np.asarray(
+                    [
+                        [0, 0, 1, 0, 0],
+                        [1, 0, 2, 0, 0],
+                        [2, 0, 10, 0, 0],
+                        [3, 0, 10, 0, 0],
+                    ],
+                    dtype=np.float64,
+                ),
+            )
+            source = SequenceSource(
+                path=result_path,
+                row_count=4,
+                time_steps=4,
+                resolved_keys={},
+                step_shapes={},
+            )
+
+            valid, lengths, _ = load_completion_metadata(
+                completion_path,
+                [source],
+                group_size=1,
+                require_complete_systems=False,
+            )
+
+            np.testing.assert_array_equal(valid, np.ones(4, dtype=bool))
+            np.testing.assert_array_equal(lengths, np.asarray([2, 3, 4, 4], dtype=np.int64))
+
+
 if __name__ == "__main__":
     unittest.main()

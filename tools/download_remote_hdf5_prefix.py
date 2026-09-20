@@ -326,7 +326,12 @@ def inspect_remote(url: str, block_size: int) -> RemoteMetadata:
         source_time_end = None
         time_info = datasets.get("times_complete")
         if time_info is not None:
-            start = time_info.offset + (time_info.shape[1] - 1) * time_info.row_bytes
+            # HDF5 contiguous datasets are laid out in C order.  The old
+            # expression multiplied the final column index by a whole-row
+            # stride, which jumped far beyond the times dataset.  Address the
+            # final scalar using its flattened index instead.
+            scalar_count = int(np.prod(time_info.shape, dtype=np.int64))
+            start = time_info.offset + (scalar_count - 1) * time_info.dtype.itemsize
             end = start + time_info.dtype.itemsize - 1
             raw = _request_range(url, [(start, end)], timeout=120.0)[(start, end)]
             source_time_end = float(np.frombuffer(raw, dtype=time_info.dtype, count=1)[0])
