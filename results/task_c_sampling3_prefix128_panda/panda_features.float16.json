@@ -1,0 +1,14 @@
+{
+  "rows": 159936,
+  "feature_dim": 11520,
+  "prefix_steps": 128,
+  "sampling_id": 3,
+  "num_patches": 8,
+  "patch_length": 16,
+  "patch_stride": 16,
+  "checkpoint": "GilpinLab/panda-72M",
+  "pooling": "patch_mean_keep_channels",
+  "label_fingerprint": "c6bb88cbcc643a8d8eb30b95fe36916e28807ed99d8e18f745979e297ad0398e",
+  "dtype": "float16",
+  "extraction_batch_size": 128
+}

@@ -815,6 +815,66 @@ orbital15 通道提取 `initial, final, mean, std, slope, min, max, delta` 八�
 由 7 个 fraction 反推 pseudo-hazard 的 dual 数字混为同一实验；后续 Panda、
 Chronos 和 LoRA 也会复用这套 target、mask、head 和评估协议。
 
+#### 主实验：高分辨率 `sampling_3`、`prefix=128`（2026-09-20）
+
+这是当前 Task C 的主实验设定。输入使用高分辨率
+`dataset_sampling_3_prefix1024` 的 `orbital15` 前 `128` 个采样步
+（`time_stride=1`），标签使用修复后的 `time_unbound` event-time 表示：
+`1` 到 `10000` 是采样步，`10000` 为 right-censored 观测上限。数据中有
+`159,952` 条有效 trajectory；Task C 选取其中完整 system 子集 `159,936` 条，
+对应 `4,998` 个完整的 `32`-variation system。其中 `49,770` 条入选 trajectory
+在 `10000` 处删失（约 `31.11%`）。
+
+所有模型都使用相同的完整 system split（`3498/750/750`，seed `42`），
+相同的 `20` 个 log-spaced hazard bins（`1 → 10000`）、future horizons
+`500,800,1500,2500,4000,6500,10000`、`variation_target=full32`、
+batch size `64` 和最多 `20` epochs。Foundation 模型先冻结 backbone，再训练
+survival hazard head；Panda-72M 使用 `15×768` patch-mean channel embedding，
+Chronos-2 使用对应的 `[REG]` token（同样为 `15×768`）。embedding cache 的
+label fingerprint 为
+`c6bb88cbcc643a8d8eb30b95fe36916e28807ed99d8e18f745979e297ad0398e`。
+
+| Model | 输入/池化 | 20-bin MAE | Final-bin MAE | old 7-horizon MAE | IBS |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mean baseline | train mean curve | 0.2805 | 0.3483 | 0.3749 | 0.1166 |
+| Stats | orbital15 八统计量 | 0.0858 | 0.1892 | 0.1633 | 0.0726 |
+| CNN | raw orbital15 | 0.0976 | 0.2020 | 0.1776 | 0.0790 |
+| TCN | raw orbital15 | 0.0861 | 0.2034 | 0.1737 | 0.0728 |
+| GRU | raw orbital15 | **0.0816** | 0.1959 | 0.1665 | **0.0710** |
+| Attention | raw orbital15 | 0.1242 | 0.2417 | 0.2169 | 0.0953 |
+| Panda-72M | direct (`15×768`) | 0.0570 | 0.1194 | 0.1086 | 0.0555 |
+| Panda-72M | mean+std (`1536`) | 0.0675 | 0.1428 | 0.1280 | 0.0605 |
+| Panda-72M | channel attention | 0.0622 | 0.1279 | 0.1178 | 0.0592 |
+| Chronos-2 | direct (`15×768`) | **0.0494** | **0.1125** | **0.0982** | **0.0517** |
+| Chronos-2 | mean+std (`1536`) | 0.0585 | 0.1272 | 0.1144 | 0.0544 |
+| Chronos-2 | channel attention | 0.0525 | 0.1184 | 0.1040 | 0.0523 |
+
+在 raw trajectory 模型中，GRU 的整体 MAE/IBS 最好；Stats 与 TCN 接近，说明
+高分辨率轨道的趋势统计已经包含大量可用信息。冻结 foundation 表示明显更强，
+其中 Chronos-2 direct 在四个主要指标上均为最佳；Panda-72M direct 次之。
+三种 pooling 的排序在两个 foundation model 上一致：direct 优于 attention，
+attention 优于 mean+std。所有误差都随预测时间变长而增加，说明长期 survival
+curve 仍是主要难点。
+
+结果与复现文件：
+
+- raw 模型：[metrics.json](results/task_c_sampling3_prefix128_raw/metrics.json)、
+  [config.json](results/task_c_sampling3_prefix128_raw/config.json)、
+  [survival curve](results/task_c_sampling3_prefix128_raw/figure_1_20bin_survival_curve.png)
+- Panda-72M：[metrics.json](results/task_c_sampling3_prefix128_panda/metrics.json)、
+  [config.json](results/task_c_sampling3_prefix128_panda/config.json)、
+  [embedding metadata](results/task_c_sampling3_prefix128_panda/panda_features.float16.json)
+- Chronos-2：[metrics.json](results/task_c_sampling3_prefix128_chronos2/metrics.json)、
+  [config.json](results/task_c_sampling3_prefix128_chronos2/config.json)、
+  [embedding metadata](results/task_c_sampling3_prefix128_chronos2/chronos2_reg_features.float16.json)
+- raw 输入 cache：[metadata.json](results/task_c_sampling3_prefix128_cache/metadata.json)
+- 公共 system split：[CSV manifest](results/task_b_sampling3_prefix128/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv)
+
+由于 `sampling_2` 的旧 shard 是每批 `8000` 行而 `sampling_3` 的高分辨率
+shard 是每批 `4000` 行，embedding loader 不再用 `index//8000` 推断 batch；现在
+直接读取 completion table 的 `num_batch`，再在 batch 内按 `index` 生成
+`row_in_batch`。这避免了高分辨率 Panda/Chronos embedding 与 trajectory 错位。
+
 已有的 prefix=96 frozen embedding 也可以直接接入同一套 hazard head：
 
 ```bash

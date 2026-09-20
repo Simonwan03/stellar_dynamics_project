@@ -663,8 +663,13 @@ def _load_embedding_cases(args: argparse.Namespace) -> tuple[np.ndarray, Any, li
         labels = labels.astype(
             {"index": "int64", "num_batch": "int64", "time_unbound": "float32", "diagnosis": "int64"}
         )
-        labels["batch_id"] = labels["index"] // 8000
-        labels["row_in_batch"] = labels["index"] % 8000
+        # The historical sampling_2 shards contain 8000 rows, while the
+        # high-resolution sampling_3 shards contain 4000.  Use the explicit
+        # completion-table batch id and derive the row order within each batch
+        # instead of assuming a fixed shard size.
+        labels["batch_id"] = labels["num_batch"].astype("int64")
+        labels = labels.sort_values(["batch_id", "index"]).reset_index(drop=True)
+        labels["row_in_batch"] = labels.groupby("batch_id", sort=False).cumcount()
 
     if len(labels) != expected_rows:
         # A complete 160000-row completion table can be reduced to the valid
