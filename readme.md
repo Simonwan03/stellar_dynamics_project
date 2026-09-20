@@ -675,6 +675,45 @@ Panda 和 Chronos-2 的 patch size/stride 均为 `16`。因此 `prefix=64` 和 `
 | Chronos-2 + linear | 0.8695 | 0.8818 | 0.7312 | **0.9140** | 0.8125 | 0.9582 | 0.9164 |
 | Stats XGBoost | **0.9036** | **0.8821** | **0.8573** | 0.8258 | **0.8412** | **0.9651** | **0.9205** |
 
+**System-level stable-fraction 评估**
+
+使用与旧版 Task B 两层评估相同的定义：在 750 个 test systems 内，先对每个 system 的
+32 条 trajectory 的 `prob_stable` 求均值，作为预测 stable fraction；真实 stable fraction
+为 32 个 `target_stable` 的均值。以下 MAE、MSE 和 R² 因而均以 system 为评估单位，
+不是对 trajectory-level 0/1 预测再次计算分类指标。
+
+| Prefix | Model | System MAE ↓ | System MSE ↓ | System R² ↑ |
+| ---: | --- | ---: | ---: | ---: |
+| 64 | MLP | 0.2255 | 0.1064 | 0.3146 |
+| 64 | CNN | 0.2301 | 0.0944 | 0.3922 |
+| 64 | TCN | 0.2133 | 0.1112 | 0.2841 |
+| 64 | Panda-72M + linear | 0.1514 | 0.0543 | 0.6500 |
+| 64 | Chronos-2 + linear | 0.1592 | 0.0553 | 0.6441 |
+| 64 | Stats XGBoost | **0.1134** | **0.0355** | **0.7712** |
+| 128 | MLP | 0.2101 | 0.1085 | 0.3010 |
+| 128 | CNN | 0.2222 | 0.0866 | 0.4421 |
+| 128 | TCN | 0.2085 | 0.0984 | 0.3665 |
+| 128 | Panda-72M + linear | 0.1386 | 0.0459 | 0.7046 |
+| 128 | Chronos-2 + linear | 0.1379 | 0.0428 | 0.7245 |
+| 128 | Stats XGBoost | **0.1012** | **0.0306** | **0.8030** |
+| 256 | MLP | 0.1994 | 0.0984 | 0.3663 |
+| 256 | CNN | 0.1889 | 0.0826 | 0.4679 |
+| 256 | TCN | 0.1881 | 0.0874 | 0.4372 |
+| 256 | Panda-72M + linear | 0.1090 | 0.0295 | 0.8098 |
+| 256 | Chronos-2 + linear | 0.1220 | 0.0354 | 0.7719 |
+| 256 | Stats XGBoost | **0.0865** | **0.0236** | **0.8479** |
+| 512 | MLP | 0.1818 | 0.0844 | 0.4562 |
+| 512 | CNN | 0.1693 | 0.0702 | 0.5480 |
+| 512 | TCN | 0.1950 | 0.0739 | 0.5240 |
+| 512 | Panda-72M + linear | 0.0869 | 0.0197 | 0.8732 |
+| 512 | Chronos-2 + linear | 0.1058 | 0.0268 | 0.8273 |
+| 512 | Stats XGBoost | **0.0700** | **0.0157** | **0.8989** |
+
+Stats XGBoost 在四个 prefix 的三个 system-level 指标上均为最佳。对 Stats XGBoost，
+prefix 从 `64` 增加到 `512` 后，system MAE 从 `0.1134` 降至 `0.0700`，MSE 从
+`0.0355` 降至 `0.0157`，R² 从 `0.7712` 升至 `0.8989`。Panda-72M 和 Chronos-2
+也随 prefix 增长整体改善；从头训练模型的改善较弱，TCN 的 MAE 还存在非单调波动。
+
 Stats XGBoost 在四个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPRC 均最高，
 是综合最强的模型；Chronos-2 在四个 prefix 上的 stable Recall 均最高，并在
 `prefix=128/256` 取得最高 Balanced Accuracy。Panda 与 Chronos-2 在短前缀下已明显优于
@@ -719,6 +758,10 @@ Stats XGBoost 在四个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPR
 MLP/CNN/TCN 的运行脚本为 [`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)；
 foundation embedding 与 Stats XGBoost runner 位于
 [`experiments/panda_threebody/scripts/`](experiments/panda_threebody/scripts/)。
+System-level 指标由
+[`scripts/evaluate_task_b_highres_two_level.py`](scripts/evaluate_task_b_highres_two_level.py)
+从上述逐 trajectory 预测统一生成；汇总指标、逐 system 预测和独立 Markdown 表位于
+[`results/task_b_sampling3_two_level_evaluation/`](results/task_b_sampling3_two_level_evaluation/)。
 
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
