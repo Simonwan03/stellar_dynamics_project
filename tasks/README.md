@@ -322,101 +322,47 @@ trajectory sampling clock uses different units and is not added to the horizons.
 
 ## Task D
 
-Task D uses initial conditions only to predict the conditional 25th, 50th, and
-75th percentiles of a system-level semimajor-axis-ratio Lyapunov-time proxy.
-For pair `(i, i+16)`, define
+Task D uses initial conditions only to predict one system-level scalar: the
+median orbital-decorrelation time. For pair `(r, r+16)`, with
+`Q=a_in/a_out`,
 
-`G_ij(t) = |Q_i(t)-Q_j(t)| / |Q_i(0)-Q_j(0)|`, with `Q=a_in/a_out`.
+`T_ir^(k) = inf{t: |Q_ir(t)-Q_i,r+16(t)| / |Q_ir(0)-Q_i,r+16(0)| >= exp(k)}`.
 
-The default pair label is `T_ij = t_cross(G=e^5)/5`, measured in initial outer
-periods. A system label is the reciprocal of the median valid pair growth rate,
-`T_system = 1 / median_ij(1/T_ij)`, requiring at least eight valid pairs. This
-is an observable finite-time proxy, not a variational-equation maximum
-Lyapunov time.
+The default is `k=5`. Each pair time is expressed in its initial outer-period
+units, and the system label is the median over the 16 pair crossing times. The
+crossing time is not divided by `k`, because this task does not interpret it as
+`1/lambda`. At least eight observed crossings are required.
 
-Inputs are the `orbital15` initial conditions, with angles encoded as sine/cosine.
-The 16 nominal variations have the same physical values for these 15 features;
-their observed differences are only floating-point noise. Tabular models can
-therefore use `--tabular-features first` to take the first variation directly,
-instead of the default redundant mean/std/min/max summary. All models predict
-`log(T_system/P_out,0)` with q25/q50/q75 pinball losses.
+The input is only the first nominal variation's base-system `orbital15`
+features. Angular variables use sine/cosine encoding. The models predict
+
+`log(T_i,med^(5) / P_out,0)`.
+
+The three baselines are a constant training-set median, XGBoost, and an MLP:
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
   --dataset-dir dataset_sampling_3_prefix1024 \
   --threshold-power 5 \
-  --models constant,gbr,mlp,deepsets \
-  --output-dir results/task_d_initial_quantiles \
+  --models constant,xgboost,mlp \
+  --output-dir results/task_d_median_decorrelation \
   --device cuda
 ```
 
-Run the recommended label sensitivity comparison with:
+The reported test metrics are log-time MAE, log-time RMSE, Spearman
+correlation, and factor-of-two accuracy. Each metric includes a paired
+bootstrap 95% confidence interval (2,000 resamples by default). Crossing
+interpolation is linear in log growth and can be disabled with
+`--no-interpolation`.
+
+For a threshold sensitivity run:
 
 ```bash
 conda run -n stellar python -m tasks.task_d.sensitivity \
   --threshold-powers 4 5 6 \
-  --models constant,gbr \
-  --output-dir results/task_d_initial_quantile_sensitivity
+  --models constant,xgboost \
+  --output-dir results/task_d_median_decorrelation_sensitivity
 ```
-
-Metrics include pinball loss and empirical coverage for every quantile, central
-50% interval coverage and width, median MAE/RMSE/Spearman, factor-two accuracy,
-and quantile-crossing rate. Crossing interpolation is linear in log growth and
-can be disabled with `--no-interpolation`.
-
-### Label-threshold sensitivity ablation (2026-09-08)
-
-Using the same seed (`42`), feature representation, split protocol, and models,
-we compared crossing thresholds `e^4`, `e^5`, and `e^6`. The table reports the
-main test metrics for GBR; the complete constant baseline, per-quantile
-coverage, predictions, and plots are summarized in
-`results/task_d_initial_quantile_sensitivity/summary.md`.
-
-| Threshold | Valid systems | Target P25/P50/P75 | GBR mean pinball ↓ | GBR P50 log-MAE ↓ | Central 50% coverage | Spearman ↑ | Factor-two accuracy ↑ |
-|---:|---:|---|---:|---:|---:|---:|---:|
-| `e^4` | 4,997 | 0.9544 / 3.4319 / 9.1262 | **0.3227** | **0.7559** | 0.4827 | 0.6589 | **54.13%** |
-| `e^5` | 4,996 | 0.9113 / 3.4091 / 11.2786 | 0.3611 | 0.8475 | 0.4780 | 0.6686 | 51.27% |
-| `e^6` | 4,988 | 0.8811 / 3.3414 / 12.0871 | 0.3930 | 0.9139 | 0.4920 | **0.6810** | 48.13% |
-
-GBR outperforms the constant quantile baseline at all three thresholds.
-Increasing the threshold widens the upper tail of the target distribution and
-steadily increases GBR pinball loss and absolute error, while central 50%
-coverage remains close to nominal. The valid system membership changes slightly
-because of the minimum-eight-valid-pairs filter, so these are label-sensitivity
-trends rather than a strictly paired comparison.
-
-### First-variation ablation (2026-09-06)
-
-The first-variation experiment used the same 4,996 systems, seed 42, and
-3,497/750/749 train/validation/test split as the summary-feature experiment.
-It requires XGBoost >= 2.0 for the native quantile objective.
-
-```bash
-conda run --no-capture-output -n stellar python -m tasks.task_d \
-  --dataset-dir dataset_sampling_3_prefix1024 \
-  --threshold-power 5 \
-  --tabular-features first \
-  --models mlp,xgboost \
-  --output-dir results/task_d_first_variation_mlp_xgboost \
-  --device cuda
-```
-
-| Metric | Summary MLP (60D) | First-variation MLP (15D) | First-variation XGBoost (15D) |
-|---|---:|---:|---:|
-| Mean pinball loss (lower is better) | **0.2760** | 0.2762 | 0.3442 |
-| Median log-MAE (lower is better) | 0.6375 | **0.6349** | 0.7993 |
-| Median log-RMSE (lower is better) | 0.8456 | **0.8295** | 1.0268 |
-| Median Spearman (higher is better) | 0.8186 | **0.8261** | 0.7039 |
-| Median factor-two accuracy (higher is better) | 62.88% | **64.22%** | 53.67% |
-| Central 50% interval coverage | 45.66% | 41.12% | **46.19%** |
-
-Using only the first variation leaves MLP pinball loss effectively unchanged
-and slightly improves its point-prediction and ranking metrics. This supports
-the conclusion that the predictive signal comes from the base system's 15
-physical initial-condition features, rather than across-variation summaries or
-floating-point differences. MLP is more accurate than XGBoost, although its
-central interval is too narrow (41.12% empirical coverage versus the nominal
-50%). Full outputs are in `results/task_d_first_variation_mlp_xgboost/`.
 
 ## Task E
 

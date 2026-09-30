@@ -1,1 +1,1 @@
-"""Task D: initial-condition prediction of Lyapunov-time quantiles."""
+"""Task D: initial-condition prediction of median orbital-decorrelation time."""

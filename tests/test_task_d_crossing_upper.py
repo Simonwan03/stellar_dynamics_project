@@ -87,11 +87,9 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         args = build_arg_parser().parse_args(["--threshold-power", "6"])
         self.assertEqual(args.threshold_power, 6.0)
 
-    def test_new_task_accepts_first_variation_and_xgboost(self) -> None:
-        args = build_arg_parser().parse_args(
-            ["--tabular-features", "first", "--models", "mlp,xgboost"]
-        )
-        self.assertEqual(args.tabular_features, "first")
+    def test_new_task_uses_first_variation_and_accepts_xgboost(self) -> None:
+        args = build_arg_parser().parse_args(["--models", "mlp,xgboost"])
+        self.assertFalse(hasattr(args, "tabular_features"))
         self.assertEqual(args.models, "mlp,xgboost")
 
     def test_aratio_pair_fits_observable_growth_rate(self) -> None:
@@ -152,17 +150,17 @@ class TaskDCrossingUpperTest(unittest.TestCase):
         self.assertEqual(tau, 1.0)
         self.assertEqual(ratio[1], 1000.0)
 
-    def test_quantile_prediction_is_the_default_task(self) -> None:
+    def test_single_regression_is_the_default_task(self) -> None:
         args = build_arg_parser().parse_args([])
         self.assertEqual(args.sampling_id, 3)
         self.assertEqual(args.threshold_power, 5.0)
         self.assertEqual(args.min_valid_pairs, 8)
-        self.assertEqual(args.models, "constant,gbr,mlp,deepsets")
+        self.assertEqual(args.models, "constant,xgboost,mlp")
 
     def test_sensitivity_grid_defaults_cover_requested_comparison(self) -> None:
         args = build_sensitivity_arg_parser().parse_args([])
         self.assertEqual(args.threshold_powers, (4.0, 5.0, 6.0))
-        self.assertEqual(args.models, "constant,gbr")
+        self.assertEqual(args.models, "constant,xgboost")
 
 if __name__ == "__main__":
     unittest.main()

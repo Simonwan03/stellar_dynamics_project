@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tasks.task_d.quantile import QuantileConfig, run_quantile_pipeline
+from tasks.task_d.quantile import RegressionConfig, run_regression_pipeline
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Task D: predict q25/q50/q75 of the system-level semimajor-axis-ratio "
-            "Lyapunov-time proxy from initial conditions only."
+            "Task D: predict one system-level median orbital-decorrelation time "
+            "from the first nominal variation's initial conditions."
         )
     )
     parser.add_argument(
@@ -33,13 +33,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--threshold-power",
         type=float,
         default=5.0,
-        help="Use the crossing G=exp(k); the pair proxy is t_cross/k (default: k=5).",
+        help="Use the crossing G=exp(k), without dividing the crossing time by k.",
     )
     parser.add_argument(
         "--min-valid-pairs",
         type=int,
         default=8,
-        help="Minimum observed pair crossings required for a system label.",
+        help="Minimum observed pair crossings required for a system median.",
     )
     parser.add_argument(
         "--no-interpolation",
@@ -48,17 +48,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--models",
-        default="constant,gbr,mlp,deepsets",
-        help="Comma-separated subset of constant,gbr,xgboost,mlp,deepsets.",
-    )
-    parser.add_argument(
-        "--tabular-features",
-        choices=("summary", "first"),
-        default="summary",
-        help=(
-            "Input for tabular models and MLP: mean/std/min/max across 16 nominal "
-            "variations, or only the first variation's 15 features."
-        ),
+        default="constant,xgboost,mlp",
+        help="Comma-separated subset of constant,xgboost,mlp.",
     )
     parser.add_argument("--train-ratio", type=float, default=0.70)
     parser.add_argument("--val-ratio", type=float, default=0.15)
@@ -70,13 +61,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.15)
     parser.add_argument("--patience", type=int, default=15)
+    parser.add_argument("--bootstrap-samples", type=int, default=2000)
     parser.add_argument("--device", default=None)
     parser.add_argument("--max-shards", type=int, default=None)
     parser.add_argument("--max-systems", type=int, default=None)
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "results/task_d_initial_quantiles",
+        default=ROOT / "results/task_d_median_decorrelation",
     )
     return parser
 
@@ -84,7 +76,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_arg_parser().parse_args()
     models = tuple(item.strip() for item in args.models.split(",") if item.strip())
-    config = QuantileConfig(
+    config = RegressionConfig(
         dataset_dir=args.dataset_dir,
         output_dir=args.output_dir,
         sampling_id=args.sampling_id,
@@ -93,7 +85,6 @@ def main() -> None:
         min_valid_pairs=args.min_valid_pairs,
         interpolate_crossings=not args.no_interpolation,
         models=models,
-        tabular_features=args.tabular_features,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
@@ -104,11 +95,12 @@ def main() -> None:
         weight_decay=args.weight_decay,
         dropout=args.dropout,
         patience=args.patience,
+        bootstrap_samples=args.bootstrap_samples,
         device=args.device,
         max_shards=args.max_shards,
         max_systems=args.max_systems,
     )
-    result = run_quantile_pipeline(config)
+    result = run_regression_pipeline(config)
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     print(f"Task D complete. Outputs: {args.output_dir}")
 

@@ -1,11 +1,11 @@
-"""Run Task D label-threshold sensitivity experiments."""
+"""Run Task D crossing-threshold sensitivity experiments."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from tasks.task_d.quantile import QuantileConfig, run_quantile_pipeline
+from tasks.task_d.quantile import RegressionConfig, run_regression_pipeline
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Task D conditional-quantile sensitivity over e^k crossing labels."
+        description="Task D single-target sensitivity over e^k crossing labels."
     )
     parser.add_argument(
         "--dataset-dir",
@@ -25,12 +25,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "results/task_d_initial_quantile_sensitivity",
+        default=ROOT / "results/task_d_median_decorrelation_sensitivity",
     )
-    parser.add_argument("--models", default="constant,gbr")
+    parser.add_argument("--models", default="constant,xgboost")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--bootstrap-samples", type=int, default=2000)
     parser.add_argument("--device", default=None)
     parser.add_argument("--max-shards", type=int, default=None)
     parser.add_argument("--max-systems", type=int, default=None)
@@ -47,8 +48,8 @@ def main() -> None:
             print(f"[skip] {cell}")
             continue
         print(f"[run] threshold=e^{power:g} -> {cell}")
-        run_quantile_pipeline(
-            QuantileConfig(
+        run_regression_pipeline(
+            RegressionConfig(
                 dataset_dir=args.dataset_dir,
                 output_dir=cell,
                 sampling_id=args.sampling_id,
@@ -57,6 +58,7 @@ def main() -> None:
                 seed=args.seed,
                 epochs=args.epochs,
                 batch_size=args.batch_size,
+                bootstrap_samples=args.bootstrap_samples,
                 device=args.device,
                 max_shards=args.max_shards,
                 max_systems=args.max_systems,

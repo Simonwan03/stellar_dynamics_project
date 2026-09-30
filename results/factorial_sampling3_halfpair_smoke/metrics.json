@@ -1,0 +1,10 @@
+{
+  "bootstrap_replicates": 20,
+  "bootstrap_unit": "base system",
+  "models": [
+    "deep_sets",
+    "mean_probability"
+  ],
+  "pair_draws": 2,
+  "primary_metric": "system-level MAE"
+}

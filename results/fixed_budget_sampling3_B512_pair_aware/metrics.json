@@ -1,0 +1,11 @@
+{
+  "bootstrap_replicates": 2000,
+  "bootstrap_unit": "base system",
+  "models": [
+    "deep_sets",
+    "mean_probability"
+  ],
+  "pair_draws": 50,
+  "preinstability_eligibility": "same pair draw must be eligible across all four 2*M_pairs*T=512 allocations",
+  "primary_metric": "system-level MAE"
+}

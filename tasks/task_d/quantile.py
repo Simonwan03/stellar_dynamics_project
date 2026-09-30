@@ -1,4 +1,4 @@
-"""Task D: initial conditions to system Lyapunov-time conditional quantiles."""
+"""Task D: predict a system's median orbital-decorrelation time."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
-from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
@@ -26,12 +25,10 @@ from sklearn.preprocessing import StandardScaler
 try:
     import torch
     from torch import nn
-    from torch.nn import functional as F
     from torch.utils.data import DataLoader, TensorDataset
 except ImportError:  # pragma: no cover
     torch = None
     nn = None
-    F = None
     DataLoader = None
     TensorDataset = None
 
@@ -39,7 +36,6 @@ except ImportError:  # pragma: no cover
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
 PAIR_COUNT = 16
 GROUP_SIZE = 32
-QUANTILES = (0.25, 0.50, 0.75)
 ORBITAL_KEYS = (
     "aratios_complete",
     "mratios_complete",
@@ -52,7 +48,7 @@ ANGLE_KEYS = frozenset({"APs_complete", "LANs_complete"})
 
 
 @dataclass
-class QuantileConfig:
+class RegressionConfig:
     dataset_dir: str | Path
     output_dir: str | Path
     sampling_id: int = 3
@@ -60,8 +56,7 @@ class QuantileConfig:
     threshold_power: float = 5.0
     min_valid_pairs: int = 8
     interpolate_crossings: bool = True
-    models: tuple[str, ...] = ("constant", "gbr", "mlp", "deepsets")
-    tabular_features: str = "summary"
+    models: tuple[str, ...] = ("constant", "xgboost", "mlp")
     train_ratio: float = 0.70
     val_ratio: float = 0.15
     test_ratio: float = 0.15
@@ -75,6 +70,11 @@ class QuantileConfig:
     device: str | None = None
     max_shards: int | None = None
     max_systems: int | None = None
+    bootstrap_samples: int = 2000
+
+
+# Compatibility for existing imports. This is no longer a quantile task.
+QuantileConfig = RegressionConfig
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -105,7 +105,7 @@ def _load_completion(path: Path) -> pd.DataFrame:
         header=None,
         names=["index", "batch", "time_unbound", "aux", "diagnosis"],
     )
-    table = table.astype(
+    return table.astype(
         {
             "index": "int64",
             "batch": "int64",
@@ -113,7 +113,6 @@ def _load_completion(path: Path) -> pd.DataFrame:
             "diagnosis": "int64",
         }
     )
-    return table
 
 
 def interpolate_first_crossing(
@@ -159,28 +158,27 @@ def interpolate_first_crossing(
 
 def aggregate_pair_times(
     crossing_periods: Sequence[float],
-    threshold_power: float,
     min_valid_pairs: int,
+    threshold_power: float | None = None,
 ) -> dict[str, Any]:
-    """Aggregate pair proxy times through the median observable growth rate."""
+    """Take the median observed crossing time without dividing by k."""
+    del threshold_power  # accepted only for compatibility with older callers
     crossing = np.asarray(crossing_periods, dtype=np.float64)
-    valid = np.isfinite(crossing) & (crossing > 0.0)
-    pair_tl = crossing[valid] / float(threshold_power)
-    pair_lambda = 1.0 / pair_tl
-    count = int(valid.sum())
-    if count < min_valid_pairs:
-        system_lambda = math.nan
-        system_tl = math.nan
-    else:
-        system_lambda = float(np.median(pair_lambda))
-        system_tl = float(1.0 / system_lambda)
+    pair_times = crossing[np.isfinite(crossing) & (crossing > 0.0)]
+    count = int(pair_times.size)
+    system_time = float(np.median(pair_times)) if count >= min_valid_pairs else math.nan
     return {
         "num_valid_pairs": count,
-        "lambda_system_per_period": system_lambda,
-        "lyapunov_time_system_periods": system_tl,
-        "pair_tl_p25_periods": float(np.quantile(pair_tl, 0.25)) if count else math.nan,
-        "pair_tl_p50_periods": float(np.quantile(pair_tl, 0.50)) if count else math.nan,
-        "pair_tl_p75_periods": float(np.quantile(pair_tl, 0.75)) if count else math.nan,
+        "median_decorrelation_time_periods": system_time,
+        "pair_crossing_p25_periods": (
+            float(np.quantile(pair_times, 0.25)) if count else math.nan
+        ),
+        "pair_crossing_p50_periods": (
+            float(np.quantile(pair_times, 0.50)) if count else math.nan
+        ),
+        "pair_crossing_p75_periods": (
+            float(np.quantile(pair_times, 0.75)) if count else math.nan
+        ),
     }
 
 
@@ -201,15 +199,17 @@ def _flatten_initial_features(handle: h5py.File) -> tuple[np.ndarray, list[str]]
     return np.concatenate(blocks, axis=1), names
 
 
-def build_dataset(config: QuantileConfig) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, list[str], dict[str, Any]]:
-    """Build [system, nominal variation, feature] inputs and e^k system labels."""
+def build_dataset(
+    config: RegressionConfig,
+) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, list[str], dict[str, Any]]:
+    """Build one base-system feature vector and one e^k median crossing label."""
     dataset_dir = Path(config.dataset_dir)
     paths = _discover_paths(dataset_dir, config.sampling_id)
     if config.max_shards is not None:
         paths = paths[: config.max_shards]
     completion = _load_completion(dataset_dir / config.completion_table_name)
     threshold = math.exp(config.threshold_power)
-    set_blocks: list[np.ndarray] = []
+    feature_rows: list[np.ndarray] = []
     label_rows: list[dict[str, Any]] = []
     feature_names: list[str] | None = None
     time_grid: np.ndarray | None = None
@@ -219,7 +219,7 @@ def build_dataset(config: QuantileConfig) -> tuple[np.ndarray, np.ndarray, pd.Da
         batch = _batch_id(path)
         batch_completion = completion.loc[completion["batch"] == batch].sort_values("index")
         with h5py.File(path, "r") as handle:
-            ratios = np.asarray(handle["aratios_complete"][:, :, 0], dtype=np.float64)
+            ratios = np.asarray(handle["aratios_complete"][:, :, 0])
             times = np.asarray(handle["times_complete"][0], dtype=np.float64)
             periods = np.asarray(handle["periods_complete"][:, 0, 1], dtype=np.float64)
             initial_features, current_names = _flatten_initial_features(handle)
@@ -267,41 +267,40 @@ def build_dataset(config: QuantileConfig) -> tuple[np.ndarray, np.ndarray, pd.Da
             threshold,
             interpolate=config.interpolate_crossings,
         )
-        pair_period = np.nanmedian(
-            np.stack((periods[:, :PAIR_COUNT], periods[:, PAIR_COUNT:]), axis=-1),
-            axis=-1,
-        ).reshape(-1)
-        observed &= np.isfinite(pair_period) & (pair_period > 0.0) & denominator_ok.reshape(-1)
+        # Normalize each pair by the nominal member's initial outer period.
+        nominal_period = periods[:, :PAIR_COUNT].reshape(-1)
+        observed &= (
+            np.isfinite(nominal_period)
+            & (nominal_period > 0.0)
+            & denominator_ok.reshape(-1)
+        )
         crossing_periods = np.full_like(crossing, np.nan)
-        crossing_periods[observed] = crossing[observed] / pair_period[observed]
+        crossing_periods[observed] = crossing[observed] / nominal_period[observed]
         crossing_periods = crossing_periods.reshape(groups, PAIR_COUNT)
         crossing_index = crossing_index.reshape(groups, PAIR_COUNT)
 
         for local_group in np.flatnonzero(complete):
             aggregate = aggregate_pair_times(
                 crossing_periods[local_group],
-                config.threshold_power,
-                config.min_valid_pairs,
+                min_valid_pairs=config.min_valid_pairs,
             )
-            if not np.isfinite(aggregate["lyapunov_time_system_periods"]):
+            system_time = float(aggregate["median_decorrelation_time_periods"])
+            if not np.isfinite(system_time):
                 continue
-            system_tl = float(aggregate["lyapunov_time_system_periods"])
             row = {
                 "system_id": int(system_ids[local_group]),
                 "batch_id": int(batch),
                 "local_group_id": int(local_group),
                 "threshold_power": float(config.threshold_power),
                 "threshold": float(threshold),
-                "log_lyapunov_time_system": float(np.log(system_tl)),
+                "log_median_decorrelation_time": float(np.log(system_time)),
                 **aggregate,
                 "pair_crossing_index_min": int(np.min(crossing_index[local_group])),
                 "pair_crossing_index_median": float(np.median(crossing_index[local_group])),
             }
             label_rows.append(row)
-            set_blocks.append(initial_features[local_group, :PAIR_COUNT])
-            initial_outer_periods.append(
-                float(np.nanmedian(pair_period.reshape(groups, PAIR_COUNT)[local_group]))
-            )
+            feature_rows.append(initial_features[local_group, 0].copy())
+            initial_outer_periods.append(float(periods[local_group, 0]))
             if config.max_systems is not None and len(label_rows) >= config.max_systems:
                 break
         if config.max_systems is not None and len(label_rows) >= config.max_systems:
@@ -309,17 +308,18 @@ def build_dataset(config: QuantileConfig) -> tuple[np.ndarray, np.ndarray, pd.Da
 
     if not label_rows or feature_names is None or time_grid is None:
         raise ValueError("No valid Task D systems were built")
-    labels = pd.DataFrame(label_rows).sort_values("system_id").reset_index(drop=True)
     order = np.argsort(np.asarray([row["system_id"] for row in label_rows], dtype=np.int64))
-    X_set = np.stack(set_blocks, axis=0)[order]
-    y = labels["log_lyapunov_time_system"].to_numpy(dtype=np.float64)
+    labels = pd.DataFrame(label_rows).iloc[order].reset_index(drop=True)
+    X = np.stack(feature_rows, axis=0)[order]
+    y = labels["log_median_decorrelation_time"].to_numpy(dtype=np.float64)
     metadata = {
         "num_systems": int(len(labels)),
-        "num_nominal_variations": PAIR_COUNT,
-        "num_features_per_variation": int(X_set.shape[-1]),
+        "num_valid_pairs_required": int(config.min_valid_pairs),
         "threshold_power": float(config.threshold_power),
         "threshold": float(threshold),
-        "label": "log(T_L,Q/P_out,0), T_L,Q=1/median_pair(k/t_cross,e^k)",
+        "label": "log(median_r(T_cross,r(e^k)/P_out,0,r))",
+        "name": "median orbital-decorrelation time",
+        "divided_by_threshold_power": False,
         "interpolate_crossings": bool(config.interpolate_crossings),
         "time_steps": int(len(time_grid)),
         "sample_spacing_periods": float(
@@ -327,26 +327,31 @@ def build_dataset(config: QuantileConfig) -> tuple[np.ndarray, np.ndarray, pd.Da
             / np.nanmedian(np.asarray(initial_outer_periods, dtype=np.float64))
         ),
     }
-    return X_set, y, labels, feature_names, metadata
+    return X, y, labels, feature_names, metadata
 
 
-def summarize_set_features(X_set: np.ndarray, feature_names: Sequence[str]) -> tuple[np.ndarray, list[str]]:
+def summarize_set_features(
+    X_set: np.ndarray, feature_names: Sequence[str]
+) -> tuple[np.ndarray, list[str]]:
+    """Legacy helper retained for old analysis imports; not used by Task D."""
     summaries = (
         np.nanmean(X_set, axis=1),
         np.nanstd(X_set, axis=1),
         np.nanmin(X_set, axis=1),
         np.nanmax(X_set, axis=1),
     )
-    names = [f"{stat}__{name}" for stat in ("mean", "std", "min", "max") for name in feature_names]
+    names = [
+        f"{stat}__{name}"
+        for stat in ("mean", "std", "min", "max")
+        for name in feature_names
+    ]
     return np.concatenate(summaries, axis=1), names
 
 
 def select_tabular_features(
-    X_set: np.ndarray,
-    feature_names: Sequence[str],
-    mode: str,
+    X_set: np.ndarray, feature_names: Sequence[str], mode: str
 ) -> tuple[np.ndarray, list[str]]:
-    """Select the system-level input used by tabular models and the MLP."""
+    """Legacy feature selector; the production pipeline always uses row zero."""
     if mode == "summary":
         return summarize_set_features(X_set, feature_names)
     if mode == "first":
@@ -354,138 +359,107 @@ def select_tabular_features(
     raise ValueError(f"Unknown Task D tabular feature mode: {mode}")
 
 
-def make_split(y: np.ndarray, config: QuantileConfig) -> dict[str, np.ndarray]:
+def make_split(y: np.ndarray, config: RegressionConfig) -> dict[str, np.ndarray]:
     ratios = np.asarray([config.train_ratio, config.val_ratio, config.test_ratio])
     if np.any(ratios <= 0.0) or not np.isclose(ratios.sum(), 1.0):
         raise ValueError("train/val/test ratios must be positive and sum to one")
     indices = np.arange(len(y), dtype=np.int64)
     strata = pd.qcut(y, q=min(10, len(y)), labels=False, duplicates="drop")
-    train, remainder = train_test_split(
-        indices,
-        test_size=float(config.val_ratio + config.test_ratio),
-        random_state=config.seed,
-        stratify=strata,
-    )
-    remainder_strata = np.asarray(strata)[remainder]
-    val_fraction = config.val_ratio / (config.val_ratio + config.test_ratio)
-    test, val = train_test_split(
-        remainder,
-        test_size=val_fraction,
-        random_state=config.seed,
-        stratify=remainder_strata,
-    )
+    try:
+        train, remainder = train_test_split(
+            indices,
+            test_size=float(config.val_ratio + config.test_ratio),
+            random_state=config.seed,
+            stratify=strata,
+        )
+        remainder_strata = np.asarray(strata)[remainder]
+        val_fraction = config.val_ratio / (config.val_ratio + config.test_ratio)
+        test, val = train_test_split(
+            remainder,
+            test_size=val_fraction,
+            random_state=config.seed,
+            stratify=remainder_strata,
+        )
+    except ValueError:
+        train, remainder = train_test_split(
+            indices,
+            test_size=float(config.val_ratio + config.test_ratio),
+            random_state=config.seed,
+        )
+        val_fraction = config.val_ratio / (config.val_ratio + config.test_ratio)
+        test, val = train_test_split(
+            remainder, test_size=val_fraction, random_state=config.seed
+        )
     return {"train": np.sort(train), "val": np.sort(val), "test": np.sort(test)}
 
 
-def pinball_numpy(y: np.ndarray, prediction: np.ndarray, quantile: float) -> float:
-    residual = y - prediction
-    return float(np.mean(np.maximum(quantile * residual, (quantile - 1.0) * residual)))
-
-
-def evaluate_quantiles(y: np.ndarray, prediction: np.ndarray) -> dict[str, Any]:
-    result: dict[str, Any] = {"count": int(len(y)), "quantiles": {}}
-    spearman = (
-        float(spearmanr(y, prediction[:, 1]).statistic)
-        if np.unique(prediction[:, 1]).size > 1
+def _metric_values(y: np.ndarray, prediction: np.ndarray) -> dict[str, float]:
+    statistic = (
+        spearmanr(y, prediction).statistic
+        if np.unique(y).size > 1 and np.unique(prediction).size > 1
         else math.nan
     )
-    for column, quantile in enumerate(QUANTILES):
-        coverage = float(np.mean(y <= prediction[:, column]))
-        result["quantiles"][f"q{int(100 * quantile)}"] = {
-            "pinball_loss": pinball_numpy(y, prediction[:, column], quantile),
-            "coverage": coverage,
-            "coverage_error": coverage - quantile,
-        }
-    result.update(
-        {
-            "mean_pinball_loss": float(
-                np.mean(
-                    [pinball_numpy(y, prediction[:, i], q) for i, q in enumerate(QUANTILES)]
-                )
-            ),
-            "central_50_coverage": float(
-                np.mean((y >= prediction[:, 0]) & (y <= prediction[:, 2]))
-            ),
-            "mean_interval_width_log": float(np.mean(prediction[:, 2] - prediction[:, 0])),
-            "quantile_crossing_rate": float(
-                np.mean((prediction[:, 0] > prediction[:, 1]) | (prediction[:, 1] > prediction[:, 2]))
-            ),
-            "median_mae_log": float(mean_absolute_error(y, prediction[:, 1])),
-            "median_rmse_log": float(mean_squared_error(y, prediction[:, 1]) ** 0.5),
-            "median_spearman": spearman if np.isfinite(spearman) else None,
-            "median_factor_2_accuracy": float(np.mean(np.abs(y - prediction[:, 1]) <= math.log(2.0))),
-        }
-    )
-    return result
+    return {
+        "mae_log": float(mean_absolute_error(y, prediction)),
+        "rmse_log": float(mean_squared_error(y, prediction) ** 0.5),
+        "spearman": float(statistic) if np.isfinite(statistic) else math.nan,
+        "factor_2_accuracy": float(np.mean(np.abs(y - prediction) <= math.log(2.0))),
+    }
+
+
+def evaluate_regression(
+    y: np.ndarray,
+    prediction: np.ndarray,
+    bootstrap_samples: int = 2000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Return point metrics and paired bootstrap 95% confidence intervals."""
+    y = np.asarray(y, dtype=np.float64)
+    prediction = np.asarray(prediction, dtype=np.float64)
+    point = _metric_values(y, prediction)
+    rng = np.random.default_rng(seed)
+    draws: dict[str, list[float]] = {name: [] for name in point}
+    for _ in range(bootstrap_samples):
+        sample = rng.integers(0, len(y), size=len(y))
+        values = _metric_values(y[sample], prediction[sample])
+        for name, value in values.items():
+            if np.isfinite(value):
+                draws[name].append(value)
+    confidence_intervals: dict[str, dict[str, float | None]] = {}
+    for name, values in draws.items():
+        if values:
+            low, high = np.quantile(values, (0.025, 0.975))
+            confidence_intervals[name] = {
+                "low": float(low),
+                "high": float(high),
+            }
+        else:
+            confidence_intervals[name] = {"low": None, "high": None}
+    return {
+        "count": int(len(y)),
+        **{name: (value if np.isfinite(value) else None) for name, value in point.items()},
+        "bootstrap_95_ci": confidence_intervals,
+        "bootstrap_samples": int(bootstrap_samples),
+    }
 
 
 if nn is not None:
 
-    class OrderedQuantileHead(nn.Module):
-        def __init__(self, input_dim: int) -> None:
-            super().__init__()
-            self.output = nn.Linear(input_dim, 3)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            raw = self.output(x)
-            median = raw[:, 0]
-            lower = median - F.softplus(raw[:, 1])
-            upper = median + F.softplus(raw[:, 2])
-            return torch.stack((lower, median, upper), dim=1)
-
-
-    class QuantileMLP(nn.Module):
+    class MLPRegressor(nn.Module):
         def __init__(self, input_dim: int, dropout: float) -> None:
             super().__init__()
-            self.encoder = nn.Sequential(
+            self.network = nn.Sequential(
                 nn.Linear(input_dim, 256),
                 nn.ReLU(),
                 nn.Dropout(dropout),
                 nn.Linear(256, 128),
                 nn.ReLU(),
                 nn.Dropout(dropout),
+                nn.Linear(128, 1),
             )
-            self.head = OrderedQuantileHead(128)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            return self.head(self.encoder(x))
-
-
-    class DeepSetsQuantileRegressor(nn.Module):
-        def __init__(self, input_dim: int, dropout: float) -> None:
-            super().__init__()
-            self.phi = nn.Sequential(
-                nn.Linear(input_dim, 64),
-                nn.ReLU(),
-                nn.Linear(64, 64),
-                nn.ReLU(),
-            )
-            self.rho = nn.Sequential(
-                nn.Linear(64 * 3, 128),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(128, 64),
-                nn.ReLU(),
-            )
-            self.head = OrderedQuantileHead(64)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            encoded = self.phi(x)
-            pooled = torch.cat(
-                (
-                    encoded.mean(dim=1),
-                    encoded.std(dim=1, unbiased=False),
-                    encoded.max(dim=1).values,
-                ),
-                dim=1,
-            )
-            return self.head(self.rho(pooled))
-
-
-def _pinball_torch(y: torch.Tensor, prediction: torch.Tensor) -> torch.Tensor:
-    quantiles = prediction.new_tensor(QUANTILES).view(1, -1)
-    residual = y[:, None] - prediction
-    return torch.maximum(quantiles * residual, (quantiles - 1.0) * residual).mean()
+            return self.network(x).squeeze(-1)
 
 
 def _fit_torch(
@@ -494,10 +468,10 @@ def _fit_torch(
     y_train: np.ndarray,
     X_val: np.ndarray,
     y_val: np.ndarray,
-    config: QuantileConfig,
+    config: RegressionConfig,
 ) -> nn.Module:
     if torch is None:
-        raise ImportError("PyTorch is required for mlp/deepsets models")
+        raise ImportError("PyTorch is required for the mlp model")
     device_name = config.device or ("cuda" if torch.cuda.is_available() else "cpu")
     device = torch.device(device_name)
     torch.manual_seed(config.seed)
@@ -525,15 +499,20 @@ def _fit_torch(
         model.train()
         for xb, yb in train_loader:
             optimizer.zero_grad(set_to_none=True)
-            loss = _pinball_torch(yb.to(device), model(xb.to(device)))
+            loss = torch.mean((model(xb.to(device)) - yb.to(device)) ** 2)
             loss.backward()
             optimizer.step()
         model.eval()
         with torch.no_grad():
-            val_loss = float(_pinball_torch(y_val_tensor, model(X_val_tensor)).item())
+            val_loss = float(
+                torch.mean((model(X_val_tensor) - y_val_tensor) ** 2).item()
+            )
         if val_loss < best_loss - 1e-6:
             best_loss = val_loss
-            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            best_state = {
+                key: value.detach().cpu().clone()
+                for key, value in model.state_dict().items()
+            }
             wait = 0
         else:
             wait += 1
@@ -558,170 +537,116 @@ def _predict_torch(model: nn.Module, X: np.ndarray, batch_size: int) -> np.ndarr
     return np.concatenate(outputs).astype(np.float64)
 
 
-def _fit_gbr(
-    X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, seed: int
-) -> tuple[np.ndarray, list[GradientBoostingRegressor]]:
-    predictions: list[np.ndarray] = []
-    models: list[GradientBoostingRegressor] = []
-    for quantile in QUANTILES:
-        model = GradientBoostingRegressor(
-            loss="quantile",
-            alpha=quantile,
-            n_estimators=300,
-            learning_rate=0.03,
-            max_depth=3,
-            min_samples_leaf=10,
-            random_state=seed,
-        )
-        model.fit(X_train, y_train)
-        predictions.append(model.predict(X_test))
-        models.append(model)
-    prediction = np.column_stack(predictions)
-    prediction.sort(axis=1)
-    return prediction, models
-
-
-def _fit_xgboost_quantiles(
-    X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, seed: int
-) -> tuple[np.ndarray, list[Any]]:
+def _fit_xgboost(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    seed: int,
+) -> tuple[np.ndarray, Any]:
     try:
         import xgboost as xgb
     except ImportError as exc:
-        raise ImportError(
-            "XGBoost >= 2.0 is required for --models xgboost."
-        ) from exc
-
-    major_version = int(xgb.__version__.split(".", maxsplit=1)[0])
-    if major_version < 2:
-        raise ImportError(
-            f"XGBoost >= 2.0 is required for native quantile regression; found {xgb.__version__}."
-        )
-
-    predictions: list[np.ndarray] = []
-    models: list[Any] = []
-    for quantile in QUANTILES:
-        model = xgb.XGBRegressor(
-            objective="reg:quantileerror",
-            quantile_alpha=quantile,
-            n_estimators=500,
-            learning_rate=0.03,
-            max_depth=3,
-            min_child_weight=10,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            tree_method="hist",
-            random_state=seed,
-            n_jobs=-1,
-        )
-        model.fit(X_train, y_train, verbose=False)
-        predictions.append(model.predict(X_test))
-        models.append(model)
-    prediction = np.column_stack(predictions)
-    prediction.sort(axis=1)
-    return prediction, models
+        raise ImportError("XGBoost is required for --models xgboost.") from exc
+    model = xgb.XGBRegressor(
+        objective="reg:squarederror",
+        n_estimators=500,
+        learning_rate=0.03,
+        max_depth=3,
+        min_child_weight=10,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        tree_method="hist",
+        random_state=seed,
+        n_jobs=-1,
+    )
+    model.fit(X_train, y_train, verbose=False)
+    return np.asarray(model.predict(X_test), dtype=np.float64), model
 
 
-def _plot_predictions(path: Path, y: np.ndarray, predictions: dict[str, np.ndarray]) -> None:
+def _plot_predictions(
+    path: Path, y: np.ndarray, predictions: dict[str, np.ndarray]
+) -> None:
     columns = len(predictions)
     fig, axes = plt.subplots(1, columns, figsize=(5 * columns, 4.5), squeeze=False)
     for axis, (name, pred) in zip(axes[0], predictions.items(), strict=True):
-        axis.scatter(np.exp(y), np.exp(pred[:, 1]), s=8, alpha=0.35)
-        low = min(float(np.exp(y).min()), float(np.exp(pred[:, 1]).min()))
-        high = max(float(np.exp(y).max()), float(np.exp(pred[:, 1]).max()))
+        axis.scatter(np.exp(y), np.exp(pred), s=8, alpha=0.35)
+        low = min(float(np.exp(y).min()), float(np.exp(pred).min()))
+        high = max(float(np.exp(y).max()), float(np.exp(pred).max()))
         axis.plot([low, high], [low, high], "k--", linewidth=1)
         axis.set_xscale("log")
         axis.set_yscale("log")
         axis.set_title(name)
-        axis.set_xlabel("true system $T_{L,Q}/P_{out,0}$")
-        axis.set_ylabel("predicted median")
+        axis.set_xlabel("true median decorrelation time / P_out,0")
+        axis.set_ylabel("predicted median decorrelation time / P_out,0")
         axis.grid(alpha=0.2)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
 
 
-def run_quantile_pipeline(config: QuantileConfig) -> dict[str, Any]:
-    unknown = sorted(
-        set(config.models) - {"constant", "gbr", "xgboost", "mlp", "deepsets"}
-    )
+def run_regression_pipeline(config: RegressionConfig) -> dict[str, Any]:
+    unknown = sorted(set(config.models) - {"constant", "xgboost", "mlp"})
     if unknown:
         raise ValueError(f"Unknown Task D models: {unknown}")
+    if config.bootstrap_samples <= 0:
+        raise ValueError("bootstrap_samples must be positive")
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    X_set, y, labels, feature_names, label_metadata = build_dataset(config)
-    X_tabular, tabular_names = select_tabular_features(
-        X_set, feature_names, config.tabular_features
-    )
+    X, y, labels, feature_names, label_metadata = build_dataset(config)
     split = make_split(y, config)
     train_idx, val_idx, test_idx = split["train"], split["val"], split["test"]
 
-    summary_imputer = SimpleImputer(strategy="median")
-    X_summary_train = summary_imputer.fit_transform(X_tabular[train_idx])
-    X_summary_val = summary_imputer.transform(X_tabular[val_idx])
-    X_summary_test = summary_imputer.transform(X_tabular[test_idx])
-    summary_scaler = StandardScaler()
-    X_summary_train_scaled = summary_scaler.fit_transform(X_summary_train)
-    X_summary_val_scaled = summary_scaler.transform(X_summary_val)
-    X_summary_test_scaled = summary_scaler.transform(X_summary_test)
-
-    channel_median = np.nanmedian(X_set[train_idx], axis=(0, 1))
-    channel_median = np.where(np.isfinite(channel_median), channel_median, 0.0)
-    X_set_clean = np.where(np.isfinite(X_set), X_set, channel_median[None, None, :])
-    channel_mean = X_set_clean[train_idx].mean(axis=(0, 1))
-    channel_std = X_set_clean[train_idx].std(axis=(0, 1))
-    channel_std = np.where(channel_std < 1e-8, 1.0, channel_std)
-    X_set_scaled = (X_set_clean - channel_mean[None, None, :]) / channel_std[None, None, :]
+    imputer = SimpleImputer(strategy="median")
+    X_train = imputer.fit_transform(X[train_idx])
+    X_val = imputer.transform(X[val_idx])
+    X_test = imputer.transform(X[test_idx])
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    X_test_scaled = scaler.transform(X_test)
 
     predictions: dict[str, np.ndarray] = {}
     fitted_models: dict[str, Any] = {}
     if "constant" in config.models:
-        values = np.quantile(y[train_idx], QUANTILES)
-        predictions["constant"] = np.broadcast_to(values, (len(test_idx), 3)).copy()
-    if "gbr" in config.models:
-        predictions["gbr"], gbr_models = _fit_gbr(
-            X_summary_train, y[train_idx], X_summary_test, config.seed
+        predictions["constant"] = np.full(
+            len(test_idx), np.median(y[train_idx]), dtype=np.float64
         )
-        fitted_models["gbr"] = gbr_models
     if "xgboost" in config.models:
-        predictions["xgboost"], xgboost_models = _fit_xgboost_quantiles(
-            X_summary_train, y[train_idx], X_summary_test, config.seed
+        predictions["xgboost"], fitted_models["xgboost"] = _fit_xgboost(
+            X_train, y[train_idx], X_test, config.seed
         )
-        fitted_models["xgboost"] = xgboost_models
     if "mlp" in config.models:
-        model = QuantileMLP(X_summary_train_scaled.shape[1], config.dropout)
+        model = MLPRegressor(X_train_scaled.shape[1], config.dropout)
         model = _fit_torch(
             model,
-            X_summary_train_scaled,
+            X_train_scaled,
             y[train_idx],
-            X_summary_val_scaled,
+            X_val_scaled,
             y[val_idx],
             config,
         )
-        predictions["mlp"] = _predict_torch(model, X_summary_test_scaled, config.batch_size)
+        predictions["mlp"] = _predict_torch(model, X_test_scaled, config.batch_size)
         fitted_models["mlp"] = model
-    if "deepsets" in config.models:
-        model = DeepSetsQuantileRegressor(X_set_scaled.shape[-1], config.dropout)
-        model = _fit_torch(
-            model,
-            X_set_scaled[train_idx],
-            y[train_idx],
-            X_set_scaled[val_idx],
-            y[val_idx],
-            config,
-        )
-        predictions["deepsets"] = _predict_torch(
-            model, X_set_scaled[test_idx], config.batch_size
-        )
-        fitted_models["deepsets"] = model
 
-    metrics = {name: evaluate_quantiles(y[test_idx], pred) for name, pred in predictions.items()}
+    metrics = {
+        name: evaluate_regression(
+            y[test_idx],
+            pred,
+            bootstrap_samples=config.bootstrap_samples,
+            seed=config.seed,
+        )
+        for name, pred in predictions.items()
+    }
     prediction_frame = labels.iloc[test_idx][
-        ["system_id", "lyapunov_time_system_periods", "log_lyapunov_time_system"]
+        [
+            "system_id",
+            "median_decorrelation_time_periods",
+            "log_median_decorrelation_time",
+        ]
     ].reset_index(drop=True)
     for name, pred in predictions.items():
-        for column, quantile in enumerate((25, 50, 75)):
-            prediction_frame[f"{name}_q{quantile}_log"] = pred[:, column]
-            prediction_frame[f"{name}_q{quantile}_periods"] = np.exp(pred[:, column])
+        prediction_frame[f"{name}_log"] = pred
+        prediction_frame[f"{name}_periods"] = np.exp(pred)
 
     labels.to_csv(output_dir / "task_d_labels.csv", index=False)
     prediction_frame.to_csv(output_dir / "test_predictions.csv", index=False)
@@ -731,44 +656,40 @@ def run_quantile_pipeline(config: QuantileConfig) -> dict[str, Any]:
     pd.DataFrame({"system_id": labels["system_id"], "split": split_names}).to_csv(
         output_dir / "split.csv", index=False
     )
-    if "gbr" in fitted_models:
-        importance = fitted_models["gbr"][1].feature_importances_
-        pd.DataFrame({"feature": tabular_names, "importance": importance}).sort_values(
-            "importance", ascending=False
-        ).to_csv(output_dir / "gbr_median_feature_importance.csv", index=False)
     if "xgboost" in fitted_models:
-        importance = fitted_models["xgboost"][1].feature_importances_
-        pd.DataFrame({"feature": tabular_names, "importance": importance}).sort_values(
-            "importance", ascending=False
-        ).to_csv(output_dir / "xgboost_median_feature_importance.csv", index=False)
-        for quantile, model in zip((25, 50, 75), fitted_models["xgboost"], strict=True):
-            model.get_booster().save_model(output_dir / f"xgboost_q{quantile}.json")
-    for name in ("mlp", "deepsets"):
-        if name in fitted_models:
-            torch.save(fitted_models[name].state_dict(), output_dir / f"{name}.pt")
-    _plot_predictions(output_dir / "median_predictions.png", y[test_idx], predictions)
+        model = fitted_models["xgboost"]
+        pd.DataFrame(
+            {"feature": feature_names, "importance": model.feature_importances_}
+        ).sort_values("importance", ascending=False).to_csv(
+            output_dir / "xgboost_feature_importance.csv", index=False
+        )
+        model.get_booster().save_model(output_dir / "xgboost.json")
+    if "mlp" in fitted_models:
+        torch.save(fitted_models["mlp"].state_dict(), output_dir / "mlp.pt")
+    _plot_predictions(output_dir / "predictions.png", y[test_idx], predictions)
 
     result = {
-        "task": "initial conditions to system Lyapunov-time conditional quantiles",
+        "task": "initial conditions to median orbital-decorrelation time",
         "config": asdict(config),
         "label_metadata": label_metadata,
         "feature_metadata": {
-            "representation": "16 nominal variations as an unordered set",
-            "per_variation_features": feature_names,
-            "tabular_features": config.tabular_features,
-            "tabular_summary": (
-                "mean/std/min/max" if config.tabular_features == "summary" else None
-            ),
-            "tabular_feature_count": len(tabular_names),
+            "representation": "first nominal variation only",
+            "features": feature_names,
+            "angles": "sin/cos encoded",
+            "feature_count": len(feature_names),
         },
         "split": {name: int(len(indices)) for name, indices in split.items()},
         "target_summary": {
             "count": int(len(y)),
             "p25_periods": float(np.exp(np.quantile(y, 0.25))),
-            "p50_periods": float(np.exp(np.quantile(y, 0.50))),
+            "median_periods": float(np.exp(np.median(y))),
             "p75_periods": float(np.exp(np.quantile(y, 0.75))),
         },
         "model_metrics": metrics,
     }
     _write_json(output_dir / "metrics.json", result)
     return result
+
+
+# Compatibility for existing callers; behavior is the single-output pipeline.
+run_quantile_pipeline = run_regression_pipeline

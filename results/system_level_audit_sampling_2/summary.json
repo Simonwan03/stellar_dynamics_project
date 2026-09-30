@@ -1,0 +1,152 @@
+{
+  "dataset_dir": "/data/sampling_2",
+  "completion_table": "/data/sampling_2/completed_systems_sampling_2.txt",
+  "initial_conditions_source": "static IC file: /data/sampling_2/ICs_sampling_2.hdf5",
+  "sampling_id": 2,
+  "group_size": 32,
+  "stable_horizon": 10000.0,
+  "time_steps_in_result_shards": null,
+  "time_axis": {
+    "source_file": "/data/sampling_2/results_batch_00_sampling_2.hdf5",
+    "stored_time_steps": 2001,
+    "source_time_steps": 2001,
+    "stored_time_start": 0.0,
+    "stored_time_end": 100000000.0,
+    "median_sampling_interval": 50000.0,
+    "source_time_end_attribute": null,
+    "source_time_end_attribute_used": false,
+    "estimated_source_time_end": 100000000.0,
+    "stored_sample_fraction": 1.0,
+    "stored_duration_fraction": 1.0
+  },
+  "sampling_relationship": "Sampling 2 and sampling 3 are paired temporal-resolution versions of the same dataset, with corresponding base-system and variation identities. Sampling 3 is the higher-resolution version, while the local sampling3 files contain only a 1024-step prefix. This prefix limits stored trajectory history; the stable/failure labels in this audit come from the completion tables, so differences in those labels cannot be attributed to prefix truncation alone.",
+  "raw_trajectories": 160000,
+  "raw_systems": 5000,
+  "invalid_trajectories": 47,
+  "valid_trajectories_all_systems": 159953,
+  "complete_valid_systems": 4998,
+  "cohort_trajectories": 159936,
+  "valid_rows_excluded_with_incomplete_systems": 17,
+  "systems_excluded": 2,
+  "stable_trajectories": 50400,
+  "unstable_variations": 109536,
+  "stable_trajectory_rate": 0.31512605042016806,
+  "unstable_variation_fraction": 0.6848739495798319,
+  "fully_unstable_systems": 1692,
+  "fully_unstable_fraction": 0.3385354141656663,
+  "fully_stable_systems": 790,
+  "fully_stable_fraction": 0.15806322529011604,
+  "phase_sensitive_systems": 2516,
+  "phase_sensitive_fraction": 0.5034013605442177,
+  "p_stable_quantiles": {
+    "q25": 0.0,
+    "median": 0.0625,
+    "q75": 0.6875
+  },
+  "phase_sensitivity_mean": 0.2382390456182473,
+  "phase_sensitivity_quantiles": {
+    "q25": 0.0,
+    "median": 0.12109375,
+    "q75": 0.4375
+  },
+  "sensitivity_gt_0_5_systems": 1102,
+  "sensitivity_gt_0_5_fraction": 0.22048819527811125,
+  "failure_time_quantiles": {
+    "q25": 35.0,
+    "median": 255.0,
+    "q75": 1310.0
+  },
+  "requested_fail_horizons": [
+    32.0,
+    64.0,
+    128.0,
+    256.0,
+    512.0
+  ],
+  "failures_by_time_horizon": [
+    {
+      "horizon": 32.0,
+      "failed_by_horizon": 27372,
+      "cohort_trajectories": 159936,
+      "trajectory_fraction": 0.17114345738295317,
+      "eventual_failures": 109536,
+      "eventual_failures_seen_fraction": 0.24989044697633656
+    },
+    {
+      "horizon": 64.0,
+      "failed_by_horizon": 35031,
+      "cohort_trajectories": 159936,
+      "trajectory_fraction": 0.219031362545018,
+      "eventual_failures": 109536,
+      "eventual_failures_seen_fraction": 0.3198126643295355
+    },
+    {
+      "horizon": 128.0,
+      "failed_by_horizon": 44337,
+      "cohort_trajectories": 159936,
+      "trajectory_fraction": 0.2772171368547419,
+      "eventual_failures": 109536,
+      "eventual_failures_seen_fraction": 0.4047710341805434
+    },
+    {
+      "horizon": 256.0,
+      "failed_by_horizon": 54942,
+      "cohort_trajectories": 159936,
+      "trajectory_fraction": 0.3435249099639856,
+      "eventual_failures": 109536,
+      "eventual_failures_seen_fraction": 0.5015885188431201
+    },
+    {
+      "horizon": 512.0,
+      "failed_by_horizon": 66453,
+      "cohort_trajectories": 159936,
+      "trajectory_fraction": 0.41549744897959184,
+      "eventual_failures": 109536,
+      "eventual_failures_seen_fraction": 0.6066772567922875
+    }
+  ],
+  "stable_fraction_bins": [
+    {
+      "stable_fraction_bin": 0,
+      "bin_label": "p=0",
+      "systems": 1692,
+      "fraction": 0.3385354141656663
+    },
+    {
+      "stable_fraction_bin": 1,
+      "bin_label": "0<p<0.25",
+      "systems": 1442,
+      "fraction": 0.28851540616246496
+    },
+    {
+      "stable_fraction_bin": 2,
+      "bin_label": "0.25<=p<0.5",
+      "systems": 371,
+      "fraction": 0.0742296918767507
+    },
+    {
+      "stable_fraction_bin": 3,
+      "bin_label": "0.5<=p<0.75",
+      "systems": 300,
+      "fraction": 0.060024009603841535
+    },
+    {
+      "stable_fraction_bin": 4,
+      "bin_label": "0.75<=p<1",
+      "systems": 403,
+      "fraction": 0.08063225290116047
+    },
+    {
+      "stable_fraction_bin": 5,
+      "bin_label": "p=1",
+      "systems": 790,
+      "fraction": 0.15806322529011604
+    }
+  ],
+  "notes": [
+    "Primary system statistics use only systems with all group_size valid variations.",
+    "Stable means time_unbound >= stable_horizon; observed failures are time_unbound < stable_horizon.",
+    "Requested T=32,64,128,256,512 values are absolute time_unbound horizons, not stored-sample prefix lengths.",
+    "The MA margin is log(Rp/Rp_crit) using the project's existing Mardling–Aarseth Equation (2)."
+  ]
+}

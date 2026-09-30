@@ -1,0 +1,259 @@
+{
+  "stable_horizon_time_unbound": 10000.0,
+  "censoring_note": "Values equal to 10000 are treated as right-censored at the label horizon, not observed unbound events.",
+  "complete_systems": {
+    "2": 4998,
+    "3": 4998
+  },
+  "common_complete_systems": 4998,
+  "sampling": {
+    "2": {
+      "raw_rows": 160000,
+      "invalid_rows": 47,
+      "valid_all_rows": {
+        "n": 159953,
+        "min": 5.0,
+        "max": 10000.0,
+        "mean": 3971.789494413984,
+        "std": 4421.07573226622,
+        "quantiles_all_including_censor_point": {
+          "q00": 5.0,
+          "q10": 15.0,
+          "q25": 95.0,
+          "q50": 1145.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 109553,
+        "observed_event_fraction": 0.6849074415609585,
+        "right_censored_at_10000": 50400,
+        "right_censored_fraction": 0.3150925584390415,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 5.0,
+          "q10": 10.0,
+          "q25": 35.0,
+          "q50": 255.0,
+          "q75": 1310.0,
+          "q90": 4050.0,
+          "q95": 6220.0,
+          "q99": 9062.39999999998,
+          "q100": 9995.0
+        },
+        "event_min": 5.0,
+        "event_max": 9995.0,
+        "values_above_10000": 0
+      },
+      "valid_rows_in_complete_systems": {
+        "n": 159936,
+        "min": 5.0,
+        "max": 10000.0,
+        "mean": 3972.1323842036813,
+        "std": 4421.1741017761005,
+        "quantiles_all_including_censor_point": {
+          "q00": 5.0,
+          "q10": 15.0,
+          "q25": 95.0,
+          "q50": 1145.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 109536,
+        "observed_event_fraction": 0.6848739495798319,
+        "right_censored_at_10000": 50400,
+        "right_censored_fraction": 0.31512605042016806,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 5.0,
+          "q10": 10.0,
+          "q25": 35.0,
+          "q50": 255.0,
+          "q75": 1310.0,
+          "q90": 4050.0,
+          "q95": 6220.0,
+          "q99": 9063.24999999997,
+          "q100": 9995.0
+        },
+        "event_min": 5.0,
+        "event_max": 9995.0,
+        "values_above_10000": 0
+      },
+      "valid_rows_in_common_complete_systems": {
+        "n": 159936,
+        "min": 5.0,
+        "max": 10000.0,
+        "mean": 3972.1323842036813,
+        "std": 4421.1741017761005,
+        "quantiles_all_including_censor_point": {
+          "q00": 5.0,
+          "q10": 15.0,
+          "q25": 95.0,
+          "q50": 1145.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 109536,
+        "observed_event_fraction": 0.6848739495798319,
+        "right_censored_at_10000": 50400,
+        "right_censored_fraction": 0.31512605042016806,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 5.0,
+          "q10": 10.0,
+          "q25": 35.0,
+          "q50": 255.0,
+          "q75": 1310.0,
+          "q90": 4050.0,
+          "q95": 6220.0,
+          "q99": 9063.24999999997,
+          "q100": 9995.0
+        },
+        "event_min": 5.0,
+        "event_max": 9995.0,
+        "values_above_10000": 0
+      }
+    },
+    "3": {
+      "raw_rows": 160000,
+      "invalid_rows": 48,
+      "valid_all_rows": {
+        "n": 159952,
+        "min": 1.0,
+        "max": 10000.0,
+        "mean": 3932.1803728618584,
+        "std": 4415.449718008251,
+        "quantiles_all_including_censor_point": {
+          "q00": 1.0,
+          "q10": 7.0,
+          "q25": 82.0,
+          "q50": 1089.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 110182,
+        "observed_event_fraction": 0.6888441532459738,
+        "right_censored_at_10000": 49770,
+        "right_censored_fraction": 0.3111558467540262,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 1.0,
+          "q10": 4.0,
+          "q25": 24.0,
+          "q50": 241.0,
+          "q75": 1292.0,
+          "q90": 4063.0,
+          "q95": 6239.0,
+          "q99": 9050.0,
+          "q100": 9997.0
+        },
+        "event_min": 1.0,
+        "event_max": 9997.0,
+        "values_above_10000": 0
+      },
+      "valid_rows_in_complete_systems": {
+        "n": 159936,
+        "min": 1.0,
+        "max": 10000.0,
+        "mean": 3932.5080657262906,
+        "std": 4415.54596554102,
+        "quantiles_all_including_censor_point": {
+          "q00": 1.0,
+          "q10": 7.0,
+          "q25": 82.0,
+          "q50": 1089.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 110166,
+        "observed_event_fraction": 0.688813025210084,
+        "right_censored_at_10000": 49770,
+        "right_censored_fraction": 0.31118697478991597,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 1.0,
+          "q10": 4.0,
+          "q25": 24.0,
+          "q50": 241.0,
+          "q75": 1292.0,
+          "q90": 4063.5,
+          "q95": 6239.0,
+          "q99": 9050.0,
+          "q100": 9997.0
+        },
+        "event_min": 1.0,
+        "event_max": 9997.0,
+        "values_above_10000": 0
+      },
+      "valid_rows_in_common_complete_systems": {
+        "n": 159936,
+        "min": 1.0,
+        "max": 10000.0,
+        "mean": 3932.5080657262906,
+        "std": 4415.54596554102,
+        "quantiles_all_including_censor_point": {
+          "q00": 1.0,
+          "q10": 7.0,
+          "q25": 82.0,
+          "q50": 1089.0,
+          "q75": 10000.0,
+          "q90": 10000.0,
+          "q95": 10000.0,
+          "q99": 10000.0,
+          "q100": 10000.0
+        },
+        "observed_events_below_10000": 110166,
+        "observed_event_fraction": 0.688813025210084,
+        "right_censored_at_10000": 49770,
+        "right_censored_fraction": 0.31118697478991597,
+        "event_time_quantiles_excluding_censored": {
+          "q00": 1.0,
+          "q10": 4.0,
+          "q25": 24.0,
+          "q50": 241.0,
+          "q75": 1292.0,
+          "q90": 4063.5,
+          "q95": 6239.0,
+          "q99": 9050.0,
+          "q100": 9997.0
+        },
+        "event_min": 1.0,
+        "event_max": 9997.0,
+        "values_above_10000": 0
+      }
+    }
+  },
+  "paired_valid_rows": 159945,
+  "paired_binary_label_agreement": 144699,
+  "paired_binary_label_disagreements": 15246,
+  "paired_binary_label_disagreement_fraction": 0.09532026634155491,
+  "s2_unstable_s3_stable": 7308,
+  "s2_stable_s3_unstable": 7938,
+  "paired_time_difference_s3_minus_s2": {
+    "mean": -39.61794366813592,
+    "median": 0.0,
+    "median_absolute_difference": 19.0,
+    "quantiles": {
+      "q00": -9999.0,
+      "q10": -1503.0,
+      "q25": -33.0,
+      "q50": 0.0,
+      "q75": 3.0,
+      "q90": 1312.0,
+      "q95": 4075.0,
+      "q99": 8840.0,
+      "q100": 9985.0
+    },
+    "exactly_equal_fraction": 0.2958954640657726,
+    "spearman_correlation": 0.9089868436774926
+  }
+}

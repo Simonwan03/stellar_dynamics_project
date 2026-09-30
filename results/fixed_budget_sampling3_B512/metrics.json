@@ -1,0 +1,14 @@
+{
+  "bootstrap_replicates": 2000,
+  "bootstrap_unit": "base system",
+  "models": [
+    "deep_sets",
+    "mean_probability"
+  ],
+  "multiple_testing": "Holm adjustment over K=2,4,8,16 within each model/target/control/subgroup family",
+  "paired_bootstrap_p_value": "two-sided centered paired bootstrap under the zero-delta null",
+  "paired_delta_definition": "MAE(K=1,T=512) - MAE(K,T=512/K)",
+  "phase_draws": 50,
+  "preinstability_eligibility": "same draw must be eligible across all five K*T=512 allocations",
+  "primary_metric": "system-level MAE"
+}
