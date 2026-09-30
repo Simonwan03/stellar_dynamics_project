@@ -58,9 +58,8 @@ from tasks.common.case_split import (  # noqa: E402
     ensure_case_split_manifest,
     missing_case_ids,
 )
-from tasks.task_b.main import (  # noqa: E402
-    FULL_RESULT_KEYS,
-    ORBITAL15_RESULT_KEYS,
+from tasks.common.orbital_schema import FULL_RESULT_KEYS, ORBITAL15_RESULT_KEYS
+from tasks.task_b.data import (  # noqa: E402
     build_prefix_features,
     discover_result_paths,
     filter_valid_samples,

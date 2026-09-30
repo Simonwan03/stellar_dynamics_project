@@ -48,7 +48,7 @@ if str(ROOT) not in sys.path:
 
 from tasks.common.analyze_divergence import load_completion_table, select_valid_rows
 from tasks.common.traditional_stability import triple_stability
-from tasks.task_b.main import ORBITAL15_RESULT_KEYS
+from tasks.common.orbital_schema import ORBITAL15_RESULT_KEYS
 
 
 GROUP_SIZE = 32

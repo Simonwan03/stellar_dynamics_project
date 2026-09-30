@@ -13,15 +13,15 @@
 完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)；其中会区分正式
 主实验、ablation、历史重跑和没有最终指标的目录。
 
-当前主线代码在 [scripts](</home/wan/stellar_dynamics/scripts>) 和 [tasks](</home/wan/stellar_dynamics/tasks>)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)。
+当前主线代码在 [scripts](scripts) 和 [tasks](tasks)；七项任务的代码地图和运行入口见 [tasks/README.md](tasks/README.md)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [experiments/panda_threebody/README.md](experiments/panda_threebody/README.md)。
 
 ## Repository Layout
 
-- [dataset_v3](</mnt/d/stellar_dynamics_data/sampling_2>): 当前主数据集，`Task A-E` 都围绕它展开
-- [scripts](</home/wan/stellar_dynamics/scripts>): 任务级入口脚本
-- [tasks](</home/wan/stellar_dynamics/tasks>): 各任务入口、数据处理、模型和训练工具
-- [results](</home/wan/stellar_dynamics/results>) / [runs](</home/wan/stellar_dynamics/runs>) / [Panda outputs](</home/wan/stellar_dynamics/experiments/panda_threebody/outputs>): 各任务产物
-- [experiments/panda_threebody](</home/wan/stellar_dynamics/experiments/panda_threebody>): Panda submodule 与历史隔离实验区；新 Task E Panda 对比优先走主项目脚本
+- [dataset_v3](dataset_v3): 当前主数据集，`Task A-E` 都围绕它展开
+- [scripts](scripts): 任务级入口脚本
+- [tasks](tasks): 各任务入口、数据处理、模型和训练工具
+- [results](results) / [runs](runs) / [Panda outputs](experiments/panda_threebody/outputs): 各任务产物
+- [experiments/panda_threebody](experiments/panda_threebody): Panda submodule 与历史隔离实验区；新 Task E Panda 对比优先走主项目脚本
 
 ## `dataset_v3`
 
@@ -256,7 +256,7 @@ python scripts/create_common_case_split.py \
 
 ### Task A: Group Stability from Initial Conditions
 
-入口脚本：[tasks/task_a/main.py](/home/wan/stellar_dynamics/tasks/task_a/main.py)
+入口脚本：[tasks/task_a/main.py](tasks/task_a/main.py)
 
 **任务定义**
 
@@ -475,7 +475,7 @@ Ghost 版结果位于 `results/task_a_common/pretrained_ghost_mlp_stable_fractio
 
 ### Task B: Prefix-Based Instability Prediction
 
-入口脚本：[tasks/task_b/main.py](/home/wan/stellar_dynamics/tasks/task_b/main.py)
+入口脚本：[tasks/task_b/main.py](tasks/task_b/main.py)
 
 **任务定义**
 
@@ -765,7 +765,7 @@ System-level 指标由
 
 ### Task C: Multi-Horizon Survival for 32-Variation Systems
 
-入口脚本：[tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
+入口脚本：[tasks/task_c/main.py](tasks/task_c/main.py)
 
 **任务定义**
 
@@ -810,7 +810,7 @@ System-level 指标由
 #### Event-time/censoring 版本（20 个 log-spaced bins）
 
 为避免把 7 个 survival fraction 反推成伪 hazard，新增了独立入口
-[`tasks/task_c/survival.py`](/home/wan/stellar_dynamics/tasks/task_c/survival.py)：
+[`tasks/task_c/survival.py`](tasks/task_c/survival.py)：
 
 ```bash
 conda run -n stellar python -m tasks.task_c.survival \
@@ -1132,7 +1132,7 @@ GBR 在三个 threshold 下都优于 constant quantile baseline。threshold 增�
 
 相关入口：
 
-- [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
+- [tasks/task_e/main.py](tasks/task_e/main.py)
 推荐优先使用统一入口 `tasks/task_e/main.py`。它按 32-variation base system
 完成 train/val/test group split，使用 completion-aware train-window scaler，并统一输出 transformed/z
 scale 的 overall、horizon-wise、channel-wise metrics。支持
@@ -1140,7 +1140,7 @@ scale 的 overall、horizon-wise、channel-wise metrics。支持
 `itransformer`, `timesfm`, `chronos`, `chronos2`, `panda_zero_shot`,
 `tirex2` 和 `toto2`。
 
-当前主协议见 [`docs/task_e_pipeline.md`](/home/wan/stellar_dynamics/docs/task_e_pipeline.md)：
+当前主协议见 [`docs/reproduction.md`](docs/reproduction.md)：
 E1 是 one-shot `512 -> 128`，E2 是复用同一模型的四段 recursive rolling，最长
 预测 horizon 为 `512`。下面的 E.0/E.1 数值是旧的 `200 -> 50` preliminary 结果，
 仅保留作历史记录。
@@ -2004,7 +2004,7 @@ Panda Adapter 在所有测试指标上最好。TimesFM 是最强 zero-shot MSE
 baseline，并优于全部从零训练的监督模型；在监督模型中 PatchTST 最好。
 Persistence 明显优于 Ridge，说明局部时间连续性比单个全局线性映射更适合
 这组短期轨道预测。详细运行目录和指标口径见
-[Task E 实验汇总](docs/task_e_experiment_summary.md)。
+[Task E 复现地图](docs/reproduction.md)。
 
 #### E.1 `orbital15` 与 `raw_state18` 表示对比
 
@@ -2038,7 +2038,7 @@ MSE。
 在当前三体 forecasting 设置与训练预算下，预测经过物理结构化处理的
 `orbital15`，整体上明显比直接预测位置和速度组成的 `raw_state18`
 更容易。完整运行口径和原始结果见
-[`docs/task_e_experiment_summary.md`](docs/task_e_experiment_summary.md)。
+[`docs/reproduction.md`](docs/reproduction.md)。
 
 #### E.2 Foundation Forecasting
 
@@ -2067,7 +2067,7 @@ MSE。
 
 ### Task F: Random-Masked High-Resolution Stability
 
-入口脚本：[tasks/task_f/main.py](/home/ubuntu/github/stellar_dynamics_project/tasks/task_f/main.py)
+入口脚本：[tasks/task_f/main.py](tasks/task_f/main.py)
 
 Task F 从 `sampling_3` 高分辨率轨道数据的前 `256` 个时间步预测单条 trajectory
 是否在 `time_horizon=10000` 时保持稳定。输入使用 `orbital15` 的 15 个通道，并追加
@@ -2087,7 +2087,7 @@ TCN 与 attention 结果见下方[实验结果总汇](#实验结果总汇磁盘�
 
 ### Task G: Boundary Sensitivity
 
-入口脚本：[tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
+入口脚本：[tasks/task_g/main.py](tasks/task_g/main.py)
 
 **任务定义**
 
@@ -2576,7 +2576,7 @@ step 32 的 MSE-z 为 0.0636/0.4214。
 | Preliminary persistence | MSE 0.336771，MAE 0.317444，Spearman 0.675598 |
 | Historical independent Panda adapter | z-MSE 0.173401，z-MAE 0.191221，raw-MSE 1992.260254，raw-MAE 2.509673；epoch 10 val MSE 1788.239416 |
 
-完整说明见 [docs/task_e_experiment_summary.md](docs/task_e_experiment_summary.md) 和
+完整说明见 [docs/reproduction.md](docs/reproduction.md) 和
 [README_task_e_horizon_results.md](README_task_e_horizon_results.md)。只有 config/feature
 metadata 而没有最终 test metrics 的目录（例如
 <code>runs/task_e_orbital15_ctx64_pred32_panda_gru</code>、
@@ -2826,17 +2826,17 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 
 ## Script Entry Points
 
-- `Task A`: [tasks/task_a/main.py](/home/wan/stellar_dynamics/tasks/task_a/main.py)
-- `Task B`: [tasks/task_b/main.py](/home/wan/stellar_dynamics/tasks/task_b/main.py)
-- `Task C`: [tasks/task_c/main.py](/home/wan/stellar_dynamics/tasks/task_c/main.py)
-- `Task D`: [tasks/task_d/main.py](/home/wan/stellar_dynamics/tasks/task_d/main.py)
-- `Task E`: [tasks/task_e/main.py](/home/wan/stellar_dynamics/tasks/task_e/main.py)
-- `Task F`: [tasks/task_f/main.py](/home/ubuntu/github/stellar_dynamics_project/tasks/task_f/main.py)
-- `Task G`: [tasks/task_g/main.py](/home/wan/stellar_dynamics/tasks/task_g/main.py)
+- `Task A`: [tasks/task_a/main.py](tasks/task_a/main.py)
+- `Task B`: [tasks/task_b/main.py](tasks/task_b/main.py)
+- `Task C`: [tasks/task_c/main.py](tasks/task_c/main.py)
+- `Task D`: [tasks/task_d/main.py](tasks/task_d/main.py)
+- `Task E`: [tasks/task_e/main.py](tasks/task_e/main.py)
+- `Task F`: [tasks/task_f/main.py](tasks/task_f/main.py)
+- `Task G`: [tasks/task_g/main.py](tasks/task_g/main.py)
 
 ## Reproducible Commands
 
-下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；如在别的机器上运行，需要先安装 [environment.yml](/home/wan/stellar_dynamics/environment.yml)、[requirement.txt](/home/wan/stellar_dynamics/requirement.txt) 和可选的 [requirements-foundation.txt](/home/wan/stellar_dynamics/requirements-foundation.txt)。
+下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；如在别的机器上运行，需要先安装 [environment.yml](environment.yml)、[requirement.txt](requirement.txt) 和可选的 [requirements-foundation.txt](requirements-foundation.txt)。
 
 ### Task A
 
@@ -3224,7 +3224,7 @@ conda run -n stellar python -m tasks.task_e \
 - `--require_complete_systems` / `--no-require_complete_systems`: 是否只保留完整有效的 32-variation system
 - `--amp`: 启用 mixed precision
 - `--hf-local-files-only` / `--no-hf-local-files-only`: foundation checkpoint 是否只从本地 cache 读取
-- Panda 依赖和 pretrained 权重约定见 [docs/panda_pretrained.md](/home/wan/stellar_dynamics/docs/panda_pretrained.md)
+- Panda 依赖和 pretrained 权重约定见 [experiments/panda_threebody/README.md](experiments/panda_threebody/README.md)
 
 ### Task F
 
@@ -3289,7 +3289,7 @@ conda run -n stellar python -m tasks.task_g \
 
 ## Environment
 
-大多数脚本默认在 `stellar` conda 环境下运行。基础依赖可以从 [environment.yml](/home/wan/stellar_dynamics/environment.yml) 和 [requirement.txt](/home/wan/stellar_dynamics/requirement.txt) 查看；foundation-model 额外依赖见 [requirements-foundation.txt](/home/wan/stellar_dynamics/requirements-foundation.txt)。
+大多数脚本默认在 `stellar` conda 环境下运行。基础依赖可以从 [environment.yml](environment.yml) 和 [requirement.txt](requirement.txt) 查看；foundation-model 额外依赖见 [requirements-foundation.txt](requirements-foundation.txt)。
 
 ## Model Settings
 

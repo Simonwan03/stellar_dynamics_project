@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tasks.task_b.main import FULL_RESULT_KEYS, ORBITAL15_RESULT_KEYS
+from tasks.common.orbital_schema import FULL_RESULT_KEYS, ORBITAL15_RESULT_KEYS
 from tasks.task_c.cache import prepare_prefix_cache
 
 

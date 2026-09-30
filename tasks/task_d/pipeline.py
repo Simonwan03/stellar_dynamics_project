@@ -20,6 +20,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+from tasks.common.orbital_schema import DEFAULT_VALID_PAIRS, INITIAL_FEATURE_KEYS
+
 try:
     import torch
     from torch import nn
@@ -39,7 +41,6 @@ except ImportError:  # pragma: no cover
 RESULT_RE = re.compile(r"results_batch_(\d+)_sampling_(\d+)\.hdf5$")
 LABEL_VERSION = 6
 DEFAULT_GROUP_SIZE = 32
-DEFAULT_VALID_PAIRS = tuple((i, i + 16) for i in range(16))
 LEGACY_VALID_PAIRS_8 = ((0, 4), (1, 5), (2, 6), (3, 7))
 ORBITAL15_FEATURE_KEYS = (
     "aratios_complete",
@@ -48,17 +49,6 @@ ORBITAL15_FEATURE_KEYS = (
     "incs_complete",
     "APs_complete",
     "LANs_complete",
-)
-INITIAL_FEATURE_KEYS = (
-    "masses_complete",
-    "mratios_complete",
-    "smaxes_complete",
-    "eccs_complete",
-    "incs_complete",
-    "aratios_complete",
-    "energy_complete",
-    "angMomentum_complete",
-    "periods_complete",
 )
 INITIAL_ANGLE_KEYS = frozenset({"APs_complete", "LANs_complete"})
 PREFIX_FEATURE_KEYS = (

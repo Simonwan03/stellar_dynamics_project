@@ -38,7 +38,7 @@ if str(ROOT) not in sys.path:
 
 from tasks.common.analyze_divergence import load_completion_table
 from tasks.common.traditional_stability import triple_stability
-from tasks.task_b.main import ORBITAL15_RESULT_KEYS
+from tasks.common.orbital_schema import ORBITAL15_RESULT_KEYS
 
 # Reuse the previously validated project-specific loading and grouping logic.
 from analysis.plot_ma_boundary import (

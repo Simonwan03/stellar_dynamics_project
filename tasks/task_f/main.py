@@ -36,7 +36,7 @@ from tasks.common.experiment_utils import (  # noqa: E402
     select_device,
     set_random_seed,
 )
-from tasks.task_b.main import batch_id_from_path  # noqa: E402
+from tasks.task_b.data import batch_id_from_path  # noqa: E402
 from tasks.task_f.masking import (  # noqa: E402
     DEFAULT_MASK_RATIOS,
     apply_observation_mask,

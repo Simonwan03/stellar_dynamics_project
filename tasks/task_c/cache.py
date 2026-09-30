@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from tasks.task_b.main import (
+from tasks.task_b.data import (
     build_prefix_features,
     discover_result_paths,
     load_aligned_labels,

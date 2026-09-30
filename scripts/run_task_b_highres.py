@@ -37,15 +37,12 @@ from tasks.common.experiment_utils import (
     select_device,
     set_random_seed,
 )
+from tasks.common.orbital_schema import ANGLE_RESULT_KEYS, ORBITAL15_RESULT_KEYS
+from tasks.task_b.data import batch_id_from_path, discover_result_paths, load_aligned_labels
 from tasks.task_b.main import (
-    ANGLE_RESULT_KEYS,
     MLPClassifier,
-    ORBITAL15_RESULT_KEYS,
     CNN1DClassifier,
     TCNClassifier,
-    batch_id_from_path,
-    discover_result_paths,
-    load_aligned_labels,
     predict_classifier,
     save_test_predictions,
     train_classifier,

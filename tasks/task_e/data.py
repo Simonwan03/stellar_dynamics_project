@@ -297,6 +297,9 @@ class ForecastWindowDataset(Dataset):
         return handle
 
     def close(self) -> None:
+        # Construction can fail before thread-local handles are initialized.
+        if not hasattr(self, "_thread_handles_lock"):
+            return
         with self._thread_handles_lock:
             handle_sets = list(self._thread_handles.values())
             self._thread_handles.clear()

@@ -31,3 +31,20 @@ __pycache__/
 *.ckpt
 *.npy
 *.npz
+
+# generated experiment trees; previously tracked provenance stays tracked
+results/
+runs/
+wandb/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+*.log
+*.tmp
+*.f32
+*.memmap
+
+# serialized trained estimators stored under historical result directories
+**/xgboost_*_model.json
+**/best_model.pkl

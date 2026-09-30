@@ -11,8 +11,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from tasks.task_f.masking import apply_observation_mask
-from tasks.task_f.mixed_masking import fixed_mask, sample_training_mask
+from tasks.common.observation_mask import apply_observation_mask
+from tasks.common.mixed_masking import fixed_mask, sample_training_mask
 
 
 class MaskedForecastWindowDataset(Dataset):

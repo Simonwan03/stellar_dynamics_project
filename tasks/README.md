@@ -15,6 +15,7 @@ tasks/
 ├── task_c/   # survival prediction
 ├── task_d/   # divergence-time regression
 ├── task_e/   # trajectory forecasting
+├── task_f/   # masked-prefix stability classification
 └── task_g/   # boundary sensitivity
 ```
 
@@ -22,6 +23,32 @@ Every task can be launched as a package, for example
 `python -m tasks.task_e --help`. Task-specific implementation stays inside its
 package; imports between tasks are explicit. General visualization utilities
 live in `tools/`.
+
+### Code map
+
+| Task | Package entry | Main implementation | Additional entry points |
+| --- | --- | --- | --- |
+| A: initial-condition stability | `python -m tasks.task_a` | `task_a/main.py` | — |
+| B: prefix classification | `python -m tasks.task_b` | `task_b/data.py`, `task_b/main.py` | `task_b/phase_ensemble.py` is used by sampling scripts |
+| C: survival | `python -m tasks.task_c.survival` | `task_c/survival.py`, `task_c/cache.py` | `python -m tasks.task_c` is the historical fraction objective; ablation and plotting are ancillary |
+| D: median decorrelation time | `python -m tasks.task_d` | `task_d/quantile.py` | `python -m tasks.task_d.sensitivity`; `pipeline.py` is historical |
+| E: forecasting | `python -m tasks.task_e` | `task_e/data.py`, `models.py`, `foundation.py`, `metrics.py` | `python -m tasks.task_e.prepare`, `python -m tasks.task_e.report` |
+| F: masked prefix | `python -m tasks.task_f` | `task_f/main.py`, `models.py`, `summaries.py` | comparison runners in `scripts/` |
+| G: historical boundary sensitivity (outside manuscript A–F) | `python -m tasks.task_g` | `task_g/main.py` | — |
+
+`tasks/common/` owns the shared dataset field order and perturbation pairs
+(`orbital_schema.py`), B/F sequence layers (`sequence_layers.py`), E/F
+observation-mask policies (`observation_mask.py`, `mixed_masking.py`), and
+case splitting, baseline, and training utilities. Task B's prefix loaders and
+feature construction live in `task_b/data.py` and are reused by Task C.
+Existing imports through `task_b.main`, `task_d.pipeline`, and
+`task_f.masking`/`task_f.mixed_masking` remain available.
+
+The final A–F map and reported configs are in [docs/reproduction.md](../docs/reproduction.md).
+Experiment runners outside the task packages are in `scripts/`; exploratory
+analysis and plots are in `analysis/` and `plot/`. Generated artifacts are
+written to `results/` or `runs/`. These directories are not Python package
+entry points.
 
 Task E defaults to group-aware splitting (`32` variations per base system),
 completion-table filtering, and scaler statistics computed only from valid
@@ -486,3 +513,38 @@ file too large.
 Foundation zero-shot and Panda adapter experiments are available through the
 unified `tasks/task_e/main.py` entry point. Their reusable loaders and
 adapter modules live under `tasks/task_e/`.
+
+## Task F
+
+Masked high-resolution orbital-prefix stability classification. The package
+entry point trains TCN or attention models for configured observation-mask
+ratios and writes run artifacts under the selected output directory:
+
+```bash
+python -m tasks.task_f \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --prefix-len 256 \
+  --mask-ratios 0,25,50,75 \
+  --models tcn \
+  --output-dir results/task_f_masked_prefix
+```
+
+The masking implementation is in `tasks/common/`; the modules under
+`task_f/` keep the older import paths for experiment scripts. Summary-feature,
+block-mask, and mixed-mask comparisons have separate runners in `scripts/`.
+
+## Task G
+
+Predicts whether paired perturbations from the same system disagree on
+stability at each configured horizon:
+
+```bash
+python -m tasks.task_g \
+  --data-glob 'dataset_v3/results_batch_*_sampling_2.hdf5' \
+  --completed-systems dataset_v3/completed_systems_sampling_2.txt \
+  --representation pair_ic54 \
+  --output-dir results/task_g_boundary_sensitivity
+```
+
+The pair convention and initial-condition field order are defined in
+`tasks/common/orbital_schema.py`.

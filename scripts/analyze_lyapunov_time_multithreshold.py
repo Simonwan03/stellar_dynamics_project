@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-dir",
         type=Path,
-        default=Path("/data/dataset_sampling_3_prefix1024_float64"),
+        default=ROOT / "dataset_sampling_3_prefix1024",
     )
     parser.add_argument(
         "--output-dir",

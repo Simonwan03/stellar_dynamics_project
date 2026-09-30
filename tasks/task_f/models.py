@@ -4,7 +4,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from tasks.task_b.main import PositionalEncoding, TCNBlock
+from tasks.common.sequence_layers import PositionalEncoding, TCNBlock
 
 
 class MaskedTCNClassifier(nn.Module):

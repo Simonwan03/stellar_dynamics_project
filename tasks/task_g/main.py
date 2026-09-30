@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tasks.task_d.pipeline import DEFAULT_VALID_PAIRS, INITIAL_FEATURE_KEYS  # noqa: E402
+from tasks.common.orbital_schema import DEFAULT_VALID_PAIRS, INITIAL_FEATURE_KEYS  # noqa: E402
 
 try:
     from scipy.stats import pearsonr, spearmanr

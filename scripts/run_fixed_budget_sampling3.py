@@ -32,7 +32,7 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 from tasks.common.case_split import create_case_split_manifest, stable_fraction_bin
 from tasks.common.experiment_utils import ensure_dir, set_random_seed
-from tasks.task_b.main import batch_id_from_path, discover_result_paths, load_aligned_labels
+from tasks.task_b.data import batch_id_from_path, discover_result_paths, load_aligned_labels
 from tasks.task_b.phase_ensemble import (
     BudgetCondition,
     PairDeepSetsRegressor,
@@ -90,8 +90,8 @@ def resolve_dataset_dir(explicit: Path | None) -> Path:
     if explicit is not None:
         return explicit.expanduser().resolve()
     candidates = (
-        ROOT / "dataset_sampling_3_prefix1024",
-        Path("/data/dataset_sampling_3_prefix1024_float64"),
+        Path(os.environ["STELLAR_DATA_DIR"]).expanduser()
+        if "STELLAR_DATA_DIR" in os.environ else ROOT / "dataset_sampling_3_prefix1024",
     )
     for candidate in candidates:
         if candidate.is_dir() and list(candidate.glob("results_batch_*_sampling_3.hdf5")):
