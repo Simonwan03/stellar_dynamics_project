@@ -1,4 +1,17 @@
-# `visualize_dataset_v3_trajectories.py` 使用说明
+# tools/ 工具说明
+
+`tools/` 提供数据下载、可视化和仓库结果索引维护工具。它们是辅助入口，不负责训练 Task A–F 模型；论文实验命令见[复现映射](../docs/reproduction.md)。
+
+| 工具 | 用途 |
+| --- | --- |
+| [download_remote_hdf5_prefix.py](download_remote_hdf5_prefix.py) | 从指定远程 HDF5 地址按需下载前缀及所选字段，输出本地分片；需要自行提供可访问的 `--base-url` 和 `--output-dir`。前缀数据不能替代需要完整时间序列的实验。 |
+| [visualize_dataset_v3_orbital_parameters.py](visualize_dataset_v3_orbital_parameters.py) | 绘制 `sampling_2` 轨道参数随时间变化的图。默认写入 `results/shared_analysis/sampling_2/dataset_v3_orbital_parameter_viz/`。 |
+| [visualize_dataset_v3_trajectories.py](visualize_dataset_v3_trajectories.py) | 绘制三维轨道、坐标时间曲线，可选 GIF/MP4 动画；详细用法见下文。 |
+| [build_artifact_inventory.py](build_artifact_inventory.py) | 扫描按任务和数据集分类的 `results/`，重新生成[结果索引](../docs/artifact_inventory.md)及 CSV。 |
+| [organize_artifacts.py](organize_artifacts.py) | 根据[路径对照表](../docs/artifact_path_map.csv)执行一次性结果目录迁移并更新文本路径引用；日常实验复现无需运行。 |
+| [__init__.py](__init__.py) | Python 包标记，无需直接执行。 |
+
+## 轨迹可视化
 
 这个脚本用于读取 `dataset_v3` 的三体轨道结果，并生成：
 
@@ -13,11 +26,11 @@
 dataset_v3/results_batch_00_sampling_2.hdf5
 ```
 
-当前本地环境中，`dataset_v3` 已链接到 `/mnt/d/stellar_dynamics_data/sampling_2`；服务器环境可以继续链接到 `/data/sampling_2`。因此通常不需要在命令中写机器相关的绝对路径。
+`dataset_v3` 是本地数据目录或符号链接；请按实际机器配置该路径，或通过 `--dataset-dir` 指定数据位置。
 
 ## 基本用法
 
-在仓库根目录 `/home/wan/stellar_dynamics` 下运行：
+在仓库根目录下运行：
 
 ```bash
 conda run -n stellar python tools/visualize_dataset_v3_trajectories.py \
@@ -29,7 +42,7 @@ conda run -n stellar python tools/visualize_dataset_v3_trajectories.py \
 默认输出目录是：
 
 ```text
-results/dataset_v3_trajectory_viz/
+results/shared_analysis/sampling_2/dataset_v3_trajectory_viz/
 ```
 
 对于 `row=0`，通常会得到：
@@ -113,7 +126,7 @@ conda run -n stellar python tools/visualize_dataset_v3_trajectories.py \
 | `--time-stop` | 全部 | 结束时间步，不包含该位置 |
 | `--time-stride` | `4` | 时间步采样间隔 |
 | `--center` | `com` | `none`、`body0` 或 `com` |
-| `--output-dir` | `results/dataset_v3_trajectory_viz` | 输出目录 |
+| `--output-dir` | `results/shared_analysis/sampling_2/dataset_v3_trajectory_viz` | 输出目录 |
 | `--dpi` | `160` | PNG/动画分辨率参数 |
 | `--animation` | 关闭 | 同时生成动画 |
 | `--animation-format` | `gif` | `gif` 或 `mp4` |
@@ -154,7 +167,7 @@ times_complete
 - 运行前可以用下面的命令检查输出：
 
 ```bash
-find results/dataset_v3_trajectory_viz -maxdepth 1 -type f | sort
+find results/shared_analysis/sampling_2/dataset_v3_trajectory_viz -maxdepth 1 -type f | sort
 ```
 
 如果出现 `Missing result shard`，请先检查 `dataset_v3` 链接和目标分片文件是否存在：

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.run_task_b_highres import (  # noqa: E402
+from tasks.task_b.highres import (  # noqa: E402
     FEATURE_NAMES,
     calculate_normalization,
     discover_result_paths,
@@ -248,7 +248,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_sampling_3_prefix1024"))
     parser.add_argument("--sampling-id", type=int, default=3)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_f_masked_prefix"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_f/sampling_3/task_f_masked_prefix"))
     parser.add_argument("--cache-path", type=Path, default=None)
     parser.add_argument("--rebuild-cache", action="store_true")
     parser.add_argument("--max-shards", type=int, default=None)

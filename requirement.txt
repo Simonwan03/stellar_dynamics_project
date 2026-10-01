@@ -1,3 +1,6 @@
+# Direct inputs for the single Linux x86_64 / Python 3.12 / CUDA 13.0 environment.
+# Regenerate requirements.lock with the command in README.md after changing this file.
+# Panda is imported from the repository-pinned submodule and is not pip-installed.
 absl-py==2.4.0
 accelerate==1.13.0
 aiohappyeyeballs==2.6.1
@@ -14,8 +17,6 @@ charset-normalizer==3.4.4
 click==8.3.1
 comm==0.2.3
 contourpy==1.3.3
-cuda-bindings==13.0.3
-cuda-pathfinder==1.2.2
 cycler==0.12.1
 debugpy==1.8.20
 decorator==5.2.1
@@ -24,17 +25,17 @@ executing==2.2.1
 filelock==3.25.2
 fonttools==4.61.1
 frozenlist==1.8.0
-fsspec==2026.3.0
+fsspec==2025.12.0
 gitdb==4.0.12
 GitPython==3.1.47
-gluonts==0.16.2
+gluonts[arrow,torch]==0.16.2
 grpcio==1.80.0
 h11==0.16.0
 h5py==3.15.1
 hf-xet==1.4.2
 httpcore==1.0.9
 httpx==0.28.1
-huggingface_hub==1.8.0
+huggingface-hub==0.36.2
 hydra-core==1.3.2
 idna==3.11
 ipykernel==7.1.0
@@ -57,26 +58,10 @@ multidict==6.7.1
 nest_asyncio==1.6.0
 networkx==3.6.1
 numpy==2.1.3
-nvidia-cublas==13.1.0.3
-nvidia-cuda-cupti==13.0.85
-nvidia-cuda-nvrtc==13.0.88
-nvidia-cuda-runtime==13.0.96
-nvidia-cudnn-cu13==9.15.1.9
-nvidia-cufft==12.0.0.61
-nvidia-cufile==1.15.1.6
-nvidia-curand==10.4.0.35
-nvidia-cusolver==12.0.4.66
-nvidia-cusparse==12.6.3.3
-nvidia-cusparselt-cu13==0.8.0
-nvidia-nccl-cu12==2.29.7
-nvidia-nccl-cu13==2.28.9
-nvidia-nvjitlink==13.0.88
-nvidia-nvshmem-cu13==3.4.5
-nvidia-nvtx==13.0.85
 omegaconf==2.3.0
 openai==0.28.0
 orjson==3.11.8
-packaging==26.0
+packaging==24.2
 pandas==2.3.3
 parso==0.8.5
 patsy==1.0.2
@@ -95,6 +80,7 @@ pydantic==2.13.3
 pydantic_core==2.46.3
 Pygments==2.19.2
 pyparsing==3.3.2
+pytest==8.4.2
 python-dateutil==2.9.0.post0
 pytz==2026.1.post1
 PyYAML==6.0.3
@@ -104,7 +90,7 @@ requests==2.32.5
 rich==15.0.0
 safetensors==0.7.0
 scikit-learn==1.8.0
-scipy==1.17.0
+scipy==1.15.3
 sentencepiece==0.2.1
 sentry-sdk==2.58.0
 setuptools==80.10.2
@@ -124,8 +110,7 @@ torchvision==0.25.0+cu130
 tornado==6.5.4
 tqdm==4.67.3
 traitlets==5.14.3
-transformers==5.4.0
-triton==3.6.0
+transformers==4.57.6
 typer==0.24.1
 typing_extensions==4.15.0
 typing-inspection==0.4.2
@@ -137,4 +122,7 @@ Werkzeug==3.1.8
 wheel==0.46.3
 xgboost==1.7.6
 yarl==1.22.0
-
+chronos-forecasting==2.1.0
+tirex-2==0.2.1
+toto-2==2.0.0
+uv==0.12.21

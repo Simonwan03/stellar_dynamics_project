@@ -1,0 +1,129 @@
+{
+  "dataset_dir": "dataset_sampling_3_prefix1024",
+  "sampling_id": 3,
+  "output_dir": "results/task_b/sampling_3/task_b_sampling3_prefix64",
+  "cache_path": "/tmp/task_b_sampling3_prefix64_orbital15.f32",
+  "rebuild_cache": false,
+  "max_shards": null,
+  "prefix_len": 64,
+  "time_stride": 1,
+  "time_horizon": 10000.0,
+  "group_size": 32,
+  "models": "mlp,cnn,tcn",
+  "train_ratio": 0.7,
+  "val_ratio": 0.15,
+  "test_ratio": 0.15,
+  "seed": 42,
+  "batch_size": 2048,
+  "epochs": 50,
+  "early_stopping_patience": 8,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "dropout": 0.2,
+  "device": "cuda",
+  "amp": true,
+  "no_preload": false,
+  "result_paths": [
+    "dataset_sampling_3_prefix1024/results_batch_00_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_01_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_02_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_03_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_04_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_05_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_06_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_07_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_08_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_09_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_10_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_11_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_12_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_13_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_14_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_15_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_16_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_17_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_18_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_19_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_20_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_21_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_22_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_23_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_24_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_25_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_26_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_27_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_28_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_29_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_30_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_31_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_32_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_33_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_34_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_35_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_36_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_37_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_38_sampling_3.hdf5",
+    "dataset_sampling_3_prefix1024/results_batch_39_sampling_3.hdf5"
+  ],
+  "cache_shape": [
+    160000,
+    64,
+    15
+  ],
+  "cache_dtype": "float32",
+  "preload_normalized_features": true,
+  "input_shape": [
+    64,
+    15
+  ],
+  "feature_names": [
+    "aratios_complete_0",
+    "mratios_complete_0",
+    "mratios_complete_1",
+    "eccs_complete_0",
+    "eccs_complete_1",
+    "incs_complete_0",
+    "incs_complete_1",
+    "APs_complete_0",
+    "APs_complete_1",
+    "APs_complete_2",
+    "APs_complete_3",
+    "LANs_complete_0",
+    "LANs_complete_1",
+    "LANs_complete_2",
+    "LANs_complete_3"
+  ],
+  "num_samples": 159936,
+  "target_mean": 0.3111869692802429,
+  "target_min": 0.0,
+  "target_max": 1.0,
+  "split_counts": {
+    "train": 111936,
+    "val": 24000,
+    "test": 24000
+  },
+  "split_case_counts": {
+    "train": 3498,
+    "val": 750,
+    "test": 750
+  },
+  "split_manifest": "results/task_b/sampling_3/task_b_sampling3_prefix64/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv",
+  "split_unit": "complete raw_case_id system",
+  "split_horizon": 10000.0,
+  "effective_model_scale": {
+    "mlp": {
+      "hidden": [
+        256,
+        128,
+        64
+      ]
+    },
+    "cnn": {
+      "hidden": 192
+    },
+    "tcn": {
+      "hidden": 160,
+      "levels": 5
+    }
+  }
+}

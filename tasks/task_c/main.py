@@ -837,7 +837,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task C: trajectory-level multi-horizon survival prediction.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c/sampling_2/task_c_main"))
     parser.add_argument("--max-shards", type=int, default=None)
     parser.add_argument("--rows-per-shard", type=int, default=None)
     parser.add_argument("--max-cases", type=int, default=None)

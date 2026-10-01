@@ -31,7 +31,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-stop", type=int, default=None)
     parser.add_argument("--time-stride", type=int, default=4)
     parser.add_argument("--center", choices=["none", "body0", "com"], default="com")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "results" / "dataset_v3_trajectory_viz")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "results" / "shared_analysis" / "sampling_2" / "dataset_v3_trajectory_viz")
     parser.add_argument("--dpi", type=int, default=160)
     parser.add_argument("--animation", action="store_true", help="Also save an animated trajectory.")
     parser.add_argument("--animation-format", choices=["gif", "mp4"], default="gif")

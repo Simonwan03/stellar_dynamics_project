@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from experiments.panda_threebody.scripts.train_panda_unbound_classifier import pool_encoder_features
+from experiments.foundation_models.scripts.train_panda_unbound_classifier import pool_encoder_features
 
 
 class PandaPoolingTest(unittest.TestCase):

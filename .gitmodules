@@ -1,3 +1,3 @@
-[submodule "experiments/panda_threebody/vendor/panda"]
-	path = experiments/panda_threebody/vendor/panda
+[submodule "experiments/foundation_models/vendor/panda"]
+	path = experiments/foundation_models/vendor/panda
 	url = https://github.com/abao1999/panda.git

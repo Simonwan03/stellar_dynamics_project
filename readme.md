@@ -1,29 +1,31 @@
 # Stellar Dynamics Research Repo
 
-这个仓库围绕 hierarchical three-body stability 数据集做 7 类任务：
+这个仓库围绕 hierarchical three-body stability 数据集做 6 类任务：
 
 - `Task A`: 只用初始条件做 system-level 稳定性预测
-- `Task B`: 用早期轨道前缀做 instability 分类或 group stable fraction 预测
+- `Task B`: 用早期轨道前缀预测单条轨迹在 horizon 时是否稳定，并聚合评估 system stable fraction
 - `Task C`: 对完整 32-variation 系统做 multi-horizon survival 预测
-- `Task D`: 用半长轴发散时间定义 Lyapunov-like 回归目标
+- `Task D`: 从初始条件预测 system-level 配对轨道中位去相关时间
 - `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
 - `Task F`: 对随机掩码的高分辨率轨道前缀做稳定性预测
-- `Task G`: 用成对扰动初值预测 stability-boundary sensitivity
 
 完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)；其中会区分正式
 主实验、ablation、历史重跑和没有最终指标的目录。
 
-当前主线代码在 [scripts](scripts) 和 [tasks](tasks)；七项任务的代码地图和运行入口见 [tasks/README.md](tasks/README.md)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [experiments/panda_threebody/README.md](experiments/panda_threebody/README.md)。
+当前主线代码在 [scripts](scripts) 和 [tasks](tasks)；六项任务的代码地图和运行入口见 [tasks/README.md](tasks/README.md)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [experiments/foundation_models/README.md](experiments/foundation_models/README.md)。
 
 ## Repository Layout
 
-- [dataset_v3](dataset_v3): 当前主数据集，`Task A-E` 都围绕它展开
+- [dataset_v3](dataset_v3): `dataset_v3_low_resolution`（sampling 2）的现有数据入口；当前 Task A 的已保存结果使用它
+- [dataset_sampling_3_prefix1024](dataset_sampling_3_prefix1024): `dataset_v3_high_resolution`（sampling 3）的现有数据入口；Task B–F 的当前主实验使用它
 - [scripts](scripts): 任务级入口脚本
 - [tasks](tasks): 各任务入口、数据处理、模型和训练工具
-- [results](results) / [runs](runs) / [Panda outputs](experiments/panda_threebody/outputs): 各任务产物
-- [experiments/panda_threebody](experiments/panda_threebody): Panda submodule 与历史隔离实验区；新 Task E Panda 对比优先走主项目脚本
+- [results](results) / [Panda outputs](experiments/foundation_models/outputs): 各任务产物；旧 `runs/` 已并入 `results/`
+- [experiments/foundation_models](experiments/foundation_models): Panda submodule 与历史隔离实验区；新 Task E Panda 对比优先走主项目脚本
 
-## `dataset_v3`
+## `dataset_v3_low_resolution`（sampling 2；代码路径 `dataset_v3/`）
+
+数据集名称与代码路径的对应关系：sampling 2 = `dataset_v3_low_resolution` → `dataset_v3/`；sampling 3 = `dataset_v3_high_resolution` → `dataset_sampling_3_prefix1024/`。以下表格介绍 sampling 2 的文件。
 
 ### Core Files
 
@@ -101,7 +103,7 @@ local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表�
 完整分析还生成了 [stable-fraction disagreement histogram](figures/local_disagreement_histogram.png)
 和 [neighbor-distance diagnostic](figures/local_disagreement_vs_neighbor_distance.png)。
 分析脚本为 [`analysis/analyze_local_stable_fraction_disagreement.py`](analysis/analyze_local_stable_fraction_disagreement.py)，
-逐系统结果保存在 [`results/analysis/local_stable_fraction_disagreement.csv`](results/analysis/local_stable_fraction_disagreement.csv)。
+逐系统结果保存在 [`results/shared_analysis/dataset_unknown/analysis/local_stable_fraction_disagreement.csv`](results/shared_analysis/dataset_unknown/analysis/local_stable_fraction_disagreement.csv)。
 
 全量 `sampling_3` 结果包含 4,998 个 base systems。以 \(k=20\) 为例，边界附近
 \(|\delta_{\rm MA}|<0.1\) 的系统平均 \(L_i=0.3540\)，远离边界的系统平均
@@ -179,44 +181,26 @@ local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表�
 - `Task A` 默认对 `APs` / `LANs` 做 `sin/cos`，保留原始 `incs`
 - 因而 `Task A` 当前默认输入与 `orbital15` 的静态初值版本一致，总计 `15` 维
 
-### 2. Prefix trajectory representation
+### 2. Prefix orbital15 representation
 
-给 `Task B` 和 `Task C` 用。
+当前 Task B/C/E 主实验使用 `orbital15` 轨道序列。Task B/C 从 result shards 截取前 `prefix_len` 个时间步；每个时间步由以下字段组成，共 `15` 通道：
 
-- 从 result shards 中截取前 `prefix_len` 个时间步
-- 默认基础通道来自 orbital 序列：
-  - `aratios_complete`
-  - `mratios_complete`
-  - `masses_complete`
-  - `eccs_complete`
-  - `smaxes_complete`
-  - `energy_complete`
-  - `angMomentum_complete`
-  - `APs_complete`
-  - `LANs_complete`
-  - `incs_complete`
-- 仅 `APs_complete` / `LANs_complete` 做 `sin/cos`，`incs_complete` 保留原值
-- 可追加：
-  - pairwise geometry features
-  - 归一化时间通道
+- `aratios_complete`：1 通道
+- `mratios_complete`：2 通道
+- `eccs_complete`：2 通道
+- `incs_complete`：2 通道，保留原值
+- `APs_complete`：2 个角度分别做 `sin/cos`，得到 4 通道
+- `LANs_complete`：2 个角度分别做 `sin/cos`，得到 4 通道
 
-### 3. `orbital15`
+只对 `APs_complete` 和 `LANs_complete` 展开 `sin/cos`；`incs_complete` 不展开，因此是 15 维而不是 17 维。Task A 使用相同字段的静态初值，Task F 在 `orbital15` 前缀上另加观测掩码通道。
 
-这是 `Task E` 里 Panda 相关分支最重要的表示。
+`orbital15` 不包含 `masses_complete`、`smaxes_complete`、`energy_complete`、`angMomentum_complete`，也不追加 pairwise geometry 或归一化时间通道。旧的宽特征方案可通过 Task B 的 `--representation full` 或 Task C 的 `--prefix-representation full` 选择；geometry/time 开关仅对 `full` 有效。
 
-- `aratios`: `1`
-- `mratios`: `2`
-- `eccs`: `2`
-- `incs`: `2`
-- `sin/cos(APs)`: `4`
-- `sin/cos(LANs)`: `4`
-- 总计 `15` channels
+Task C 的 Panda/Chronos-2 分支以 `orbital15` 前缀生成冻结 embedding，再用 embedding 训练 survival head，因此 head 的输入维度不是 15。
 
-`orbital15` 和通用 orbital stack 的区别在于：它保留 `incs` 原值，不对 `incs` 做 `sin/cos` 展开，所以是 `15` 维而不是 `17` 维。
+### 3. `raw_state18` representation
 
-### 4. `trajectory/raw_state18`
-
-这是直接状态预测的默认表示。
+这是 Task E 可选的直接状态预测表示；当前主结果默认使用 `orbital15`。
 
 - `positions_complete`: `3 bodies x 3 coords = 9`
 - `velocities_complete`: `3 bodies x 3 coords = 9`
@@ -224,10 +208,12 @@ local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表�
 
 ## Tasks
 
-### Shared Task A/B/C Split Protocol
+### Task A/B/C 的 system-level split（按数据集分别维护）
 
-Task A、Task B 和 Task C 的正式结果必须使用同一份 system-level split，不能分别
-调用各自的随机切分函数。当前统一协议如下：
+同一数据集上的 Task A/B/C 实验应复用同一份 system-level split，不能分别
+调用各自的随机切分函数。当前 Task A 的已保存结果使用 sampling 2；Task B/C
+的当前主实验使用 sampling 3。这两个数据集各自有 manifest，不能交叉使用。
+以下数量和命令对应 Task A 的 sampling 2 数据：
 
 - 切分单位是 `raw_case_id`，即一个 base system 及其全部 `32` 条 variations；B 的
   trajectory-level 样本也必须继承所属 system 的 split，不能把同一 system 的
@@ -240,27 +226,25 @@ Task A、Task B 和 Task C 的正式结果必须使用同一份 system-level spl
 - 使用 `seed=42` 和 `70/15/15` 比例。由于 system 数量必须是整数，实际为
   `3498 / 750 / 750`（`69.988% / 15.006% / 15.006%`）。B 的
   `trajectory_binary` 对应 `111936 / 24000 / 24000` 条 trajectory。
-- manifest 默认位于 `dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv`，旁边有同名 `.json` 元数据。首次运行 A/B/C 任一入口会创建它，后续入口会校验并复用它；也可以显式传入同一个 `--split-manifest`。
+- sampling 2 的 manifest 默认位于 `dataset_v3/common_case_split_sampling_2_g32_h10000_r70-15-15_seed42.csv`，旁边有同名 `.json` 元数据。相同数据集的入口会校验并复用它；也可以显式传入 `--split-manifest`。sampling 3 的当前主实验使用 [configs/splits](configs/splits) 中对应的 manifest。
 
 建议先显式生成 manifest：
 
 ```bash
-python scripts/create_common_case_split.py \
+python -m tasks.common.create_case_split \
   --dataset-dir dataset_v3 --sampling-id 2 --group-size 32 \
   --time-horizon 10000 --train-ratio 0.70 --val-ratio 0.15 \
   --test-ratio 0.15 --seed 42
 ```
 
-已有的旧结果（例如 `3498/500/1000` 或 B 的 `125/10` 配置）不能与新协议下的
-结果直接混合比较，A/B/C 需要在同一 manifest 下重新运行。
 
 ### Task A: Group Stability from Initial Conditions
 
-入口脚本：[tasks/task_a/main.py](tasks/task_a/main.py)
+入口脚本：[scripts/task_a.py](scripts/task_a.py)；实现：[tasks/task_a/main.py](tasks/task_a/main.py)
 
 **任务定义**
 
-- 输入：一个 system 的 `32` 条 variation 的初始条件
+- 输入：每个 system 的代表性初始条件；该 system 的 `32` 条 variation 用于构造标签
 - 默认目标：`stable_fraction`
   - 即这 `32` 条里有多少比例在 `time_horizon` 内保持稳定
 - 可选目标：`binary_any`
@@ -269,7 +253,7 @@ python scripts/create_common_case_split.py \
 
 **输入形式**
 
-- 数据源：`ICs_sampling_2.hdf5` + `completed_systems_sampling_2.txt`
+- 数据源：`dataset_v3/ICs_sampling_2.hdf5` + `dataset_v3/completed_systems_sampling_2.txt`；这两个原始文件需要另行提供，当前 checkout 的 `dataset_v3` 链接目标不可用
 - 先把初始条件重排成 `group_size=32`
 - 但建模时默认只取每组 `32` 条 variations 里的第一个初始条件
 - 特征定义与 `orbital15` 对齐：
@@ -280,21 +264,21 @@ python scripts/create_common_case_split.py \
   - `sin/cos(APs)`: `4`
   - `sin/cos(LANs)`: `4`
   - 总计 `15` 维
-- 这样做的原因是：同组 `32` 条 variations 的初始条件几乎完全相同，保留整组会引入大量重复输入
+- 这是当前 MLP/XGBoost 的输入约定；物理判据和官方 pretrained MLP 则逐条处理 `32` 个 variation，再聚合为 system 预测
 
 **模型族**
 
 - `binary_any`：`equation2`、`equation4`、`pretrained_mlp`、`pretrained_ghost_mlp`、`mlp`、`xgboost`
 - `stable_fraction`：`equation2`、`equation4`、`pretrained_mlp`、`pretrained_ghost_mlp`、`mlp`、`xgboost`
 
-其中 `equation2` 直接使用原始初始条件中的半长轴比、外轨偏心率、质量和轨道
-角动量方向，按 Equation (2) 计算每条 variation 的稳定性；system 只有在 32 条
-variation 的 Equation (2) margin 都为正时才预测为 stable。它不训练参数，但仍在
+其中 `equation2`（MA criterion）直接使用原始初始条件中的半长轴比、外轨偏心率、质量和轨道
+角动量方向，按 MA criterion 计算每条 variation 的稳定性；system 只有在 32 条
+variation 的 MA criterion margin 都为正时才预测为 stable。它不训练参数，但仍在
 公共 manifest 的 train/val/test system 上分别报告指标，test 结果可与 MLP 和
-XGBoost 直接比较。在 `stable_fraction` 模式下，Equation (2) 使用 32 条 variation
+XGBoost 直接比较。在 `stable_fraction` 模式下，MA criterion 使用 32 条 variation
 中物理判据为 stable 的比例作为预测值。
 
-`equation4` 实现 Vynatheya et al. (2022) 的 Equations (3)-(4)。它在 MA01
+`equation4` 实现 Vynatheya et al. criterion（2022 年论文的 Equations (3)–(4)）。它在 MA criterion
 基础上加入内轨偏心率和非线性互倾角修正，并使用
 `log(Y_tilde / Y_tilde_crit)` 作为 margin。LK 最大偏心率公式在经典 LK 窗口外
 根号项为负时裁剪到 `0`，表示不施加 LK 偏心率修正。`binary_any` 仍要求所有
@@ -343,7 +327,7 @@ sha256sum external_checkpoints/triple_stability/mlp_model_trip_ghost_v1.2.2.pkl
 在 `binary_any` 模式下，MLP 默认使用 `BCEWithLogitsLoss`，XGBoost 使用
 `binary:logistic`，并报告 accuracy、precision、recall、F1、AUROC 和 AUPRC。
 MLP 和 XGBoost 的二分类阈值默认只在 validation set 上选择 F1 最大值，再固定到
-test set；Equation (2) 和 Equation (4) 保持各自的物理判据 `margin > 0`，官方
+test set；MA criterion 和 Vynatheya et al. criterion 保持各自的物理判据 `margin > 0`，官方
 pretrained MLP 同时报告上游 `0.5` 阈值和 validation-F1 阈值；只有后一个 operating
 point 使用本地 validation 标签，模型权重始终冻结。
 此外，`metrics.json` 还会保存 balanced accuracy、specificity、FPR/FNR、MCC、
@@ -353,31 +337,6 @@ median absolute error、explained variance、Pearson/Spearman、平均偏差、�
 按目标稳定比例分箱的误差，以及相对于 32 次扰动二项采样噪声的 MSE 比值。
 
 这项任务强调的是：不看时间演化，只凭初值能预测多少 system-level 稳定性信息。
-
-**历史实验结果（旧切分）**
-
-观测稳定比例来自每个 system 的 `32` 次扰动试验，因此即使模型准确预测了
-潜在稳定概率 \(p\)，标签本身仍有二项采样噪声：
-
-\[
-\operatorname{MSE}_{\mathrm{binomial}}=\frac{p(1-p)}{32}.
-\]
-
-在噪声最大的 \(p=0.5\) 附近，
-\(\operatorname{MSE}=0.0078\)、\(\operatorname{RMSE}\approx0.088\)，
-正态近似下 \(\operatorname{MAE}\approx0.07\)。这是中等稳定概率 system
-附近的近似不可约误差尺度。
-
-| Model | MSE | RMSE | MAE | \(R^2\) |
-| --- | ---: | ---: | ---: | ---: |
-| MLP-base | 0.0916 | 0.3026 | 0.2149 | 0.3876 |
-| XGBoost-base | 0.0862 | 0.2937 | 0.2239 | 0.4233 |
-| MLP-large | 0.0938 | 0.3062 | **0.2033** | 0.3728 |
-| XGBoost-strong | **0.0834** | **0.2887** | 0.2176 | **0.4425** |
-
-`XGBoost-strong` 取得最低 MSE/RMSE 和最高 \(R^2\)，整体表现最佳；
-`MLP-large` 的 MAE 最低。所有模型仍明显高于上述二项采样噪声尺度，
-说明仅凭初始条件预测长期稳定比例仍有较大难度。
 
 **当前公共切分重跑结果**
 
@@ -390,7 +349,7 @@ conda run -n stellar python -m tasks.task_a \
   --group-size 32 \
   --time-horizon 10000 \
   --target-mode binary_any \
-  --models equation2,equation4,pretrained_mlp,mlp,xgboost \
+  --models equation2,mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
   --train-ratio 0.70 \
@@ -400,22 +359,22 @@ conda run -n stellar python -m tasks.task_a \
   --seed 42 \
   --epochs 50 \
   --device cuda \
-  --output-dir results/task_a_common/binary
+  --output-dir results/task_a/sampling_2/task_a_common/binary
 ```
 
 `--time-horizon` 可以直接改成其他判定时刻，例如 `5000`；当前
 `completed_systems_sampling_2.txt` 的 `time_unbound` 最大值是 `10000`，因此不要设置超过
 `10000` 的 horizon。
-二分类输出会保存 `metrics.json`、Equation (2)/(4) 的 system 预测、MLP/XGBoost
-模型文件、测试集预测以及 MLP 的 ROC/PR 曲线。
+上述二分类命令会保存 `metrics.json`、MA criterion 的 system 预测、MLP/XGBoost
+模型文件、测试集预测以及 MLP 的 ROC/PR 曲线。Vynatheya et al. criterion 的结果来自下述独立运行。
 
 本次公共切分下的 test 结果如下；原有模型保存在
-`results/task_a_common/binary/metrics.json`，Equation (4) 保存在下述独立目录：
+`results/task_a/sampling_2/task_a_common/binary/metrics.json`，Vynatheya et al. criterion 保存在下述独立目录：
 
 | Method | Accuracy | F1 | AUROC | AUPRC |
 | --- | ---: | ---: | ---: | ---: |
-| Equation (2) | 0.6187 | 0.4414 | 0.7529 | 0.2810 |
-| Equation (4) | 0.6600 | 0.4540 | 0.7536 | 0.2887 |
+| MA criterion | 0.6187 | 0.4414 | 0.7529 | 0.2810 |
+| Vynatheya et al. criterion | 0.6600 | 0.4540 | 0.7536 | 0.2887 |
 | Official pretrained MLP（固定 0.5） | 0.6453 | 0.4701 | **0.9124** | 0.6934 |
 | Official pretrained MLP（val 阈值 0.8232） | 0.7933 | 0.5658 | **0.9124** | 0.6934 |
 | Official Ghost MLP（固定 0.5） | 0.7267 | 0.5060 | 0.9086 | **0.7184** |
@@ -423,10 +382,10 @@ conda run -n stellar python -m tasks.task_a \
 | MLP-base | 0.7507 | 0.4905 | 0.8416 | 0.5139 |
 | XGBoost-base | **0.8053** | 0.5350 | 0.8525 | 0.5089 |
 
-Equation (4) 和 pretrained MLP 的独立完整运行产物分别位于
-`results/task_a_common/equation4_binary/` 和
-`results/task_a_common/pretrained_mlp_binary/`。Ghost 版结果位于
-`results/task_a_common/pretrained_ghost_mlp_binary/`。pretrained MLP 在固定官方阈值下
+Vynatheya et al. criterion 和 pretrained MLP 的独立完整运行产物分别位于
+`results/task_a/sampling_2/task_a_common/equation4_binary/` 和
+`results/task_a/sampling_2/task_a_common/pretrained_mlp_binary/`。Ghost 版结果位于
+`results/task_a/sampling_2/task_a_common/pretrained_ghost_mlp_binary/`。pretrained MLP 在固定官方阈值下
 偏向预测 stable，accuracy 不高，但 AUROC/AUPRC 显著领先，说明跨数据集排序能力强而
 阈值校准不匹配；只调整 validation operating point 后，test F1 提升到 0.5658，
 超过本地 MLP/XGBoost。论文原始标签要求存活 100 个外轨周期且
@@ -442,7 +401,7 @@ conda run -n stellar python -m tasks.task_a \
   --group-size 32 \
   --time-horizon 10000 \
   --target-mode stable_fraction \
-  --models equation2,equation4,pretrained_mlp,mlp,xgboost \
+  --models mlp,xgboost \
   --mlp-size base \
   --xgb-size base \
   --train-ratio 0.70 \
@@ -452,34 +411,34 @@ conda run -n stellar python -m tasks.task_a \
   --seed 42 \
   --epochs 50 \
   --device cuda \
-  --output-dir results/task_a_common/stable_fraction
+  --output-dir results/task_a/sampling_2/task_a_common/stable_fraction
 ```
 
 本次 stable-fraction 公共切分下的 test 结果如下；原有模型保存在
-`results/task_a_common/stable_fraction/metrics.json`，Equation (4) 保存在下述独立目录：
+`results/task_a/sampling_2/task_a_common/stable_fraction/metrics.json`，Vynatheya et al. criterion 保存在下述独立目录：
 
 | Method | MSE | RMSE | MAE | R² |
 | --- | ---: | ---: | ---: | ---: |
-| Equation (2) | 0.2488 | 0.4988 | 0.3073 | -0.5653 |
-| Equation (4) | 0.2268 | 0.4763 | 0.2853 | -0.4269 |
+| MA criterion | 0.2488 | 0.4988 | 0.3073 | -0.5653 |
+| Vynatheya et al. criterion | 0.2268 | 0.4763 | 0.2853 | -0.4269 |
 | Official pretrained MLP | 0.1294 | 0.3597 | 0.2397 | 0.1859 |
 | Official Ghost MLP | 0.1056 | 0.3249 | **0.2176** | 0.3359 |
 | MLP-base | 0.0901 | 0.3001 | 0.2247 | 0.4335 |
 | XGBoost-base | **0.0884** | **0.2972** | 0.2330 | **0.4442** |
 
-两个解析判据 stable-fraction 的独立完整运行产物分别位于
-`results/task_a_common/equation2_stable_fraction/` 和
-`results/task_a_common/equation4_stable_fraction/`；pretrained MLP 结果位于
-`results/task_a_common/pretrained_mlp_stable_fraction/`。
-Ghost 版结果位于 `results/task_a_common/pretrained_ghost_mlp_stable_fraction/`。
+MA criterion 和 Vynatheya et al. criterion 的 stable-fraction 独立运行产物分别位于
+`results/task_a/sampling_2/task_a_common/equation2_stable_fraction/` 和
+`results/task_a/sampling_2/task_a_common/equation4_stable_fraction/`；pretrained MLP 结果位于
+`results/task_a/sampling_2/task_a_common/pretrained_mlp_stable_fraction/`。
+Ghost 版结果位于 `results/task_a/sampling_2/task_a_common/pretrained_ghost_mlp_stable_fraction/`。
 
-### Task B: Prefix-Based Instability Prediction
+### Task B: Prefix-Based Stability Prediction
 
-入口脚本：[tasks/task_b/main.py](tasks/task_b/main.py)
+Task B 统一从 [scripts/task_b.py](scripts/task_b.py) 进入：`--resolution high` 选择 sampling 3（`dataset_v3_high_resolution`）主实验，`--resolution low` 选择 sampling 2（`dataset_v3_low_resolution`）的 `trajectory_binary` / `group_fraction` 历史实现。
 
 **任务定义**
 
-Task B 有两个模式：
+Task B 当前 sampling 3 主结果使用 `trajectory_binary`；旧版入口还提供 `group_fraction`：
 
 - `trajectory_binary`
   - 输入单条 trajectory 的早期 prefix
@@ -490,21 +449,13 @@ Task B 有两个模式：
 
 **输入形式**
 
-- 数据源：`results_batch_*_sampling_2.hdf5`
-- 默认只截取前 `prefix_len=100` 个时间步
-- 默认标签 horizon 是 `time_horizon = 10000`
-- 默认表示是 `orbital15` prefix：`aratios_complete(1) + mratios_complete(2) + eccs_complete(2) + incs_complete(2) + sin/cos(APs_complete)(4) + sin/cos(LANs_complete)(4) = 15` 维
-- 常见输入张量：
-  - trajectory 模式：`[N, T, C]`
-  - group 模式：
-    - `concat`: `[G, T, 32*C]`
-    - `set_attention`: `[G, T, 32, C]`
-- `trajectory_binary` 默认读取 Shared Task A/B/C Split Protocol 生成的 manifest，按
-  `raw_case_id` 做 group split，避免同一个 base system 的 32 条 perturbations 泄漏到
-  不同数据集；`group_fraction` 和 Task C 使用完全相同的 system IDs
-- 如需旧版宽特征栈，可切到 `--representation full`
+- 当前主结果：sampling 3 的 `orbital15` 前缀（[通道定义见上文](#2-prefix-orbital15-representation)），长度 `64/128/256/512`，标签 horizon 为 `10000`。
+- 历史 sampling 2 入口默认使用 `prefix_len=100`；`group_fraction` 等输入形式见 [Task B 代码说明](tasks/README.md#task-b)。
+- 两套数据各自按 `raw_case_id` 的完整 system 划分，保证同一 system 的 `32` 条 variations 不跨 train/val/test；同一数据集上的任务复用相应 manifest。
 
 **模型族**
+
+当前 sampling 3 主结果比较 MLP、CNN、TCN、Panda-72M + linear、Chronos-2 + linear 和 Summary（Stats）+ XGBoost。旧版 sampling 2 入口还支持：
 
 - `svm`: prefix flatten 后的线性 baseline
 - `cnn`: 1D temporal CNN
@@ -513,7 +464,7 @@ Task B 有两个模式：
 - `attention`: Transformer encoder over time
 - `group_attention`: 先在 variation 维做 attention，再在 time 维做 attention
 
-#### 公共切分下的 trajectory/system 两层评估
+#### sampling 2 历史公共切分下的 trajectory/system 两层评估
 
 所有模型使用相同的 `111936/24000/24000` trajectory split、`time_horizon=10000`
 和 750 个 test systems。表格前半部分是 stable-positive trajectory binary 指标；后半
@@ -537,9 +488,9 @@ prefix features，并使用 XGBoost。
 | 512 | Raw sequence | CNN | 0.8839 | 0.8205 | 0.9470 | 0.8543 | 0.0985 | 0.0278 | 0.8249 |
 | 512 | Raw sequence | TCN | 0.8973 | 0.8411 | 0.9593 | 0.8900 | 0.0765 | 0.0177 | 0.8886 |
 
-Dynamical summaries + XGBoost 在两个 prefix 和两个评估层级上均为当前最佳。结果文件位于
-`results/task_b_common/two_level_evaluation/`，原始预测位于
-`experiments/panda_threebody/outputs/panda_unbound_dataset/task_b_common/`。这些结果沿用
+在这组 sampling 2 历史结果中，Dynamical summaries + XGBoost 在两个 prefix 和两个评估层级上均为最佳。结果文件位于
+`results/task_b/sampling_2/task_b_common/two_level_evaluation/`，原始预测位于
+`experiments/foundation_models/outputs/panda_unbound_dataset/task_b_common/`。这些结果沿用
 Task B 的 early-detection 定义，prefix 内已经 unbound 的样本没有排除；因此不应把
 trajectory binary 列解释为严格的 future-only 预测。
 
@@ -563,9 +514,9 @@ XGBoost，且只重新评估、不重新训练。
 67.8%/82.7%；在 `t=2560` cohort 中，prefix 512 相对 prefix 96 将 MAE/MSE 分别
 降低 42.0%/57.9%。两组 paired system-bootstrap 95% CI 均不跨 0。第二组真值均值
 达到 0.9668、方差很小，因此应以 MAE/MSE 和 paired differences 为主，不应重点
-解释负 R²。完整结果位于 `results/task_ab_future_only_ablation/`。
+解释负 R²。完整结果位于 `results/comparisons/dataset_unknown/task_ab_future_only_ablation/`。
 
-**默认参数规模（`orbital15` 表示）**
+**sampling 2 入口的默认参数规模（`orbital15` 表示）**
 
 - `SVM`
   - 参数量自动由 `T * C` 决定；当前 `C = 15`
@@ -587,11 +538,11 @@ XGBoost，且只重新评估、不重新训练。
 - 这些规模由脚本按实际输入时间步数自动选择；若显式设置 `--hidden-dim`，则 `cnn/tcn/gru/attention` 统一改用该 hidden width；`--tcn-levels`、`--gru-layers`、`--attention-layers`、`--attention-heads` 也可单独覆盖
 - 默认最大训练轮数是 `50`，并启用 early stopping：`patience = 8`
 
-这项任务是仓库里最直接的 early-warning 分类线。
+这些是旧版 sampling 2 的 early-warning 分类结果；当前 sampling 3 主结果见下节。
 
-**实验结果**
+**sampling 2 历史实验结果**
 
-以下 `trajectory_binary` 测试集中的不稳定类别占比为 `31.6%`：
+以下 `trajectory_binary` 测试集中的稳定正类占比约为 `31.6%`（不稳定类别约为 `68.4%`）：
 
 | Prefix | Model | Accuracy | Precision | Recall | F1 | AUROC | AUPRC |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -610,14 +561,14 @@ F1、AUROC 和 AUPRC 分别达到 `0.7920`、`0.9321` 和 `0.8293`，
 召回率也由 `0.6101` 提升到 `0.8297`。SVM 的提升较小，说明更长观测
 需要合适的时序归纳偏置才能转化为有效的早期预警信号。
 
-#### 新高分辨率 `sampling_3` 数据集：`prefix=64/128/256/512`
+#### 当前主实验：高分辨率 `sampling_3`，`prefix=64/128/256/512`
 
 在新高分辨率数据集上重新运行 `trajectory_binary` Task B，输入为 `orbital15`，标签
 horizon 为 `10000`，并比较前 `64`、`128`、`256` 和 `512` 个时间步。过滤无效标签和非有限 prefix 后
 共有 `159936` 条 trajectory（`4998` 个完整 systems）；train/val/test 分别为
 `111936/24000/24000` 条 trajectory（`3498/750/750` 个 systems）。四个 prefix 逐字节复用
 相同的标签顺序和完整 `raw_case_id` system split，避免同一 system 的 32 条扰动发生数据泄漏。
-以下结果以 stable 为正类、阈值为 `0.5`，测试集正类比例为 `30.92%`。
+以下结果以 stable 为正类、阈值为 `0.5`，测试集正类比例为 `30.92%`。当前分类标签只检查 `H=10000` 时是否稳定，未排除在 prefix 结束前已经 unbound 的轨迹；因此它是早期观测分类，不是严格的 future-only 风险预测。
 
 MLP、CNN、TCN 使用 seed `42`、最多 `50` epochs、early-stopping patience `8`、
 batch size `2048` 和 CUDA AMP。Panda-72M 与 Chronos-2 均冻结 foundation encoder，
@@ -721,152 +672,51 @@ Stats XGBoost 在四个 prefix 上的 Accuracy、Precision、F1、AUROC 和 AUPR
 从 `64` 增加到 `128` 时，Panda、Chronos-2 和 Stats XGBoost 的 F1 分别提升
 `0.0392`、`0.0371` 和 `0.0135`；TCN 也提升 `0.0436`，而 MLP/CNN 有小幅波动。
 
-从 `512` 缩短到 `256` 后，所有模型的 F1 和 AUROC 都下降：
 
-| Model | Delta F1 (`256-512`) | Delta AUROC (`256-512`) |
-| --- | ---: | ---: |
-| MLP | -0.0455 | -0.0269 |
-| CNN | **-0.0077** | -0.0291 |
-| TCN | -0.0437 | -0.0122 |
-| Panda-72M + linear | -0.0267 | -0.0171 |
-| Chronos-2 + linear | -0.0168 | -0.0124 |
-| Stats XGBoost | -0.0273 | **-0.0100** |
+完整指标、模型、逐样本预测和配置位于。`prefix=512` 的 `config.json` 已补齐 MLP/CNN/TCN 复现模型列表，并在 `model_selection_provenance` 中保留最后一次原始调用只记录 `mlp` 的事实。CNN/TCN 的独立调用参数未保存；它们的 checkpoint、训练日志、预测和指标均在该目录：
 
-完整指标、模型、逐样本预测和配置位于：
-
-- `prefix=64`：[MLP/CNN/TCN](results/task_b_sampling3_prefix64/)、
-  [Panda-72M](results/task_b_sampling3_prefix64_panda_linear/)、
-  [Chronos-2](results/task_b_sampling3_prefix64_chronos2/)、
-  [Stats XGBoost](results/task_b_sampling3_prefix64_stats_xgboost/)
-- `prefix=128`：[MLP/CNN/TCN](results/task_b_sampling3_prefix128/)、
-  [Panda-72M](results/task_b_sampling3_prefix128_panda_linear/)、
-  [Chronos-2](results/task_b_sampling3_prefix128_chronos2/)、
-  [Stats XGBoost](results/task_b_sampling3_prefix128_stats_xgboost/)
-- `prefix=256`：[MLP/CNN/TCN](results/task_b_sampling3_prefix256/)、
-  [Panda-72M](results/task_b_sampling3_prefix256_panda_linear/)、
-  [Chronos-2](results/task_b_sampling3_prefix256_chronos2/)、
-  [Stats XGBoost](results/task_b_sampling3_prefix256_stats_xgboost/)
-- `prefix=512`：[MLP/CNN/TCN](results/task_b_sampling3_prefix512/)、
-  [Panda-72M](results/task_b_sampling3_prefix512_panda_linear/)、
-  [Chronos-2](results/task_b_sampling3_prefix512_chronos2/)、
-  [Stats XGBoost](results/task_b_sampling3_prefix512_stats_xgboost/)
+- `prefix=64`：[MLP/CNN/TCN](results/task_b/sampling_3/task_b_sampling3_prefix64/)、
+  [Panda-72M](results/task_b/sampling_3/task_b_sampling3_prefix64_panda_linear/)、
+  [Chronos-2](results/task_b/sampling_3/task_b_sampling3_prefix64_chronos2/)、
+  [Stats XGBoost](results/task_b/sampling_3/task_b_sampling3_prefix64_stats_xgboost/)
+- `prefix=128`：[MLP/CNN/TCN](results/task_b/sampling_3/task_b_sampling3_prefix128/)、
+  [Panda-72M](results/task_b/sampling_3/task_b_sampling3_prefix128_panda_linear/)、
+  [Chronos-2](results/task_b/sampling_3/task_b_sampling3_prefix128_chronos2/)、
+  [Stats XGBoost](results/task_b/sampling_3/task_b_sampling3_prefix128_stats_xgboost/)
+- `prefix=256`：[MLP/CNN/TCN](results/task_b/sampling_3/task_b_sampling3_prefix256/)、
+  [Panda-72M](results/task_b/sampling_3/task_b_sampling3_prefix256_panda_linear/)、
+  [Chronos-2](results/task_b/sampling_3/task_b_sampling3_prefix256_chronos2/)、
+  [Stats XGBoost](results/task_b/sampling_3/task_b_sampling3_prefix256_stats_xgboost/)
+- `prefix=512`：[MLP/CNN/TCN](results/task_b/sampling_3/task_b_sampling3_prefix512/)、
+  [Panda-72M](results/task_b/sampling_3/task_b_sampling3_prefix512_panda_linear/)、
+  [Chronos-2](results/task_b/sampling_3/task_b_sampling3_prefix512_chronos2/)、
+  [Stats XGBoost](results/task_b/sampling_3/task_b_sampling3_prefix512_stats_xgboost/)
 
 为节省磁盘，`prefix=64/128` 的 Panda/Chronos embedding `.npy` 和基线输入临时 cache
 在 probe 训练及产物校验后已清理；embedding 元数据、最佳 checkpoint、完整指标和逐样本预测均保留，
 特征 cache 可由对应 runner 重新生成。
 
-MLP/CNN/TCN 的运行脚本为 [`scripts/run_task_b_highres.py`](scripts/run_task_b_highres.py)；
+MLP/CNN/TCN 的运行脚本为 [`scripts/task_b.py`](scripts/task_b.py)；
 foundation embedding 与 Stats XGBoost runner 位于
-[`experiments/panda_threebody/scripts/`](experiments/panda_threebody/scripts/)。
+[`experiments/foundation_models/scripts/`](experiments/foundation_models/scripts/)。
 System-level 指标由
-[`scripts/evaluate_task_b_highres_two_level.py`](scripts/evaluate_task_b_highres_two_level.py)
+[`tasks/task_b/evaluate_highres_two_level.py`](tasks/task_b/evaluate_highres_two_level.py)
 从上述逐 trajectory 预测统一生成；汇总指标、逐 system 预测和独立 Markdown 表位于
-[`results/task_b_sampling3_two_level_evaluation/`](results/task_b_sampling3_two_level_evaluation/)。
+[`results/task_b/sampling_3/task_b_sampling3_two_level_evaluation/`](results/task_b/sampling_3/task_b_sampling3_two_level_evaluation/)。
 
-### Task C: Multi-Horizon Survival for 32-Variation Systems
+### Task C: System Survival Curves
 
-入口脚本：[tasks/task_c/main.py](tasks/task_c/main.py)
+当前论文结果通过 [scripts/task_c.py](scripts/task_c.py) 运行，实现在 [tasks/task_c/survival.py](tasks/task_c/survival.py)。它从每个完整 system 的 `32` 条 `orbital15` 前缀与 `time_unbound` 构造 20-bin 事件时间和删失标签，预测逐 variation survival curve，再聚合为 system stable-fraction 曲线。Panda 和 Chronos-2 分支先生成冻结 embedding，再训练相同目标的 survival head。评价使用 20-bin MAE、最终 bin MAE、离散 IBS，并在指定七个时间点读取同一模型的曲线。
 
-**任务定义**
-
-- 输入：一个完整 system 的 `32` 条 trajectory prefixes
-- 输出：多个 future horizons 上的 survival curve
-- 标签是 `y_cases[variation, horizon]`
-  - 某条 variation 在给定未来时刻是否仍然稳定
-- 评估时还会对 `32` 条 variations 求均值，得到 system-level survival fraction 曲线
-
-**输入形式**
-
-- 数据源：`results_batch_*_sampling_2.hdf5`
-- 默认先做 prefix truncation，再按 `case_id` 组回 `32` 条 variations
-- 输入张量是 `[num_cases, 32, time, channels]`
-- 默认 future horizons 是：
-  - `500,800,1500,2500,4000,6500,10000`
-- system split 默认复用 Shared Task A/B/C Split Protocol 的
-  `3498/750/750` manifest；variation ablation 只改变输入 variation 数量，不改变
-  train/val/test 的 system 边界
-
-**模型族**
-
-- `baseline`: 直接用训练集平均 survival curve
-- `direct`: aggregation-before-encoding weak baseline；先把 32 条 variation 做均值，再直接回归整条 survival curve
-- `direct_mean_std`: 对 32 条 variation 分别计算逐时间点的 `mean / std / min / max`，拼接后直接回归 survival curve
-- `traj`: 每条 variation 先做 temporal encoding，再与 group context 融合
-- `dual`: 同时建模时间维和 variation 集合结构的 dual-attention 模型
-- `stats`: 对每个 `orbital15` 通道提取 Task-B 对齐的八统计量，再预测逐 variation hazard
-- `embedding_direct`: 直接使用冻结 Panda/Chronos 的 `15×768=11520` 维 embedding
-- `embedding_meanstd`: 对 15 个通道做 mean/std pooling 后使用 1536 维表示
-- `embedding_attention`: 对 15 个通道 embedding 学习 softmax attention 权重后池化
-
-所有 Task C 神经网络统一使用 discrete-time hazard head：
-
-- 输出每个未来区间的条件失稳 hazard
-- survival curve 通过 `cumprod(1 - sigmoid(hazard_logits))` 构造，因此严格单调不增
-- `traj` / `dual` 同时输出逐 variation survival curve 和 system-level survival curve
-- `traj` / `dual` 的 variation head 使用逐 variation、仅在 at-risk 区间计算的 hazard NLL；system head 使用 binomial hazard NLL
-- 训练时额外使用 system head 与 variation survival 均值之间的一致性损失
-- `direct` / `direct_mean_std` 使用由 32 条 variation 的区间存活数和失稳数得到的 binomial hazard NLL
-
-#### Event-time/censoring 版本（20 个 log-spaced bins）
-
-为避免把 7 个 survival fraction 反推成伪 hazard，新增了独立入口
-[`tasks/task_c/survival.py`](tasks/task_c/survival.py)：
-
-```bash
-conda run -n stellar python -m tasks.task_c.survival \
-  --prefix-cache results/task_c_ablation/_cache \
-  --prefix-len 100 \
-  --prefix-representation orbital15 \
-  --models baseline,stats,cnn \
-  --hazard-bins 20 \
-  --hazard-t-max 10000 \
-  --variation-target full32 \
-  --epochs 40 \
-  --device cuda
-```
-
-它直接使用每条 variation 的 `time_unbound` 构造事件时间标签：事件 bin 之前
-target 为 0、事件 bin 为 1，之后由 at-risk mask 屏蔽；`time_unbound == 10000`
-按观测上限处理为 right-censored（所有 bin target=0、mask=1）。模型为每条
-variation 输出 20 个 conditional hazards，再用 `cumprod(1-hazard)` 得到严格
-单调的 survival curve；训练目标为 variation masked hazard NLL 加上权重
-`0.2` 的 system curve MAE（32 条 variation survival 的均值对真实 system curve）。
-默认 `t_min` 从有效数据最早正事件时间推断（sampling_2 为 5），也可通过
-`--hazard-t-min` 显式指定。输出同时保存 20-bin 的 MAE/RMSE、variation NLL、
-Brier/IBS、删失比例和 monotonicity 检查，并把曲线插值到原有 7 个 horizons，
-对应指标位于 `old_*` 字段。原 `python -m tasks.task_c` 入口仍保留，便于和旧
-的 7-horizon fraction 训练结果直接对比。
-
-在相同的 4998-system case split、orbital15 prefix=100 上，Stats 和 7/20 bins
-均训练 20 epochs；Stats 编码器现在与 Task B 类 SPoCK baseline 对齐，按每个
-orbital15 通道提取 `initial, final, mean, std, slope, min, max, delta` 八个
-统计量（共 120 维/variation），TCN 为 5-epoch pilot：
-
-| event model | bins | 20-bin MAE | final-bin MAE | old 7-horizon MAE | IBS |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| mean baseline | 20 | 0.3093 | 0.3478 | 0.3720 | 0.1309 |
-| Stats | 7 | 0.0723 | 0.1493 | 0.1057 | 0.0669 |
-| Stats | 20 | **0.0671** | **0.1499** | **0.1029** | **0.0636** |
-| TCN (pilot) | 20 | 0.1160 | 0.2072 | 0.1625 | 0.0915 |
-
-八统计量重跑结果分别保存在
-`results/task_c_survival7_stats_full_taskb8/` 和
-`results/task_c_survival20_stats_full_taskb8/`；旧的 `stats_full` 目录保留作
-7-stat 历史结果参考。
-
-这组数字是正确 event-time/censoring 目标的第一版参考，不应直接与旧脚本中
-由 7 个 fraction 反推 pseudo-hazard 的 dual 数字混为同一实验；后续 Panda、
-Chronos 和 LoRA 也会复用这套 target、mask、head 和评估协议。
-
-#### 主实验：高分辨率 `sampling_3`、`prefix=128`（2026-09-20）
+#### 主实验：`dataset_v3_high_resolution`（sampling 3），`prefix=128`
 
 这是当前 Task C 的主实验设定。输入使用高分辨率
 `dataset_sampling_3_prefix1024` 的 `orbital15` 前 `128` 个采样步
-（`time_stride=1`），标签使用修复后的 `time_unbound` event-time 表示：
-`1` 到 `10000` 是采样步，`10000` 为 right-censored 观测上限。数据中有
+（`time_stride=1`），标签使用 `time_unbound` event-time 表示：
+`1` 到 `10000` 是 `time_unbound` 的原始时间坐标，与 prefix 的采样步数不同；`10000` 为 right-censored 观测上限。数据中有
 `159,952` 条有效 trajectory；Task C 选取其中完整 system 子集 `159,936` 条，
 对应 `4,998` 个完整的 `32`-variation system。其中 `49,770` 条入选 trajectory
-在 `10000` 处删失（约 `31.11%`）。
+在 `10000` 处删失（约 `31.11%`）。事件恰好落在内部 bin 边界时，hazard 与经验 survival 标签的口径存在[待核查的不一致](docs/scientific_issues.md#task-c-events-exactly-on-an-interior-hazard-bin-boundary)；现有指标未重算。
 
 所有模型都使用相同的完整 system split（`3498/750/750`，seed `42`），
 相同的 `20` 个 log-spaced hazard bins（`1 → 10000`）、future horizons
@@ -877,256 +727,57 @@ Chronos-2 使用对应的 `[REG]` token（同样为 `15×768`）。embedding cac
 label fingerprint 为
 `c6bb88cbcc643a8d8eb30b95fe36916e28807ed99d8e18f745979e297ad0398e`。
 
-| Model | 输入/池化 | 20-bin MAE | Final-bin MAE | old 7-horizon MAE | IBS |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Mean baseline | train mean curve | 0.2805 | 0.3483 | 0.3749 | 0.1166 |
-| Stats | orbital15 八统计量 | 0.0858 | 0.1892 | 0.1633 | 0.0726 |
-| CNN | raw orbital15 | 0.0976 | 0.2020 | 0.1776 | 0.0790 |
-| TCN | raw orbital15 | 0.0861 | 0.2034 | 0.1737 | 0.0728 |
-| GRU | raw orbital15 | **0.0816** | 0.1959 | 0.1665 | **0.0710** |
-| Attention | raw orbital15 | 0.1242 | 0.2417 | 0.2169 | 0.0953 |
-| Panda-72M | direct (`15×768`) | 0.0570 | 0.1194 | 0.1086 | 0.0555 |
-| Panda-72M | mean+std (`1536`) | 0.0675 | 0.1428 | 0.1280 | 0.0605 |
-| Panda-72M | channel attention | 0.0622 | 0.1279 | 0.1178 | 0.0592 |
-| Chronos-2 | direct (`15×768`) | **0.0494** | **0.1125** | **0.0982** | **0.0517** |
-| Chronos-2 | mean+std (`1536`) | 0.0585 | 0.1272 | 0.1144 | 0.0544 |
-| Chronos-2 | channel attention | 0.0525 | 0.1184 | 0.1040 | 0.0523 |
+| Model | 输入/池化 | 20-bin MAE | Final-bin MAE | IBS |
+| --- | --- | ---: | ---: | ---: |
+| Mean baseline | train mean curve | 0.2805 | 0.3483 | 0.1166 |
+| Stats | orbital15 八统计量 | 0.0858 | 0.1892 | 0.0726 |
+| CNN | raw orbital15 | 0.0976 | 0.2020 | 0.0790 |
+| TCN | raw orbital15 | 0.0861 | 0.2034 | 0.0728 |
+| GRU | raw orbital15 | **0.0816** | 0.1959 | **0.0710** |
+| Attention | raw orbital15 | 0.1242 | 0.2417 | 0.0953 |
+| Panda-72M | direct (`15×768`) | 0.0570 | 0.1194 | 0.0555 |
+| Panda-72M | mean+std (`1536`) | 0.0675 | 0.1428 | 0.0605 |
+| Panda-72M | channel attention | 0.0622 | 0.1279 | 0.0592 |
+| Chronos-2 | direct (`15×768`) | **0.0494** | **0.1125** | **0.0517** |
+| Chronos-2 | mean+std (`1536`) | 0.0585 | 0.1272 | 0.0544 |
+| Chronos-2 | channel attention | 0.0525 | 0.1184 | 0.0523 |
 
 在 raw trajectory 模型中，GRU 的整体 MAE/IBS 最好；Stats 与 TCN 接近，说明
 高分辨率轨道的趋势统计已经包含大量可用信息。冻结 foundation 表示明显更强，
-其中 Chronos-2 direct 在四个主要指标上均为最佳；Panda-72M direct 次之。
+其中 Chronos-2 direct 在表中三个指标上均为最佳；Panda-72M direct 次之。
 三种 pooling 的排序在两个 foundation model 上一致：direct 优于 attention，
-attention 优于 mean+std。所有误差都随预测时间变长而增加，说明长期 survival
+attention 优于 mean+std。后期时间区间的误差通常更大，长期 survival
 curve 仍是主要难点。
 
 结果与复现文件：
 
-- raw 模型：[metrics.json](results/task_c_sampling3_prefix128_raw/metrics.json)、
-  [config.json](results/task_c_sampling3_prefix128_raw/config.json)、
-  [survival curve](results/task_c_sampling3_prefix128_raw/figure_1_20bin_survival_curve.png)
-- Panda-72M：[metrics.json](results/task_c_sampling3_prefix128_panda/metrics.json)、
-  [config.json](results/task_c_sampling3_prefix128_panda/config.json)、
-  [embedding metadata](results/task_c_sampling3_prefix128_panda/panda_features.float16.json)
-- Chronos-2：[metrics.json](results/task_c_sampling3_prefix128_chronos2/metrics.json)、
-  [config.json](results/task_c_sampling3_prefix128_chronos2/config.json)、
-  [embedding metadata](results/task_c_sampling3_prefix128_chronos2/chronos2_reg_features.float16.json)
-- raw 输入 cache：[metadata.json](results/task_c_sampling3_prefix128_cache/metadata.json)
-- 公共 system split：[CSV manifest](results/task_b_sampling3_prefix128/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv)
+- raw 模型：[metrics.json](results/task_c/sampling_3/task_c_sampling3_prefix128_raw/metrics.json)、
+  [config.json](results/task_c/sampling_3/task_c_sampling3_prefix128_raw/config.json)、
+  [survival curve](results/task_c/sampling_3/task_c_sampling3_prefix128_raw/figure_1_20bin_survival_curve.png)
+- Panda-72M：[metrics.json](results/task_c/sampling_3/task_c_sampling3_prefix128_panda/metrics.json)、
+  [config.json](results/task_c/sampling_3/task_c_sampling3_prefix128_panda/config.json)、
+  [embedding metadata](results/task_c/sampling_3/task_c_sampling3_prefix128_panda/panda_features.float16.json)
+- Chronos-2：[metrics.json](results/task_c/sampling_3/task_c_sampling3_prefix128_chronos2/metrics.json)、
+  [config.json](results/task_c/sampling_3/task_c_sampling3_prefix128_chronos2/config.json)、
+  [embedding metadata](results/task_c/sampling_3/task_c_sampling3_prefix128_chronos2/chronos2_reg_features.float16.json)
+- raw 输入 cache：[metadata.json](results/task_c/sampling_3/task_c_sampling3_prefix128_cache/metadata.json)
+- 公共 system split：[CSV manifest](results/task_b/sampling_3/task_b_sampling3_prefix128/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv)
 
-由于 `sampling_2` 的旧 shard 是每批 `8000` 行而 `sampling_3` 的高分辨率
-shard 是每批 `4000` 行，embedding loader 不再用 `index//8000` 推断 batch；现在
-直接读取 completion table 的 `num_batch`，再在 batch 内按 `index` 生成
-`row_in_batch`。这避免了高分辨率 Panda/Chronos embedding 与 trajectory 错位。
+### Task D: Median Orbital-Decorrelation Time
 
-已有的 prefix=96 frozen embedding 也可以直接接入同一套 hazard head：
+当前入口为 [scripts/task_d.py](scripts/task_d.py)，实现位于 [tasks/task_d/main.py](tasks/task_d/main.py) 和 [tasks/task_d/quantile.py](tasks/task_d/quantile.py)。输入只取每个 system 第一条 nominal variation 的 `orbital15` 静态初值，预测一个 system-level 的轨道去相关时间，不预测 P25/P50/P75。
 
-```bash
-conda run -n stellar python -m tasks.task_c.survival \
-  --embedding-cache experiments/panda_threebody/outputs/panda_unbound_dataset/panda_task_b_prefix_96_features_aligned.float16.npy \
-  --embedding-labels results/task_b_prefix_ablation/prefix_100/labels_filtered.csv \
-  --prefix-len 96 \
-  --models baseline,embedding_direct,embedding_meanstd,embedding_attention \
-  --hazard-bins 20 --epochs 10 --device cuda \
-  --output-dir results/task_c_survival20_panda
-```
+对 16 个 `(r, r+16)` 配对，令 `Q_r(t)=a_in(t)/a_out(t)`，`G_r(t)=|Q_r(t)-Q_{r+16}(t)|/|Q_r(0)-Q_{r+16}(0)|`。默认寻找 `G_r=e^5` 的首次 crossing，在相邻采样点的 log-growth 上插值，并将每个 pair 的 crossing time 除以该 pair nominal member 的初始外轨周期。至少 8 个 pair 有有效 crossing 时，标签取有效 pair 时间的中位数，再在 log-time 上训练模型；**不把 crossing time 除以 5**。这是一项基于半长轴比的有限时间去相关 proxy，不是变分方程定义的最大 Lyapunov time。
 
-`embedding_direct` 不增加额外 projection，直接让 HazardHead 的第一层处理
-`15×768=11520` 维；`embedding_meanstd` 先变为 1536 维。相同 split、20 bins、
-10 epochs 的结果为（Stats 使用上述八统计量）：
+当前 sampling 3 结果使用 4,996 个合格 system，按 system 划分为 train/val/test `3497/750/749`（seed `42`）。比较训练集常数中位数、XGBoost 和 MLP，报告 log-time MAE/RMSE、Spearman、factor-2 accuracy 与配对 bootstrap 95% CI。保存的 test 指标如下：
 
-| encoder | pooling | 20-bin MAE | final-bin MAE | old 7-horizon MAE | IBS |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Stats (prefix=96, 10 epochs) | Task-B eight statistics | 0.0747 | 0.1605 | 0.1138 | 0.0670 |
-| Panda | direct | **0.0449** | 0.0923 | 0.0658 | 0.0473 |
-| Panda | mean+std | 0.0784 | 0.1272 | 0.0980 | 0.0651 |
-| Panda | attention pooling | 0.0527 | 0.1057 | 0.0760 | 0.0523 |
-| Chronos-2 | direct | **0.0388** | 0.0887 | **0.0616** | **0.0426** |
-| Chronos-2 | mean+std | 0.0582 | 0.1079 | 0.0787 | 0.0542 |
-| Chronos-2 | attention pooling | 0.0512 | 0.1068 | 0.0749 | 0.0501 |
-
-prefix=96 的八统计量重跑结果位于
-`results/task_c_survival20_stats_prefix96_taskb8/`。
-
-结果目录分别为
-`results/task_c_survival20_panda_direct/`、
-`results/task_c_survival20_panda_meanstd/` 和
-`results/task_c_survival20_panda_attention/`、
-`results/task_c_survival20_chronos_direct/`、
-`results/task_c_survival20_chronos_attention/`。attention pooling 在现有
-`[15,768]` 通道 embedding 上学习 softmax 权重并加权求和，不重新运行
-Panda/Chronos-2 backbone；这些 embedding cache 已先通过
-label fingerprint 检查，再按完整 system 重组为 `[4998,32,embedding_dim]`。
-Chronos-2 的 direct 和 mean+std 指标共同保存在
-`results/task_c_survival20_chronos_direct/metrics.json` 中。
-
-#### 20-bin 逐时间区间 MAE
-
-下面是同一 prefix=96、同一 case split、20-bin、10-epoch 协议下的
-`horizon_mae`。每个数表示该时间 bin 上的 system-level 平均绝对误差，时间边界
-为从 `5` 到 `10000` 的 log-spaced edges：
-
-| Bin | 上界时间 | Stats | Panda direct | Panda mean+std | Panda attention | Chronos direct | Chronos mean+std | Chronos attention |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 7.31 | 0.04197 | 0.03507 | 0.04858 | 0.04196 | 0.02962 | 0.04688 | 0.04452 |
-| 2 | 10.69 | 0.05077 | 0.04093 | 0.06731 | 0.04862 | 0.03117 | 0.05503 | 0.04885 |
-| 3 | 15.64 | 0.05426 | 0.04262 | 0.07390 | 0.05039 | 0.03060 | 0.05765 | 0.04887 |
-| 4 | 22.87 | 0.05428 | 0.04069 | 0.07605 | 0.04698 | 0.02760 | 0.05568 | 0.04477 |
-| 5 | 33.44 | 0.05168 | 0.03515 | 0.07667 | 0.04218 | 0.02374 | 0.05203 | 0.03892 |
-| 6 | 48.90 | 0.04805 | 0.02889 | 0.07377 | 0.03620 | 0.02001 | 0.04814 | 0.03273 |
-| 7 | 71.50 | 0.04255 | 0.02163 | 0.06483 | 0.02793 | 0.01542 | 0.03985 | 0.02523 |
-| 8 | 104.56 | 0.03973 | 0.02108 | 0.06043 | 0.02529 | 0.01593 | 0.03395 | 0.02182 |
-| 9 | 152.91 | 0.03620 | 0.01805 | 0.05699 | 0.02209 | 0.01480 | 0.02824 | 0.01938 |
-| 10 | 223.61 | 0.03544 | 0.01637 | 0.05140 | 0.02036 | 0.01217 | 0.02495 | 0.01882 |
-| 11 | 326.99 | 0.03451 | 0.01537 | 0.04850 | 0.01933 | 0.01319 | 0.02470 | 0.01998 |
-| 12 | 478.18 | 0.03429 | 0.01614 | 0.04830 | 0.02125 | 0.01340 | 0.02479 | 0.01930 |
-| 13 | 699.26 | 0.05861 | 0.03262 | 0.06274 | 0.03937 | 0.02954 | 0.04327 | 0.03539 |
-| 14 | 1022.57 | 0.08302 | 0.04844 | 0.07774 | 0.05599 | 0.04388 | 0.05879 | 0.05305 |
-| 15 | 1495.35 | 0.10538 | 0.06193 | 0.09334 | 0.07151 | 0.05728 | 0.07468 | 0.06940 |
-| 16 | 2186.72 | 0.12301 | 0.07222 | 0.10369 | 0.08356 | 0.06665 | 0.08519 | 0.08184 |
-| 17 | 3197.76 | 0.13642 | 0.08081 | 0.11264 | 0.09196 | 0.07459 | 0.09412 | 0.09071 |
-| 18 | 4676.24 | 0.14747 | 0.08704 | 0.12012 | 0.09957 | 0.08149 | 0.10228 | 0.09965 |
-| 19 | 6838.31 | 0.15547 | 0.08979 | 0.12444 | 0.10282 | 0.08620 | 0.10506 | 0.10386 |
-| 20 | 10000 | 0.16053 | 0.09229 | 0.12715 | 0.10567 | 0.08866 | 0.10795 | 0.10682 |
-
-逐 bin MAE 的均值、极小值和极大值如下：
-
-| Model | Mean over 20 bins | Minimum (bin) | Maximum (bin) |
-| --- | ---: | ---: | ---: |
-| Stats | 0.07468 | 0.03429 (12) | 0.16053 (20) |
-| Panda direct | 0.04486 | 0.01537 (11) | 0.09229 (20) |
-| Panda mean+std | 0.07843 | 0.04830 (12) | 0.12715 (20) |
-| Panda attention | 0.05265 | 0.01933 (11) | 0.10567 (20) |
-| Chronos direct | **0.03880** | **0.01217 (10)** | **0.08866 (20)** |
-| Chronos mean+std | 0.05816 | 0.02470 (11) | 0.10795 (20) |
-| Chronos attention | 0.05120 | 0.01882 (10) | 0.10682 (20) |
-
-共同趋势是 Bin 1–12 的误差逐渐下降，Bin 13 之后快速上升，说明长期 survival
-预测明显更困难。当前结果中 direct 在 Panda 和 Chronos-2 中都优于对应的
-mean+std 与 attention pooling；attention pooling 又稳定优于 mean+std。
-
-#### IBS 定义
-
-IBS（Integrated Brier Score）是所有时间 bin 上 Brier score 的平均。当前实现为：
-
-```python
-variation_error = variation_survival - variation_survival_target
-brier_by_bin = np.mean(variation_error**2, axis=(0, 1))
-ibs = brier_by_bin.mean()
-```
-
-它衡量完整 survival curve 的平方误差，越低越好；当前是离散 20-bin IBS，并且
-对 system、32 个 variation 和时间 bin 做等权平均。相同协议下的总体 IBS 为：
-这里采用当前 event-time target 的离散评估实现，不是额外使用 IPCW 的连续时间 IBS。
-
-| Model | IBS |
-| --- | ---: |
-| Stats | 0.0670 |
-| Panda direct | 0.0473 |
-| Panda mean+std | 0.0651 |
-| Panda attention | 0.0523 |
-| Chronos direct | **0.0426** |
-| Chronos mean+std | 0.0542 |
-| Chronos attention | 0.0501 |
-
-因此，在 Task C 当前的完整 survival-curve 任务上，预训练 Panda/Chronos 表示整体
-优于手工 Stats 表示；而 Task B 是单一稳定性分类，类 SPoCK + XGBoost 仍然可以
-凭借直接的轨道趋势特征取得更高 AUROC/F1。两类任务的指标和目标不同，不能直接
-把 AUROC/F1 与 survival MAE/IBS 混为一个排名。
-
-运行后会生成平均 survival curve、代表性 case、per-horizon MAE、`q_pred` vs `q_true` scatter，以及 true/pred/error heatmap 五张结果图。
-
-这是最强调 perturbation-set 结构的任务。
-
-**实验结果**
-
-下面的 prefix 表格来自双头改造之前的 single-head 运行；代码结构更新后需要重新运行，不能直接把这些数值当作双头模型结果。
-
-总体 MAE 对所有预测时间点取平均；Final MAE 对应 \(t=10000\)。
-Improvement 是相对平均 survival-curve baseline 的总体 MAE 降幅。
-
-| Model | Loss | Overall MAE | Final MAE | Improvement |
+| Model | MAE(log time) ↓ | RMSE(log time) ↓ | Spearman ↑ | Factor-2 accuracy ↑ |
 | --- | ---: | ---: | ---: | ---: |
-| Baseline (average) | — | 0.3720 | 0.3478 | — |
-| Direct | 0.2742 | 0.0830 | 0.1101 | 77.7% |
-| Direct mean/std | 0.2640 | 0.0710 | 0.0912 | 80.9% |
-| Trajectory-context | 0.2067 | 0.0657 | 0.1046 | 82.3% |
-| Dual-attention | **0.1929** | **0.0529** | **0.0817** | **85.8%** |
+| Constant median | 1.2725 | 1.4690 | — | 0.2537 |
+| XGBoost | 0.7870 | 0.9849 | 0.7342 | 0.5207 |
+| MLP | **0.6519** | **0.8236** | **0.8348** | **0.6275** |
 
-| Model | \(t=500\) | \(t=800\) | \(t=1500\) | \(t=2500\) | \(t=4000\) | \(t=6500\) | \(t=10000\) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Baseline (average) | 0.3776 | 0.3813 | 0.3843 | 0.3788 | 0.3726 | 0.3617 | 0.3478 |
-| Direct | 0.0464 | 0.0584 | 0.0752 | 0.0875 | 0.0984 | 0.1048 | 0.1101 |
-| Direct mean/std | 0.0428 | 0.0522 | 0.0652 | 0.0750 | 0.0832 | 0.0877 | 0.0912 |
-| Trajectory-context | 0.0140 | 0.0347 | 0.0544 | 0.0712 | 0.0850 | 0.0962 | 0.1046 |
-| Dual-attention | **0.0113** | **0.0302** | **0.0472** | **0.0578** | **0.0672** | **0.0748** | **0.0817** |
-
-所有学习模型都显著优于平均值基线。Dual-attention 在全部 horizon 上取得
-最低 MAE，总体误差相对 baseline 降低 `85.8%`，说明联合建模时间维与
-32 条扰动 variation 的集合结构最有效。各模型误差总体随预测 horizon
-增长，符合混沌系统长期可预测性逐渐下降的预期。
-
-### Task D: Initial Conditions → Lyapunov-Time Quantiles
-
-入口脚本：[tasks/task_d/main.py](tasks/task_d/main.py)
-
-底层实现：[tasks/task_d/quantile.py](tasks/task_d/quantile.py)
-
-Task D 现在只使用 system 的初始条件，预测 system-level semi-major-axis-ratio
-Lyapunov-time proxy 的条件 P25/P50/P75。对每个 `(i, i+16)` pair 定义
-
-`G_ij(t)=|Q_i(t)-Q_j(t)|/|Q_i(0)-Q_j(0)|`, `Q=a_in/a_out`。
-
-默认 pair label 为 `T_ij=t_cross(G=e^5)/5`。system label 先对有效 pair 的
-`lambda_ij=1/T_ij` 取中位数，再取倒数；至少要求8个有效 pair。模型训练目标是
-`log(T_system/P_out,0)`。它是基于指定 observable 的 finite-time proxy，不是变分方程
-定义的最大 Lyapunov time。
-
-输入由前16个 nominal variations 的 `orbital15` 初始条件组成，角度使用 sin/cos。
-GBR/MLP 使用 permutation-invariant 的 mean/std/min/max 汇总，DeepSets 直接编码16元素
-集合。三个输出使用 pinball loss，并通过有序输出头保证 `q25 <= q50 <= q75`。
-
-```bash
-conda run -n stellar python -m tasks.task_d \
-  --dataset-dir dataset_sampling_3_prefix1024 \
-  --threshold-power 5 \
-  --models constant,gbr,mlp,deepsets \
-  --output-dir results/task_d_initial_quantiles \
-  --device cuda
-```
-
-默认按 system 做 70/15/15 train/validation/test split。评价包括各分位数 pinball
-loss 和 empirical coverage、中心50%区间 coverage/width、P50 MAE/RMSE/Spearman、
-factor-2 accuracy 与 quantile crossing rate。
-
-推荐同时运行 `e^4/e^5/e^6` label 敏感性实验：
-
-```bash
-conda run -n stellar python -m tasks.task_d.sensitivity \
-  --threshold-powers 4 5 6 \
-  --models constant,gbr \
-  --output-dir results/task_d_initial_quantile_sensitivity
-```
-
-#### Label-threshold sensitivity ablation (2026-09-08)
-
-在相同 seed=42、特征表示和模型配置下，比较 crossing threshold 为 `e^4`、`e^5`、
-`e^6` 的结果。下表报告 GBR 的主要测试集指标；完整的 constant baseline、逐分位数
-coverage 和预测文件见 [`results/task_d_initial_quantile_sensitivity/summary.md`](results/task_d_initial_quantile_sensitivity/summary.md)。
-
-| Threshold | 有效 systems | Target P25/P50/P75 | GBR mean pinball ↓ | GBR P50 log-MAE ↓ | Central 50% coverage | Spearman ↑ | Factor-2 accuracy ↑ |
-|---:|---:|---|---:|---:|---:|---:|---:|
-| `e^4` | 4,997 | 0.9544 / 3.4319 / 9.1262 | **0.3227** | **0.7559** | 0.4827 | 0.6589 | **54.13%** |
-| `e^5` | 4,996 | 0.9113 / 3.4091 / 11.2786 | 0.3611 | 0.8475 | 0.4780 | 0.6686 | 51.27% |
-| `e^6` | 4,988 | 0.8811 / 3.3414 / 12.0871 | 0.3930 | 0.9139 | 0.4920 | **0.6810** | 48.13% |
-
-GBR 在三个 threshold 下都优于 constant quantile baseline。threshold 增大后目标分布的
-上尾变宽，GBR 的 pinball loss 和绝对误差逐步上升，而中心 50% 区间 coverage 仍接近
-名义值。由于“至少 8 个有效 pair”的过滤，三组有效 system 并非完全相同，因此趋势应
-解释为 label sensitivity，而不是严格配对比较。
-
-默认在相邻存储点之间按 log growth 插值 crossing；使用 `--no-interpolation` 可改为
-首次离散 crossing。旧的 single-target crossing/slope 实现仍保留在
-`tasks/task_d/pipeline.py`，仅用于复核历史结果，不再由 Task D 默认入口调用。
+完整配置、预测、split 和指标在 [当前 Task D 结果](results/task_d/sampling_3/task_d_median_decorrelation/metrics.json)；复现命令见下文 [Reproducible Commands](#reproducible-commands)。旧分位数与 sampling 2 实验记录已移至 [archive](archive/task_d_historical_results.md)。
 
 ### Task E: Forecasting Baselines
 
@@ -1161,11 +812,11 @@ E2 rolling `17,485` windows。它们不是全部 candidate windows；candidate w
 
 | Model | Checkpoint | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [Chronos-2](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md) | `amazon/chronos-2` | 0.2331056 | **0.2282289** | 0.4828101 | 0.8580278 | **33.3610%** | **0.2264770** |
-| [Panda zero-shot](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md) | `GilpinLab/panda-72M` | 0.2217443 | 0.2370772 | 0.4708973 | 0.8624963 | 36.1440% | 0.2861868 |
-| [iTransformer](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md) | `iTransformer (30 epochs)` | **0.2123486** | 0.2429306 | **0.4608130** | **0.8672591** | 38.2350% | 0.3151870 |
-| [TiRex-2](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md) | `NX-AI/TiRex-2` | 0.2421608 | 0.2407973 | 0.4920984 | 0.8508211 | 34.5179% | 0.2277438 |
-| [Toto-2.0](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md) | `Datadog/Toto-2.0-22m` | 0.2262473 | 0.2303106 | 0.4756546 | 0.8601255 | 33.6224% | 0.2310443 |
+| [Chronos-2](results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/summary.md) | `amazon/chronos-2` | 0.2331056 | **0.2282289** | 0.4828101 | 0.8580278 | **33.3610%** | **0.2264770** |
+| [Panda zero-shot](results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md) | `GilpinLab/panda-72M` | 0.2217443 | 0.2370772 | 0.4708973 | 0.8624963 | 36.1440% | 0.2861868 |
+| [iTransformer](results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/summary.md) | `iTransformer (30 epochs)` | **0.2123486** | 0.2429306 | **0.4608130** | **0.8672591** | 38.2350% | 0.3151870 |
+| [TiRex-2](results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/summary.md) | `NX-AI/TiRex-2` | 0.2421608 | 0.2407973 | 0.4920984 | 0.8508211 | 34.5179% | 0.2277438 |
+| [Toto-2.0](results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/summary.md) | `Datadog/Toto-2.0-22m` | 0.2262473 | 0.2303106 | 0.4756546 | 0.8601255 | 33.6224% | 0.2310443 |
 
 **E2 recursive rolling（最长 horizon 512）**
 
@@ -1184,16 +835,16 @@ Chronos-2 的 MAE-z 及四个 rollout block 的绝对 MAE 最低。上述差异�
 
 Ridge、TCN、PatchTST 和 Transformer 的已有数字属于下面的历史
 `E.0/E.1` preliminary benchmark（`context=200 -> pred=50`），没有与本表混合。
-`runs/task_e_e1e2_tcn_orbital15_ctx512_pred128` 当前只有 console log，暂无可纳入
+`results/task_e/dataset_unknown/task_e_e1e2_tcn_orbital15_ctx512_pred128` 当前只有 console log，暂无可纳入
 主协议排行榜的最终 metrics。
 
 对应的完整文件：
 
-- [Chronos-2 summary](runs/task_e_chronos2_orbital15_ctx512_pred128/summary.md)
-- [Panda zero-shot summary](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md)
-- [iTransformer summary](runs/task_e_itransformer_orbital15_ctx512_pred128/summary.md)
-- [TiRex-2 summary](runs/task_e_tirex2_orbital15_ctx512_pred128/summary.md)
-- [Toto-2.0 summary](runs/task_e_toto2_orbital15_ctx512_pred128/summary.md)
+- [Chronos-2 summary](results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/summary.md)
+- [Panda zero-shot summary](results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/summary.md)
+- [iTransformer summary](results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/summary.md)
+- [TiRex-2 summary](results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/summary.md)
+- [Toto-2.0 summary](results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/summary.md)
 
 #### E.current.0 新高分辨率 `sampling_3`：固定前 512 步（2026-09-20）
 
@@ -1212,25 +863,25 @@ sMAPE 在 test 上计算，E2 的 amplification 是 `block_4_MAE / block_1_MAE`�
 
 | Model | Training | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [Toto-2](runs/task_e_sampling3_first512_toto2/summary.json) | zero-shot | **0.217659** | 0.222297 | **0.466539** | **0.873670** | 30.1662% | 0.182041 |
-| [Chronos-2](runs/task_e_sampling3_first512_chronos2/summary.json) | zero-shot | 0.226219 | **0.221723** | **0.475625** | **0.870241** | **29.6257%** | 0.171653 |
-| [TiRex-2](runs/task_e_sampling3_first512_tirex2/summary.json) | zero-shot | 0.237418 | 0.232584 | 0.487255 | 0.863216 | 31.0279% | 0.173224 |
-| [Panda-72M](runs/task_e_sampling3_first512_panda/summary.json) | zero-shot | 0.231738 | 0.239895 | 0.481392 | 0.863981 | 33.5534% | 0.244699 |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_ep25/summary.json) | supervised, 25 epochs | 0.226875 | 0.260282 | 0.476313 | 0.867887 | 37.7547% | 0.288506 |
-| [TCN](runs/task_e_sampling3_first512_tcn_ep25_continued/summary.json) | supervised, 25 epochs | 0.347537 | 0.382849 | 0.589523 | 0.787813 | 57.9286% | 0.547491 |
-| [Linear extrapolation](runs/task_e_sampling3_first512_linear/summary.json) | no training | 1.466162 | 0.573974 | 1.210852 | 0.584784 | 53.7090% | 0.000000 |
+| [Toto-2](results/task_e/sampling_3/task_e_sampling3_first512_toto2/summary.json) | zero-shot | **0.217659** | 0.222297 | **0.466539** | **0.873670** | 30.1662% | 0.182041 |
+| [Chronos-2](results/task_e/sampling_3/task_e_sampling3_first512_chronos2/summary.json) | zero-shot | 0.226219 | **0.221723** | **0.475625** | **0.870241** | **29.6257%** | 0.171653 |
+| [TiRex-2](results/task_e/sampling_3/task_e_sampling3_first512_tirex2/summary.json) | zero-shot | 0.237418 | 0.232584 | 0.487255 | 0.863216 | 31.0279% | 0.173224 |
+| [Panda-72M](results/task_e/sampling_3/task_e_sampling3_first512_panda/summary.json) | zero-shot | 0.231738 | 0.239895 | 0.481392 | 0.863981 | 33.5534% | 0.244699 |
+| [iTransformer](results/task_e/sampling_3/task_e_sampling3_first512_itransformer_ep25/summary.json) | supervised, 25 epochs | 0.226875 | 0.260282 | 0.476313 | 0.867887 | 37.7547% | 0.288506 |
+| [TCN](results/task_e/sampling_3/task_e_sampling3_first512_tcn_ep25_continued/summary.json) | supervised, 25 epochs | 0.347537 | 0.382849 | 0.589523 | 0.787813 | 57.9286% | 0.547491 |
+| [Linear extrapolation](results/task_e/sampling_3/task_e_sampling3_first512_linear/summary.json) | no training | 1.466162 | 0.573974 | 1.210852 | 0.584784 | 53.7090% | 0.000000 |
 
 **E2 recursive rolling（最长 horizon 512）**
 
 | Model | MSE-z | MAE-z | RMSE-z | Block MAE（1 -> 4） | Error amplification |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| [Toto-2](runs/task_e_sampling3_first512_toto2/e2_metrics.json) | 0.366338 | **0.325192** | 0.605259 | 0.216279 -> 0.399839 | 1.848718 |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_ep25/e2_metrics.json) | **0.362589** | 0.346581 | **0.602153** | 0.255137 -> 0.409072 | **1.603344** |
-| [Panda-72M](runs/task_e_sampling3_first512_panda/e2_metrics.json) | 0.371580 | 0.341082 | 0.609574 | 0.231064 -> 0.403988 | 1.748379 |
-| [TiRex-2](runs/task_e_sampling3_first512_tirex2/e2_metrics.json) | 0.396369 | 0.336787 | 0.629578 | 0.227547 -> 0.407478 | 1.790741 |
-| [Chronos-2](runs/task_e_sampling3_first512_chronos2/e2_metrics.json) | 0.384154 | 0.326271 | 0.619802 | 0.214891 -> 0.400641 | 1.864397 |
-| [TCN](runs/task_e_sampling3_first512_tcn_ep25_continued/e2_metrics.json) | 0.444356 | 0.474394 | 0.666600 | 0.383775 -> 0.554580 | **1.445064** |
-| [Linear extrapolation](runs/task_e_sampling3_first512_linear/e2_metrics.json) | 11.933765 | 1.210531 | 3.454528 | 0.579115 -> 1.817169 | 3.137837 |
+| [Toto-2](results/task_e/sampling_3/task_e_sampling3_first512_toto2/e2_metrics.json) | 0.366338 | **0.325192** | 0.605259 | 0.216279 -> 0.399839 | 1.848718 |
+| [iTransformer](results/task_e/sampling_3/task_e_sampling3_first512_itransformer_ep25/e2_metrics.json) | **0.362589** | 0.346581 | **0.602153** | 0.255137 -> 0.409072 | **1.603344** |
+| [Panda-72M](results/task_e/sampling_3/task_e_sampling3_first512_panda/e2_metrics.json) | 0.371580 | 0.341082 | 0.609574 | 0.231064 -> 0.403988 | 1.748379 |
+| [TiRex-2](results/task_e/sampling_3/task_e_sampling3_first512_tirex2/e2_metrics.json) | 0.396369 | 0.336787 | 0.629578 | 0.227547 -> 0.407478 | 1.790741 |
+| [Chronos-2](results/task_e/sampling_3/task_e_sampling3_first512_chronos2/e2_metrics.json) | 0.384154 | 0.326271 | 0.619802 | 0.214891 -> 0.400641 | 1.864397 |
+| [TCN](results/task_e/sampling_3/task_e_sampling3_first512_tcn_ep25_continued/e2_metrics.json) | 0.444356 | 0.474394 | 0.666600 | 0.383775 -> 0.554580 | **1.445064** |
+| [Linear extrapolation](results/task_e/sampling_3/task_e_sampling3_first512_linear/e2_metrics.json) | 11.933765 | 1.210531 | 3.454528 | 0.579115 -> 1.817169 | 3.137837 |
 
 在 E1 上 Toto-2 的 system-balanced MSE、RMSE 和 Pearson 最好；Chronos-2 的 MAE 和 sMAPE 最低，TiRex-2 的单位圆误差与其接近。Linear 的单位圆误差接近零是因为显式做了 sin/cos 投影，不能直接当作模型优势。E2 中 iTransformer 的总体 MSE/RMSE 和误差放大比最好，Toto-2 的总体 MAE 最低；不同 foundation model 在 one-shot 与长程递归上的优势并不完全一致。监督模型均从第 25 epoch 的最佳验证
 checkpoint 评估；foundation models 不训练参数，只执行 zero-shot 推理。
@@ -1250,30 +901,30 @@ epoch 动态采样 clean/single-block/multi-block/random 掩码，clean-only 对
 
 | Model | Training / input | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | **0.321402** | **0.396725** | **0.566923** | **0.831395** | **54.9716%** | **0.546901** |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
-| [Panda-72M](runs/task_e_sampling3_first512_panda_masked_r50/summary.json) | zero-shot, 16-channel input | 0.464034 | 0.566025 | 0.681200 | 0.838396 | 73.1123% | 0.826506 |
-| [TiRex-2](runs/task_e_sampling3_first512_tirex2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.490926 | 0.587055 | 0.700661 | 0.832026 | 77.7291% | 0.843680 |
-| [Chronos-2](runs/task_e_sampling3_first512_chronos2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.554911 | 0.621384 | 0.744923 | 0.807168 | 82.6103% | 0.869868 |
-| [Toto-2.0](runs/task_e_sampling3_first512_toto2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.586839 | 0.630204 | 0.766054 | 0.764037 | 88.5850% | 0.861010 |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.470040 | 0.555433 | 0.685595 | 0.799928 | 71.0869% | 0.764429 |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.683660 | 0.658510 | 0.826837 | 0.588171 | 87.9430% | 0.786339 |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | **0.321402** | **0.396725** | **0.566923** | **0.831395** | **54.9716%** | **0.546901** |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | mixed, 16 -> 15 | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
+| [Panda-72M](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_panda_masked_r50/summary.json) | zero-shot, 16-channel input | 0.464034 | 0.566025 | 0.681200 | 0.838396 | 73.1123% | 0.826506 |
+| [TiRex-2](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tirex2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.490926 | 0.587055 | 0.700661 | 0.832026 | 77.7291% | 0.843680 |
+| [Chronos-2](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_chronos2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.554911 | 0.621384 | 0.744923 | 0.807168 | 82.6103% | 0.869868 |
+| [Toto-2.0](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_toto2_masked_r50/summary.json) | zero-shot, 16-channel input | 0.586839 | 0.630204 | 0.766054 | 0.764037 | 88.5850% | 0.861010 |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.470040 | 0.555433 | 0.685595 | 0.799928 | 71.0869% | 0.764429 |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_clean_r50/summary.json) | clean-only, 16 -> 15 | 0.683660 | 0.658510 | 0.826837 | 0.588171 | 87.9430% | 0.786339 |
 
 **Foundation fixed-mask sensitivity（test MSE-z）**
 
 | Model | 25% hidden | 50% hidden | 75% hidden |
 | --- | ---: | ---: | ---: |
-| [Panda-72M](runs/task_e_sampling3_first512_panda_masked_r25/summary.json) | 0.312909 | **0.464034** | **0.726548** |
-| [Chronos-2](runs/task_e_sampling3_first512_chronos2_masked_r25/summary.json) | **0.234933** | 0.554911 | 1.058969 |
-| [Toto-2.0](runs/task_e_sampling3_first512_toto2_masked_r25/summary.json) | 0.239602 | 0.586839 | 1.066093 |
-| [TiRex-2](runs/task_e_sampling3_first512_tirex2_masked_r25/summary.json) | 0.236252 | 0.490926 | 1.055153 |
+| [Panda-72M](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_panda_masked_r25/summary.json) | 0.312909 | **0.464034** | **0.726548** |
+| [Chronos-2](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_chronos2_masked_r25/summary.json) | **0.234933** | 0.554911 | 1.058969 |
+| [Toto-2.0](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_toto2_masked_r25/summary.json) | 0.239602 | 0.586839 | 1.066093 |
+| [TiRex-2](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tirex2_masked_r25/summary.json) | 0.236252 | 0.490926 | 1.055153 |
 
 **Supervised mixed-checkpoint fixed-mask sensitivity（test MSE-z；不重新训练）**
 
 | Model | 25% hidden | 50% hidden | 75% hidden |
 | --- | ---: | ---: | ---: |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | **0.264421** | **0.321402** | 0.620715 |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 0.372196 | 0.404719 | **0.530433** |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | **0.264421** | **0.321402** | 0.620715 |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 0.372196 | 0.404719 | **0.530433** |
 
 这两行均加载原先 50% mixed 训练得到的 `best_model.pt`，只把验证/测试 context 的固定随机掩码比例改为 25% 或 75%；因此反映的是同一 mask-aware checkpoint 的缺失率敏感性，而不是比例专用重训练结果。
 
@@ -1281,12 +932,12 @@ epoch 动态采样 clean/single-block/multi-block/random 掩码，clean-only 对
 
 | Model | Context mask | MSE-z | MAE-z | RMSE-z | Pearson | sMAPE transformed | Unit-circle error |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | 25% | 0.264421 | 0.319646 | 0.514219 | 0.846761 | 45.9250% | 0.385172 |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | 50% | 0.321402 | 0.396725 | 0.566923 | 0.831395 | 54.9716% | 0.546901 |
-| [iTransformer](runs/task_e_sampling3_first512_itransformer_masked_mixed_eval_r75/summary.json) | 75% | 0.620715 | 0.655630 | 0.787855 | 0.775324 | 86.4697% | 0.868959 |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 25% | 0.372196 | 0.412514 | 0.610079 | 0.773248 | 62.0649% | 0.589304 |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | 50% | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
-| [TCN](runs/task_e_sampling3_first512_tcn_masked_mixed_eval_r75/summary.json) | 75% | 0.530433 | 0.561069 | 0.728309 | 0.695288 | 80.0520% | 0.783927 |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_mixed_eval_r25/summary.json) | 25% | 0.264421 | 0.319646 | 0.514219 | 0.846761 | 45.9250% | 0.385172 |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_mixed_r50/summary.json) | 50% | 0.321402 | 0.396725 | 0.566923 | 0.831395 | 54.9716% | 0.546901 |
+| [iTransformer](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_itransformer_masked_mixed_eval_r75/summary.json) | 75% | 0.620715 | 0.655630 | 0.787855 | 0.775324 | 86.4697% | 0.868959 |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_mixed_eval_r25/summary.json) | 25% | 0.372196 | 0.412514 | 0.610079 | 0.773248 | 62.0649% | 0.589304 |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_mixed_r50/summary.json) | 50% | 0.404719 | 0.448462 | 0.636175 | 0.757000 | 66.7148% | 0.646846 |
+| [TCN](results/task_f/sampling_3/masked_forecasting/task_e_sampling3_first512_tcn_masked_mixed_eval_r75/summary.json) | 75% | 0.530433 | 0.561069 | 0.728309 | 0.695288 | 80.0520% | 0.783927 |
 
 这些敏感性结果说明：25% 缺测时四个 foundation model 都仍可用，其中 Chronos-2、TiRex-2 和 Toto-2 的 MSE-z 接近完整 context；
 50% 后误差明显上升；75% 时 foundation model 大多接近失效。监督模型中 mixed 训练
@@ -1313,11 +964,11 @@ MSE-z/RMSE-z 仅保存 overall 指标。
 
 | Model | E1 steps 1–128 | E2 steps 1–512 |
 | --- | --- | --- |
-| Chronos-2 | [runs/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
-| Panda zero-shot | [runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
-| iTransformer | [runs/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json](runs/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json) | [runs/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json](runs/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json) |
-| TiRex-2 | [runs/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
-| Toto-2.0 | [runs/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv](runs/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv) | [runs/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](runs/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
+| Chronos-2 | [results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv](results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/horizon_metrics.csv) | [results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](results/task_e/sampling_2/task_e_chronos2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
+| Panda zero-shot | [results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv](results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/horizon_metrics.csv) | [results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](results/task_e/sampling_2/task_e_panda_zero_shot_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
+| iTransformer | [results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json](results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/test_metrics.json) | [results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json](results/task_e/sampling_2/task_e_itransformer_orbital15_ctx512_pred128/rolling_metrics.json) |
+| TiRex-2 | [results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv](results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/horizon_metrics.csv) | [results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](results/task_e/sampling_2/task_e_tirex2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
+| Toto-2.0 | [results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv](results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/horizon_metrics.csv) | [results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv](results/task_e/sampling_2/task_e_toto2_orbital15_ctx512_pred128/rolling_horizon_metrics.csv) |
 
 <details>
 <summary>E1 one-shot：每步 MSE-z / MAE-z / Pearson-z / sMAPE transformed（128 steps）</summary>
@@ -2062,12 +1713,12 @@ MSE。
   - 直接消费 multivariate window
   - 默认 checkpoint `GilpinLab/panda-72M` 使用共享的通道 embedding 和
     forecast head，可接收 `orbital15`（15 通道）或 `raw_state18`（18 通道）
-  - Panda 源码来自 `experiments/panda_threebody/vendor/panda` submodule
+  - Panda 源码来自 `experiments/foundation_models/vendor/panda` submodule
   - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
 
 ### Task F: Random-Masked High-Resolution Stability
 
-入口脚本：[tasks/task_f/main.py](tasks/task_f/main.py)
+入口脚本：[scripts/task_f.py](scripts/task_f.py)；实现：[tasks/task_f/main.py](tasks/task_f/main.py)
 
 Task F 从 `sampling_3` 高分辨率轨道数据的前 `256` 个时间步预测单条 trajectory
 是否在 `time_horizon=10000` 时保持稳定。输入使用 `orbital15` 的 15 个通道，并追加
@@ -2084,68 +1735,6 @@ TCN 与 attention 结果见下方[实验结果总汇](#实验结果总汇磁盘�
 [Task F mixed-mask 结果](#task-f-mixed-mask-robustness-benchmark-prefix256-seed42)。该实验
 使用同一个模型覆盖 clean、random point、single-block 和 multi-block corruption，
 并额外测试 `60%/70%` 的 OOD missing ratio 以及 `25%` Early/Middle/Late block location。
-
-### Task G: Boundary Sensitivity
-
-入口脚本：[tasks/task_g/main.py](tasks/task_g/main.py)
-
-**任务定义**
-
-- 输入：同一 base system 内成对 perturbation 的初始条件差异
-- 输出：多个 future horizons 上，pair 内两条 trajectory 的稳定性是否出现分歧
-- 默认 horizon 与 Task C 对齐：
-  - `500,800,1500,2500,4000,6500,10000`
-
-**输入形式**
-
-- 数据源：`dataset_v3/results_batch_*_sampling_2.hdf5` + `completed_systems_sampling_2.txt`
-- 默认表示：`pair_ic54`
-- 可选表示：`pair_ic72`
-- 默认每个 system 使用 `group_size=32`
-
-**模型族**
-
-- `constant`
-- `logistic`
-- `random_forest`
-- `xgboost`
-- `mlp`
-
-这项任务关注的是：非常接近的初始扰动对是否会跨过稳定性边界，因而与 Task A 的 system-level stable fraction 互补。
-
-**实验结果**
-
-已保存的 `pair_ic54` 主实验包含 `4998` 个 system、`79968` 个 perturbation
-pair 和 `54` 个初始条件特征。下表为 7 个 horizon 上测试指标的平均值；
-F1 使用 validation set 调优的逐 horizon threshold：
-
-| Model | Mean AUPRC | Mean AUROC | Mean F1 |
-| --- | ---: | ---: | ---: |
-| Constant | 0.1184 | 0.5000 | 0.2114 |
-| Logistic | 0.1635 | 0.6303 | 0.2555 |
-| Random Forest | 0.1935 | 0.6656 | 0.2671 |
-| MLP | **0.2103** | **0.7005** | **0.2982** |
-
-MLP 在 AUPRC、AUROC 和 F1 上均为当前最佳模型，但绝对数值表明，仅凭
-pair 初值判断两条扰动轨道未来是否落到稳定边界两侧仍然较难。配置中请求了
-XGBoost，但该次运行没有保存 XGBoost 预测或指标，因此不列入结果表。
-
-边界分歧本身也随 horizon 改变：
-
-| Horizon | Pair disagreement rate | Systems with any disagreement |
-| ---: | ---: | ---: |
-| 500 | 0.1276 | 0.5298 |
-| 800 | **0.1317** | 0.5488 |
-| 1500 | 0.1303 | **0.5540** |
-| 2500 | 0.1249 | 0.5432 |
-| 4000 | 0.1170 | 0.5300 |
-| 6500 | 0.1078 | 0.5084 |
-| 10000 | 0.0987 | 0.4850 |
-
-pair disagreement rate 在 \(t=800\) 附近最高，之后逐渐下降；至少包含一对
-分歧轨道的 system 比例在 \(t=1500\) 达到峰值。原始汇总见
-[Task G summary](results/task_g_boundary_sensitivity/summary.md) 和
-[dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
 
 ## 实验结果总汇（磁盘产物，截至 2026-09-07）
 
@@ -2166,344 +1755,21 @@ trajectory 和 4998 个完整的 32-variation systems。
 | 传统稳定性判据 | paper Eq.(2)，group prediction 取 pair margin 最小值 | individual accuracy 0.6806，balanced accuracy 0.7099，sensitivity 0.7891，specificity 0.6307；group accuracy 0.6232，balanced accuracy 0.7336，sensitivity 0.8949，specificity 0.5722 |
 | 轨道参数示例 | 6 个代表性 system，rows 0/800/1600/2400/3200/4000 | 生成 6 张 orbital-parameter 诊断图；大多数通道 finite fraction 为 1，periods_complete 在部分代表样本中存在缺失 |
 
-原始文件：[divergence_summary.json](results/divergence_statistics/divergence_summary.json)、
-[traditional_stability_summary.json](results/traditional_stability/traditional_stability_summary.json)、
-[orbital examples summary](results/dataset_v3_orbital_examples/summary.json)。
+原始文件：[divergence_summary.json](results/task_d/sampling_2/divergence_statistics/divergence_summary.json)、
+[traditional_stability_summary.json](results/shared_analysis/sampling_2/traditional_stability/traditional_stability_summary.json)、
+[orbital examples summary](results/shared_analysis/sampling_2/dataset_v3_orbital_examples/summary.json)。
 
-### 1. Task A：初始条件到 system stability
+### 1–2. Task A / Task B 历史非公共划分
 
-最新 expanded rerun 使用 4998 systems、70/10/20 split、seed=42、horizon=10000、
-orbital15 初始条件。stable_fraction 是 32 条 variation 的观测稳定比例；
-binary_any 的正类是 32 条 variation 全部稳定。
+这些非公共划分的实验产物已按清理要求删除。当前结果与复现命令见上文的 Task A、Task B 主实验章节；不要将历史指标与公共划分指标合并比较。
 
-#### 1.1 stable fraction 主结果
+### 3. Task C：当前 sampling 3 survival
 
-| Model | MSE | MAE | R2 | Spearman | MSE / binomial noise |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| MLP-small | 0.08553 | 0.20680 | 0.42798 | 0.64393 | 46.05 |
-| MLP-base | 0.09157 | 0.21485 | 0.38760 | 0.62934 | 49.30 |
-| MLP-large | 0.09377 | **0.20326** | 0.37285 | 0.63198 | 50.49 |
-| XGB-base | 0.08624 | 0.22388 | 0.42327 | 0.65034 | 46.43 |
-| XGB-strong | **0.08336** | 0.21765 | **0.44251** | **0.66239** | **44.88** |
+当前 20-bin Task C 结果、配置及复现入口见上文 [Task C 主实验](#task-c-system-survival-curves)。
 
-XGB-strong 的 MSE、R2 和 Spearman 最好；MLP-large 的 MAE 最低。所有模型误差仍显著
-高于 32 次 Bernoulli 观测的采样噪声尺度，因此初始条件对长期稳定比例的可预测性仍有限。
+### 4. Task D：当前 sampling 3 轨道去相关时间
 
-#### 1.2 binary_any 主结果
-
-| Model | F1 | AUROC | AUPRC | Balanced Acc | MCC | Brier | ECE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| MLP-small | 0.43137 | 0.82748 | 0.47315 | 0.64911 | 0.36753 | 0.10756 | 0.04670 |
-| MLP-base | **0.45890** | 0.82711 | 0.47549 | **0.67224** | **0.36884** | 0.10977 | 0.05861 |
-| MLP-large | 0.42636 | 0.82360 | 0.45381 | 0.64733 | 0.35825 | 0.10928 | 0.05056 |
-| XGB-small | 0.21053 | 0.82426 | 0.46076 | 0.55617 | 0.23279 | 0.10652 | **0.01183** |
-| XGB-base | 0.29108 | **0.84806** | 0.48913 | 0.58385 | 0.26830 | 0.10256 | 0.01874 |
-| XGB-strong | 0.35242 | **0.85299** | **0.50816** | 0.60936 | 0.31476 | **0.10120** | 0.01993 |
-
-MLP-base 的阈值 F1/平衡准确率最好；XGB-strong 的 AUROC/AUPRC 和 Brier 更好。
-
-#### 1.3 horizon grid
-
-下表是 expanded rerun 的全部 horizon grid；stable fraction 的列为 MLP/XGB 的
-MSE、MAE、R2，后两列为 binary_any 的 F1。
-
-| Horizon | Stable frac. | MLP MSE/MAE/R2 | XGB MSE/MAE/R2 | MLP F1 | XGB F1 |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 1000 | 0.4888 | 0.08518/0.21465/0.50121 | 0.08666/0.23410/0.49256 | **0.59696** | 0.58614 |
-| 2000 | 0.4233 | 0.09338/0.23548/0.45006 | 0.08936/0.23724/0.47374 | **0.58093** | 0.53944 |
-| 3000 | 0.3878 | 0.09136/0.22603/0.45177 | 0.08911/0.23702/0.46528 | **0.49468** | 0.44575 |
-| 4000 | 0.3653 | 0.09252/0.22249/0.43448 | 0.08874/0.23494/0.45759 | **0.49102** | 0.45847 |
-| 5000 | 0.3474 | 0.09264/0.22798/0.42540 | 0.08906/0.23399/0.44758 | **0.46207** | 0.38849 |
-| 6000 | 0.3331 | 0.09090/0.22298/0.42599 | 0.08838/0.23155/0.44193 | **0.52514** | 0.43011 |
-| 7000 | 0.3218 | 0.09174/0.22251/0.41207 | 0.08766/0.22889/0.43818 | **0.34959** | 0.29661 |
-| 8000 | 0.3130 | 0.09395/0.22843/0.38945 | 0.08798/0.22820/0.42824 | **0.43636** | 0.30508 |
-| 9000 | 0.3046 | 0.09074/0.21862/0.40150 | 0.08719/0.22612/0.42492 | **0.45038** | 0.32743 |
-| 10000 | 0.2974 | 0.09157/0.21485/0.38760 | 0.08624/0.22388/0.42327 | **0.45890** | 0.29108 |
-
-短 horizon 独立 grid（同一实验的 short rerun）得到 stable fraction mean：
-100/200/500/1000/2000 = 0.745861/0.682454/0.587529/0.513718/0.445616；
-对应 MLP MSE = 0.051570/0.063825/0.076093/0.088373/0.090029，
-XGB MSE = 0.049802/0.059510/0.074599/0.086658/0.089360。
-
-#### 1.4 loss 与 feature ablation
-
-| Ablation | Regression MSE/MAE/R2 | Binary F1/AUROC/AUPRC |
-| --- | --- | --- |
-| BCE, all orbital15 | 0.09157/0.21485/0.38760 | 0.45890/0.82711/0.47549 |
-| MSE-sigmoid, all orbital15 | not saved / not saved / not saved | 0.42969/0.81445/0.47010 |
-| no AP/LAN angles | 0.08787/0.21887/0.41233 | 0.30189/0.85104/0.50852 |
-| no eccentricity/inclination | 0.11714/0.26340/0.21656 | 0.19718/0.71838/0.30933 |
-| aratio+mratio+ecc | 0.08751/0.22204/0.41476 | 0.24510/0.84400/0.48692 |
-| aratio+mratio | 0.11588/0.26706/0.22499 | 0.00000/0.74106/0.33754 |
-
-MSE-sigmoid 行的回归指标未在该 ablation 汇总中保存，不能用 binary 指标反推。
-作为历史 CPU reference，旧版 summary 的 stable_fraction 指标为：
-
-| Model | MSE | RMSE | MAE | R2 |
-| --- | ---: | ---: | ---: | ---: |
-| MLP-small | 0.08489 | 0.29135 | 0.20280 | 0.43229 |
-| MLP-base | 0.09184 | 0.30305 | 0.21867 | 0.38579 |
-| MLP-large | 0.08799 | 0.29662 | 0.20930 | 0.41156 |
-| XGB-base | 0.08624 | 0.29366 | 0.22388 | 0.42327 |
-| XGB-strong | 0.08336 | 0.28872 | 0.21765 | 0.44251 |
-
-同一旧版 run 的 binary_any 指标（Acc/Prec/Recall/F1/AUROC/AP）为：
-
-| Model | Acc | Prec | Recall | F1 | AUROC | AP |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| MLP-small | 0.855 | 0.562 | 0.373 | 0.449 | 0.836 | 0.481 |
-| MLP-base | 0.852 | 0.550 | 0.348 | 0.426 | 0.825 | 0.481 |
-| MLP-large | 0.851 | 0.545 | 0.342 | 0.420 | 0.823 | 0.467 |
-| XGB-small | 0.850 | 0.625 | 0.127 | 0.211 | 0.824 | 0.461 |
-| XGB-base | 0.849 | 0.564 | 0.196 | 0.291 | 0.848 | 0.489 |
-| XGB-strong | 0.853 | 0.580 | 0.253 | 0.352 | 0.853 | 0.508 |
-
-完整文件：[Task A legacy summary](results/task_a_experiments/summary.md)、
-[expanded summary](results/task_a_experiments/metrics_augmented/summary.md)、
-[horizon grid](results/task_a_experiments/metrics_augmented/horizon_grid/summary.md)、
-[short horizon grid](results/task_a_experiments/metrics_augmented/horizon_grid_short/summary.md)。
-其中 <code>h=20000</code> 的边界测试已经超过数据中 <code>time_unbound</code> 最大值，
-不纳入正式比较；若目录中只有 config 或 smoke log，也不伪造最终指标。
-
-### 2. Task B：trajectory prefix instability classification
-
-标准 prefix ablation 使用 dataset v3、orbital15、horizon=10000、trajectory_binary、
-group split、测试集不稳定比例约 31.6%。以下是
-[results/task_b_prefix_ablation/readme.md](results/task_b_prefix_ablation/readme.md) 中
-<code>metrics.json</code> 的完整结果；表中 prefix=512 是后来补跑的部分模型。
-
-| Prefix | Model | Acc | Prec | Recall | F1 | AUROC | AUPRC |
-| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 10 | SVM | 0.7765 | 0.6964 | 0.5195 | 0.5951 | 0.8256 | 0.6657 |
-| 10 | CNN | 0.7522 | 0.6210 | 0.5548 | 0.5860 | 0.8179 | 0.6539 |
-| 10 | TCN | 0.7536 | 0.6840 | 0.4100 | 0.5127 | 0.8127 | 0.6514 |
-| 10 | GRU | 0.7623 | 0.6552 | 0.5237 | 0.5821 | 0.8176 | 0.6573 |
-| 10 | Attention | 0.7543 | 0.6326 | 0.5317 | 0.5778 | 0.8039 | 0.6491 |
-| 20 | SVM | 0.7749 | 0.6930 | 0.5170 | 0.5922 | 0.8223 | 0.6552 |
-| 20 | CNN | 0.7771 | 0.6491 | 0.6425 | 0.6458 | 0.8374 | 0.6849 |
-| 20 | TCN | 0.7842 | 0.6971 | 0.5613 | 0.6219 | 0.8397 | 0.6819 |
-| 20 | GRU | 0.7660 | 0.6639 | 0.5263 | 0.5872 | 0.8256 | 0.6544 |
-| 20 | Attention | 0.7756 | 0.6449 | 0.6463 | 0.6456 | 0.8378 | 0.6493 |
-| 50 | SVM | 0.7649 | 0.6658 | 0.5150 | 0.5808 | 0.8232 | 0.6387 |
-| 50 | CNN | 0.7935 | 0.6750 | 0.6693 | 0.6721 | 0.8671 | 0.7188 |
-| 50 | TCN | 0.7897 | 0.7115 | 0.5632 | 0.6287 | 0.8697 | 0.7158 |
-| 50 | GRU | 0.7703 | 0.6828 | 0.5107 | 0.5843 | 0.8523 | 0.7129 |
-| 50 | Attention | 0.7946 | 0.6940 | 0.6270 | 0.6588 | 0.8673 | 0.7121 |
-| 100 | SVM | 0.7687 | 0.6659 | 0.5385 | 0.5955 | 0.8361 | 0.6387 |
-| 100 | CNN | 0.8130 | 0.6895 | 0.7435 | 0.7154 | 0.8890 | 0.7503 |
-| 100 | TCN | 0.8045 | 0.7273 | 0.6104 | 0.6637 | 0.8922 | **0.7642** |
-| 100 | GRU | 0.7997 | **0.7532** | 0.5453 | 0.6326 | 0.8908 | 0.7420 |
-| 100 | Attention | 0.7904 | 0.7156 | 0.5597 | 0.6281 | 0.8890 | 0.7322 |
-| 200 | SVM | 0.7723 | 0.6611 | 0.5743 | 0.6147 | 0.8418 | 0.6476 |
-| 200 | CNN | 0.8370 | 0.7268 | 0.7761 | 0.7507 | 0.9133 | 0.7947 |
-| 200 | GRU | 0.8333 | 0.7535 | 0.7028 | 0.7273 | 0.9186 | 0.7848 |
-| 200 | TCN | **0.8622** | 0.7575 | **0.8297** | **0.7920** | 0.9321 | 0.8293 |
-| 200 | Attention | 0.8420 | 0.7507 | 0.7490 | 0.7498 | 0.9208 | 0.7845 |
-| 300 | SVM | 0.7868 | 0.6681 | 0.6474 | 0.6576 | 0.8503 | 0.6634 |
-| 300 | CNN | 0.8619 | 0.7594 | 0.8245 | 0.7906 | 0.9282 | 0.8145 |
-| 300 | GRU | 0.8605 | 0.7990 | 0.7466 | 0.7719 | 0.9366 | 0.8219 |
-| 300 | TCN | 0.8697 | 0.8123 | 0.7644 | 0.7876 | 0.9440 | **0.8654** |
-| 300 | Attention | **0.8737** | 0.7546 | **0.8897** | **0.8166** | 0.9350 | 0.8158 |
-| 512 | SVM | 0.7849 | 0.6815 | 0.6006 | 0.6385 | 0.8442 | 0.6684 |
-| 512 | CNN | 0.8934 | 0.8153 | 0.8571 | 0.8357 | 0.9508 | 0.8654 |
-| 512 | TCN | **0.9039** | **0.8425** | 0.8560 | **0.8492** | **0.9599** | **0.8919** |
-
-结论：在 prefix 10–300 的完整网格中，长 prefix 明显有利；prefix=200 的 TCN
-达到 F1=0.7920，prefix=300 的 Attention 达到 Recall=0.8897，prefix=512 的
-补跑 TCN 达到 F1=0.8492、AUROC=0.9599。prefix=512 没有 GRU/Attention 的最终
-<code>metrics.json</code>，因此不把缺失结果写成 0。
-
-上表与本文前面 Task B 的旧版 100/200 摘要存在小数点末位差异，原因是历史运行的
-训练/保存时点不同；这里以当前 prefix 目录中的指标文件为准。
-
-#### Task B：类 SPoCK 统计特征与 frozen encoder 对比
-
-为了复现“类 SPoCK”思路，prefix=96 的 `orbital15` 每个通道提取
-`initial, final, mean, std, slope, min, max, delta` 八个统计量，共 `15×8=120`
-维，再使用 XGBoost 分类。它是 prefix-only 的 SPoCK-inspired baseline，不运行额外
-N-body integration，也不直接计算原始 SPoCK 的 MEGNO 特征。
-
-| Representation / head | AUROC | Unbound F1 | Stable F1 |
-| --- | ---: | ---: | ---: |
-| Panda frozen embedding + linear head | 0.94545 | 0.89840 | 0.80812 |
-| Chronos-2 frozen embedding + linear head | 0.95076 | 0.89689 | 0.81051 |
-| SPoCK-inspired statistics + XGBoost | **0.96253** | **0.92525** | **0.83479** |
-
-这说明类 SPoCK 的手工统计特征在 Task B 的单一稳定性分类目标上很有竞争力；它与
-Task C 的完整 survival-curve 预测不是同一个目标，不能直接用 AUROC/F1 与
-20-bin MAE/IBS 做数值比较。
-
-### 3. Task C：multi-horizon survival 与 ablation
-
-Task C ablation 使用 4998 systems、prefix lengths 10/20/50/100、variation counts
-1/2/4/8/16/32、future times
-500/800/1500/2500/4000/6500/10000。每个 cell 都是嵌套 variation 子集，并预测完整
-32 条 variation 的 system survival fraction。表中数字是测试集 overall MAE，列顺序为
-baseline/direct/traj/dual。
-
-| Prefix | Variations | Baseline | Direct | Traj | Dual |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 10 | 1 | 0.3720 | 0.2216 | 0.2377 | 0.2381 |
-| 10 | 2 | 0.3720 | 0.2169 | 0.2272 | 0.2428 |
-| 10 | 4 | 0.3720 | 0.2024 | 0.2158 | 0.2277 |
-| 10 | 8 | 0.3720 | 0.1868 | 0.2107 | 0.2026 |
-| 10 | 16 | 0.3720 | 0.1875 | 0.2175 | 0.1903 |
-| 10 | 32 | 0.3720 | 0.1805 | 0.1880 | 0.1766 |
-| 20 | 1 | 0.3720 | 0.2159 | 0.2374 | 0.2484 |
-| 20 | 2 | 0.3720 | 0.2075 | 0.2166 | 0.2301 |
-| 20 | 4 | 0.3720 | 0.1827 | 0.1967 | 0.2085 |
-| 20 | 8 | 0.3720 | 0.1647 | 0.1992 | 0.1808 |
-| 20 | 16 | 0.3720 | 0.1644 | 0.1795 | 0.1611 |
-| 20 | 32 | 0.3720 | 0.1548 | 0.1747 | 0.1512 |
-| 50 | 1 | 0.3720 | 0.2141 | 0.2249 | 0.2256 |
-| 50 | 2 | 0.3720 | 0.1802 | 0.1954 | 0.1989 |
-| 50 | 4 | 0.3720 | 0.1544 | 0.1682 | 0.1620 |
-| 50 | 8 | 0.3720 | 0.1426 | 0.1556 | 0.1295 |
-| 50 | 16 | 0.3720 | 0.1356 | 0.1437 | 0.1175 |
-| 50 | 32 | 0.3720 | 0.1305 | 0.1279 | 0.1057 |
-| 100 | 1 | 0.3720 | 0.1938 | 0.1995 | 0.2104 |
-| 100 | 2 | 0.3720 | 0.1505 | 0.1741 | 0.1680 |
-| 100 | 4 | 0.3720 | 0.1305 | 0.1443 | 0.1316 |
-| 100 | 8 | 0.3720 | 0.1212 | 0.1356 | 0.1090 |
-| 100 | 16 | 0.3720 | 0.1140 | 0.1171 | 0.0946 |
-| 100 | 32 | 0.3720 | **0.1061** | **0.0971** | **0.0748** |
-
-各模型在最佳输入配置 prefix=100、variations=32 下的 horizon-wise MAE：
-
-| Model | 500 | 800 | 1500 | 2500 | 4000 | 6500 | 10000 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Baseline | 0.377554 | 0.381327 | 0.384258 | 0.378834 | 0.372599 | 0.361742 | 0.347804 |
-| Direct | 0.083846 | 0.091997 | 0.102430 | 0.110449 | 0.115667 | 0.118593 | 0.119743 |
-| Traj | 0.064176 | 0.073784 | 0.086962 | 0.099471 | 0.109715 | 0.118828 | 0.126826 |
-| Dual | **0.047085** | **0.055776** | **0.067096** | **0.075407** | **0.085552** | **0.093667** | **0.098697** |
-
-整体最优为 dual（overall MAE=0.0748），其次是 traj（0.0971）和 direct（0.1061）；
-baseline 的 overall MAE 为 0.3720。另有 initial-condition MLP 对照：
-baseline overall/final = 0.3720169/0.3478040，IC-MLP =
-0.2451511/0.2435258，IC-MLP 各 horizon MAE =
-0.229286/0.239105/0.250980/0.251613/0.252635/0.248913/0.243526。
-
-另一个已保存的 single-head prefix run（与当前 96-cell ablation 不是同一组实现）结果为：
-
-| Model | Overall MAE | Final MAE | Improvement |
-| --- | ---: | ---: | ---: |
-| Baseline | 0.3720 | 0.3478 | — |
-| Direct | 0.0830 | 0.1101 | 77.7% |
-| Direct mean/std | 0.0710 | 0.0912 | 80.9% |
-| Trajectory-context | 0.0657 | 0.1046 | 82.3% |
-| Dual-attention | **0.0529** | **0.0817** | **85.8%** |
-
-该 single-head run 的逐 horizon MAE 为：
-
-| Model | 500 | 800 | 1500 | 2500 | 4000 | 6500 | 10000 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Baseline | 0.3776 | 0.3813 | 0.3843 | 0.3788 | 0.3726 | 0.3617 | 0.3478 |
-| Direct | 0.0464 | 0.0584 | 0.0752 | 0.0875 | 0.0984 | 0.1048 | 0.1101 |
-| Direct mean/std | 0.0428 | 0.0522 | 0.0652 | 0.0750 | 0.0832 | 0.0877 | 0.0912 |
-| Trajectory-context | 0.0140 | 0.0347 | 0.0544 | 0.0712 | 0.0850 | 0.0962 | 0.1046 |
-| Dual-attention | **0.0113** | **0.0302** | **0.0472** | **0.0578** | **0.0672** | **0.0748** | **0.0817** |
-
-完整 96-cell 结果、输入预算表和每个 horizon 的原始值见
-[Task C ablation README](results/task_c_ablation/readme.md)、
-[Task C ablation summary.csv](results/task_c_ablation/summary.csv) 和
-[initial-condition MLP metrics](results/task_c_initial_condition_mlp/metrics.json)。
-
-### 4. Task D：Lyapunov-proxy / lambda-fast 回归
-
-Task D 的 proxy 标签由 16 个 pair 的离散 crossing time 聚合得到；数据采样间隔约为
-50000，因此这里的时间是“首次存储采样点”而不是连续 crossing time。下面先列出已经
-保存的 initial/prefix 结果，再列出 threshold × aggregation 敏感性网格。
-
-#### 4.1 已保存的 initial/prefix 结果
-
-表中的 MAE/RMSE 都是在 log-time 上计算；F2/F3 表示预测落在真实值 2 倍/3 倍范围内
-的比例。lambda_fast 与 lyapunov_proxy 是两种不同 target，不能直接横向混排。
-
-| Run | Target / setting | Representation | Labels | Censoring | Model | MAE | RMSE | Spearman | F2 / F3 |
-| --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
-| D-lambda-raw | lambda_fast / initial | raw IC | 3199 | 0.0004 before quality filter | constant median | 0.958787 | 1.757718 | — | 0.6375/0.8094 |
-| D-lambda-raw | lambda_fast / initial | raw IC | 3199 | 0.0004 before quality filter | random forest | 1.074405 | 1.622455 | 0.208866 | 0.4688/0.6875 |
-| D-lambda-raw | lambda_fast / initial | raw IC | 3199 | 0.0004 before quality filter | MLP | 0.962735 | 1.645267 | 0.235682 | 0.5734/0.7625 |
-| D-lambda-orbital15 | lambda_fast / initial | orbital15 | 3199 | 0.0004 before quality filter | constant median | 0.958787 | 1.757718 | — | 0.6375/0.8094 |
-| D-lambda-orbital15 | lambda_fast / initial | orbital15 | 3199 | 0.0004 before quality filter | random forest | 1.092392 | 1.654524 | 0.188678 | 0.4469/0.6500 |
-| D-lambda-orbital15 | lambda_fast / initial | orbital15 | 3199 | 0.0004 before quality filter | MLP | 1.021682 | 1.679629 | 0.197611 | 0.5266/0.7297 |
-| D-proxy-initial | lyapunov_proxy, threshold=1000, min | orbital15 | 4997 | 0.0002 | constant median | 1.000961 | 1.278772 | — | 0.3590/0.7680 |
-| D-proxy-initial | lyapunov_proxy, threshold=1000, min | orbital15 | 4997 | 0.0002 | random forest | 0.748865 | 0.984519 | 0.667342 | 0.5630/0.7560 |
-| D-proxy-initial | lyapunov_proxy, threshold=1000, min | orbital15 | 4997 | 0.0002 | MLP | **0.652977** | **0.878598** | **0.721417** | **0.6300/0.8200** |
-| D-prefix | lambda_fast / initial_prefix, prefix=100 | orbital15 | 4998 | 0.886154 | constant median | 1.642400 | 2.607517 | — | 0.3610/0.5070 |
-| D-prefix | lambda_fast / initial_prefix, prefix=100 | orbital15 | 4998 | 0.886154 | random forest | **1.237786** | **2.084188** | **0.657684** | **0.4710/0.6240** |
-| D-prefix | lambda_fast / initial_prefix, prefix=100 | orbital15 | 4998 | 0.886154 | MLP | 1.647709 | 3.003794 | 0.495328 | 0.3470/0.5320 |
-
-当前代码推荐的 threshold=10000 版本不是上面 D-proxy-initial 目录中的历史
-threshold=1000 结果；推荐使用后面的 sensitivity cell 或重新运行主命令后再作正式比较。
-
-#### 4.2 threshold / aggregation sensitivity
-
-标签分布（每个 cell 都有 4998 个 systems）：
-
-| Threshold | Aggregation | Uncensored | Censored fraction | Median tau | P90 tau |
-| ---: | --- | ---: | ---: | ---: | ---: |
-| 1000 | median | 4992 | 0.001200 | 300000 | 3957500 |
-| 1000 | min | 4997 | 0.000200 | 150000 | 1100000 |
-| 3000 | median | 4974 | 0.004802 | 350000 | 5550000 |
-| 3000 | min | 4989 | 0.001801 | 150000 | 1300000 |
-| 10000 | median | 4921 | 0.015406 | 387500 | 6590000 |
-| 10000 | min | 4968 | 0.006002 | 150000 | 1565000 |
-| 30000 | median | 4762 | 0.047219 | 425000 | 7615000 |
-| 30000 | min | 4934 | 0.012805 | 200000 | 1800000 |
-
-每个 cell 的所有模型指标：
-
-| Threshold | Agg. | Model | MAE(log tau) | RMSE | Spearman | F2 | F3 |
-| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 1000 | median | constant | 1.2960 | 1.5767 | — | 0.2442 | 0.5385 |
-| 1000 | median | MLP | **0.7882** | **1.0205** | **0.7957** | **0.5405** | **0.7558** |
-| 1000 | median | RF | 0.9099 | 1.1499 | 0.7005 | 0.4725 | 0.6757 |
-| 1000 | min | constant | 1.0010 | 1.2788 | — | 0.3590 | 0.7680 |
-| 1000 | min | MLP | **0.6794** | **0.9105** | **0.7158** | **0.6230** | **0.8050** |
-| 1000 | min | RF | 0.7489 | 0.9845 | 0.6673 | 0.5630 | 0.7560 |
-| 3000 | median | constant | 1.3552 | 1.6973 | — | 0.2673 | 0.4523 |
-| 3000 | median | MLP | **0.8769** | **1.1768** | **0.7579** | **0.5206** | **0.6965** |
-| 3000 | median | RF | 0.9918 | 1.2911 | 0.6812 | 0.4503 | 0.6332 |
-| 3000 | min | constant | 1.0379 | 1.3253 | — | 0.3417 | 0.7365 |
-| 3000 | min | MLP | **0.6798** | **0.9164** | **0.7354** | **0.6182** | **0.8116** |
-| 3000 | min | RF | 0.7665 | 1.0148 | 0.6527 | 0.5521 | 0.7595 |
-| 10000 | median | constant | 1.3625 | 1.7322 | — | 0.2853 | 0.4426 |
-| 10000 | median | MLP | **0.8712** | **1.2209** | **0.7621** | **0.5350** | **0.7411** |
-| 10000 | median | RF | 1.0037 | 1.3205 | 0.6831 | 0.4508 | 0.6487 |
-| 10000 | min | constant | 1.1449 | 1.5105 | — | 0.3239 | 0.6992 |
-| 10000 | min | MLP | **0.7297** | **0.9992** | **0.7891** | **0.6137** | **0.7907** |
-| 10000 | min | RF | 0.8304 | 1.1433 | 0.6734 | 0.5151 | 0.7334 |
-| 30000 | median | constant | 1.3171 | 1.6694 | — | 0.2844 | 0.4533 |
-| 30000 | median | MLP | **0.8599** | **1.1857** | **0.7515** | **0.5331** | **0.7272** |
-| 30000 | median | RF | 0.9898 | 1.3002 | 0.6574 | 0.4407 | 0.6537 |
-| 30000 | min | constant | 1.1276 | 1.4417 | — | 0.2523 | 0.5137 |
-| 30000 | min | MLP | **0.7644** | **1.0704** | **0.7383** | **0.5735** | **0.7771** |
-| 30000 | min | RF | 0.8504 | 1.1654 | 0.6490 | 0.5360 | 0.7224 |
-
-在当前 sensitivity 网格里，min aggregation 通常保留更多 uncensored labels，MLP 的
-log-time MAE 约为 0.679–0.764；median aggregation 的 censoring 更高，MLP MAE
-约为 0.788–0.877。完整原始表见
-[task_d_proxy_sensitivity/summary.csv](results/task_d_proxy_sensitivity/summary.csv)。
-各 initial/prefix run 的 config、feature importance 和 predictions 分别保存在：
-[lambda-fast raw](results/task_d_initial_lambda_fast/metrics.json)、
-[lambda-fast orbital15](results/task_d_initial_lambda_fast_orbital15/metrics.json)、
-[lyapunov proxy](results/task_d_initial_lyapunov_proxy/metrics.json)、
-[prefix](results/task_d_initial_prefix_lambda_fast_orbital15/metrics.json)。
-
-#### 4.3 Task D feature importance
-
-已保存 feature importance 中的第一重要特征为：
-
-| Run | Top feature | Importance |
-| --- | --- | ---: |
-| lambda_fast raw | periods_complete_0 | 0.132797 |
-| lambda_fast orbital15 | eccs_complete_1 | 0.143158 |
-| lyapunov proxy | incs_complete_0 | 0.256413 |
-| prefix lambda_fast | early_log_R_q90_1 | 0.137737 |
-
-完整排名见各目录中的 <code>feature_importance.csv</code>；它们说明不同 target/输入设定
-依赖的物理摘要并不相同。
+当前 Task D 的标签、模型、test 指标和复现入口见上文 [Task D 主实验](#task-d-median-orbital-decorrelation-time)。历史分位数与 sampling 2 结果见 [归档记录](archive/task_d_historical_results.md)。
 
 ### 5. Task E：forecasting 与 foundation-model 对比
 
@@ -2579,8 +1845,8 @@ step 32 的 MSE-z 为 0.0636/0.4214。
 完整说明见 [docs/reproduction.md](docs/reproduction.md) 和
 [README_task_e_horizon_results.md](README_task_e_horizon_results.md)。只有 config/feature
 metadata 而没有最终 test metrics 的目录（例如
-<code>runs/task_e_orbital15_ctx64_pred32_panda_gru</code>、
-<code>runs/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
+<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_gru</code>、
+<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
 
 ### 6. Task F：随机掩码高分辨率前缀稳定性预测
 
@@ -2606,10 +1872,10 @@ Task F 使用 `dataset_sampling_3_prefix1024`、`prefix_len=256`、`time_stride=
 | Attention | 75% | 3 / 0.8673 | 0.3870 | 0.7779 | 0.7540 | 0.6581 | 0.6683 | 0.8563 | 0.6973 | 0.1479 |
 
 完整指标（precision、recall、specificity、FPR/FNR、MCC、log loss、ECE/MCE 及
-confusion matrix counts）保存在 [TCN metrics](results/task_f_masked_prefix/metrics.json)
-和 [attention metrics](results/task_f_masked_prefix_attention/metrics.json)；训练日志、
+confusion matrix counts）保存在 [TCN metrics](results/task_f/sampling_3/task_f_masked_prefix/metrics.json)
+和 [attention metrics](results/task_f/sampling_3/task_f_masked_prefix_attention/metrics.json)；训练日志、
 预测 CSV、曲线和模型权重也分别保留在
-`results/task_f_masked_prefix/` 与 `results/task_f_masked_prefix_attention/`。
+`results/task_f/sampling_3/task_f_masked_prefix/` 与 `results/task_f/sampling_3/task_f_masked_prefix_attention/`。
 
 
 #### Task F mixed-mask robustness benchmark（prefix=256, seed=42）
@@ -2716,43 +1982,16 @@ mixed-mask augmentation 可以改善连续缺失鲁棒性，但会与 random-mas
 以上数值来自 `seed=42` 的单次运行，尚不包含 multi-seed 置信区间。
 
 完整的 `225` 行结果（包含 accuracy、balanced accuracy、F1@0.5、F1@validation
-threshold、AUROC、AUPRC 和 Brier）见 [mixed-mask comparison CSV](results/task_f_mixed_mask_benchmark_seed42/comparison.csv)、
-[mixed-mask comparison Markdown](results/task_f_mixed_mask_benchmark_seed42/comparison.md)
-和原始嵌套指标 [metrics.json](results/task_f_mixed_mask_benchmark_seed42/metrics.json)。
+threshold、AUROC、AUPRC 和 Brier）见 [mixed-mask comparison CSV](results/task_f/sampling_3/task_f_mixed_mask_benchmark_seed42/comparison.csv)、
+[mixed-mask comparison Markdown](results/task_f/sampling_3/task_f_mixed_mask_benchmark_seed42/comparison.md)
+和原始嵌套指标 [metrics.json](results/task_f/sampling_3/task_f_mixed_mask_benchmark_seed42/metrics.json)。
 配置、checkpoint、训练日志和每个 cell 的 prediction arrays 均保存在
-`results/task_f_mixed_mask_benchmark_seed42/`；可复现实验入口为
-[run_task_f_mixed_mask_benchmark.py](scripts/run_task_f_mixed_mask_benchmark.py)。
+`results/task_f/sampling_3/task_f_mixed_mask_benchmark_seed42/`；可复现实验入口为
+[run_task_f_mixed_mask_benchmark.py](tasks/task_f/mixed_mask_benchmark.py)。
 
-### 7. Task G：stability-boundary sensitivity
+### 7. Panda 独立实验区
 
-Task G 的主实验是 pair_ic54、4998 systems、7 个 horizons；下表是保存的 pair disagreement
-统计，MLP 的 mean AUPRC/AUROC/F1 = 0.2103/0.7005/0.2982，为四个已保存模型中最高。
-
-| Model | Mean AUPRC | Mean AUROC | Mean F1 |
-| --- | ---: | ---: | ---: |
-| Constant | 0.1184 | 0.5000 | 0.2114 |
-| Logistic | 0.1635 | 0.6303 | 0.2555 |
-| Random Forest | 0.1935 | 0.6656 | 0.2671 |
-| MLP | **0.2103** | **0.7005** | **0.2982** |
-
-| Horizon | Pair disagreement | Systems with any disagreement |
-| ---: | ---: | ---: |
-| 500 | 0.1276 | 0.5298 |
-| 800 | **0.1317** | 0.5488 |
-| 1500 | 0.1303 | **0.5540** |
-| 2500 | 0.1249 | 0.5432 |
-| 4000 | 0.1170 | 0.5300 |
-| 6500 | 0.1078 | 0.5084 |
-| 10000 | 0.0987 | 0.4850 |
-
-pair disagreement 在 horizon=800 附近最高，system-level any-disagreement 在 1500 达到
-峰值。配置请求了 XGBoost，但该次运行没有保存 XGBoost prediction/metrics，因此不能
-把它加入比较。原始文件：[Task G summary](results/task_g_boundary_sensitivity/summary.md)、
-[dataset summary](results/task_g_boundary_sensitivity/dataset_summary.json)。
-
-### 8. Panda 独立实验区
-
-以下结果来自 <code>experiments/panda_threebody</code> 的历史/隔离 pipeline，和主项目
+以下结果来自 <code>experiments/foundation_models</code> 的历史/隔离 pipeline，和主项目
 Task E 的统一窗口 benchmark 分开记录。
 
 #### 7.1 unbound classifier
@@ -2785,11 +2024,11 @@ stable-positive）如下。这里的 head 以各目录的 <code>run_config.json<
 | zero-shot orbital15 | 64 | 4.17944e9 | 3950.24 | 55.5869 |
 | zero-shot orbital15 | 128 | 6.29700e9 | 4515.44 | 60.3770 |
 
-详细路径和训练配置见 [experiments/panda_threebody/reports/results_summary.md](experiments/panda_threebody/reports/results_summary.md)、
-[Panda classifier metrics](experiments/panda_threebody/outputs/panda_unbound_dataset/panda_unbound_orbital15_dataset/metrics.json)
+详细路径和训练配置见 [experiments/foundation_models/reports/results_summary.md](experiments/foundation_models/reports/results_summary.md)、
+[Panda classifier metrics](experiments/foundation_models/outputs/panda_unbound_dataset/panda_unbound_orbital15_dataset/metrics.json)
 及各 <code>panda_task_b_split_*</code> 子目录。
 
-### 9. Historical notebook-only 结果
+### 8. Historical notebook-only 结果
 
 这些结果来自 notebook 的已保存输出，标签和 split 与当前 production runner 不完全相同，
 所以只作为历史记录，不与上面的正式表直接排序。
@@ -2798,7 +2037,6 @@ stable-positive）如下。这里的 head 以各目录的 <code>run_config.json<
 | --- | --- | --- |
 | task_a.ipynb | system label = “32 条 variation 中任意一条稳定”，train/test=3998/1000 | MLP AUC/AP/F1/Acc/Prec/Recall = 0.8489/0.9029/0.8434/0.7890/0.8280/0.8593；XGB = 0.8458/0.9045/0.8478/0.7900/0.8136/0.8850 |
 | task_b.ipynb | soft-time / early-prefix，64 bins，train/val/test=125963/13996/19994 | notebook 最终输出 AUC=0.9689，F1=0.8548，Acc=0.9039；模型名未在保存输出中可靠记录 |
-| task_c.ipynb | 9 horizons = 1100/1500/2000/3000/4000/5000/7000/8500/10000，prefix=200 | baseline overall/final MAE=0.3735/0.3480；direct=0.0768/0.0857；trajectory-context=0.0748/0.1076；dual=0.0627/0.0947 |
 | task_d.ipynb | notebook 说明 threshold=10000、lyapunov proxy | 没有保存可复核的 stream metrics；对应目录中的旧 metrics 实际是 threshold=1000 |
 
 Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
@@ -2806,66 +2044,39 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 [task_c.ipynb](jupyter_notebook/task_c.ipynb)、
 [task_d.ipynb](jupyter_notebook/task_d.ipynb)。
 
-### 10. 未完成、部分完成与不纳入正式排名的运行
+### 9. 未完成、部分完成与不纳入正式排名的运行
 
 - Task A 的 <code>fraction_mlp_base_cuda</code>、<code>fraction_mlp_cuda_smoke</code> 没有
   可用最终 metrics；<code>h=20000</code> 只属于超出数据有效范围的边界测试。
-- Task B 的新高分辨率 `sampling_3`、`prefix=256/512` 目前已有 MLP、CNN、TCN、
+- Task B 的新高分辨率 `sampling_3`、`prefix=64/128/256/512` 目前已有 MLP、CNN、TCN、
   Panda-72M、Chronos-2 和 Stats XGBoost 的可复核结果；GRU/Attention 仍未完成。
 - Task B 的 group_fraction / group_attention 入口在代码中存在，但本仓库当前没有可复核的
   最终结果文件，因此不虚构其测试指标。
-- Task D prefix 运行的 censoring fraction 为 0.886154，说明它更像高 censoring
-  的诊断实验，不能和 initial run 当作同一个预测问题。
 - Task E 有若干只保存 config/feature metadata 的目录；没有 test metrics 的运行不纳入
   统一 benchmark。
-- <code>runs/panda_temporal_adapter_full</code> 只有配置，没有最终 metrics；只有
-  <code>runs/panda_temporal_adapter_full_20k</code> 的指标列入上面的历史 Panda adapter 记录。
-- Task G 的 XGBoost 被请求但没有保存预测/指标。
+- <code>results/task_e/sampling_2/panda_temporal_adapter_full</code> 只有配置，没有最终 metrics；只有
+  <code>results/task_e/sampling_2/panda_temporal_adapter_full_20k</code> 的指标列入上面的历史 Panda adapter 记录。
 - 训练日志中的中间 epoch 指标和重复重跑结果都保留在产物目录，但本节只把有明确最终
   test/validation 汇总的运行作为结果。
 
 ## Script Entry Points
 
-- `Task A`: [tasks/task_a/main.py](tasks/task_a/main.py)
-- `Task B`: [tasks/task_b/main.py](tasks/task_b/main.py)
-- `Task C`: [tasks/task_c/main.py](tasks/task_c/main.py)
-- `Task D`: [tasks/task_d/main.py](tasks/task_d/main.py)
-- `Task E`: [tasks/task_e/main.py](tasks/task_e/main.py)
-- `Task F`: [tasks/task_f/main.py](tasks/task_f/main.py)
-- `Task G`: [tasks/task_g/main.py](tasks/task_g/main.py)
+- `Task A`: [scripts/task_a.py](scripts/task_a.py)（`--resolution low`）
+- `Task B`: [scripts/task_b.py](scripts/task_b.py)（`--resolution high|low`）
+- `Task C`: [scripts/task_c.py](scripts/task_c.py)（`--resolution low|high`）；历史 fraction 入口为 [tasks/task_c/main.py](tasks/task_c/main.py)
+- `Task D`: [scripts/task_d.py](scripts/task_d.py)（`--resolution high`）
+- `Task E`: [scripts/task_e.py](scripts/task_e.py)（`--resolution low|high`）；完整 E1/E2 复现用 [scripts/task_e.sh](scripts/task_e.sh)
+- `Task F`: [scripts/task_f.py](scripts/task_f.py)（`--resolution high`）
+
+辅助评估和消融在各 `tasks/` 包中，见 [任务代码地图](tasks/README.md)。
 
 ## Reproducible Commands
 
-下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；如在别的机器上运行，需要先安装 [environment.yml](environment.yml)、[requirement.txt](requirement.txt) 和可选的 [requirements-foundation.txt](requirements-foundation.txt)。
+下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；新机器请按 [README 安装说明](README.md#install) 使用 [environment.yml](environment.yml) 和 [requirements.lock](requirements.lock) 建立唯一环境。
 
 ### Task A
 
-当前 `results/task_a/config.json` 对应的主实验：
-
-```bash
-conda run -n stellar python -m tasks.task_a \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --group-size 32 \
-  --time-horizon 10000 \
-  --target-mode stable_fraction \
-  --output-dir results/task_a \
-  --features aratios,mratios,eccs,incs,APs,LANs \
-  --models mlp,xgboost \
-  --mlp-size large \
-  --xgb-size strong \
-  --test-size 0.2 \
-  --val-size 0.1 \
-  --seed 42 \
-  --batch-size 128 \
-  --epochs 50 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --early-stopping-patience 15 \
-  --early-stopping-min-delta 1e-4 \
-  --mlp-loss mse \
-  --device cuda
-```
+当前 Task A 的 sampling 2 公共切分主结果使用上文 [Task A](#task-a-group-stability-from-initial-conditions) 的 70/15/15 命令，结果位于 `results/task_a/sampling_2/task_a_common/`。历史 70/10/20 expanded rerun 的结果已删除；其测试集合与公共切分不同。
 
 常用参数：
 
@@ -2877,61 +2088,49 @@ conda run -n stellar python -m tasks.task_a \
 
 ### Task B
 
-当前 `results/task_b/config.json` 对应的 trajectory binary 主实验：
+当前 sampling 3 主实验的 MLP/CNN/TCN 使用 [scripts/task_b.py](scripts/task_b.py)。以下命令以 `prefix=128` 为例；其他正式前缀为 `64/256/512`，应分别设置 `--prefix-len` 和新的 `--output-dir`。保存的 [prefix 128 配置](results/task_b/sampling_3/task_b_sampling3_prefix128/config.json) 使用 `batch-size=2048`、`epochs=50` 和 `seed=42`。
 
 ```bash
-conda run -n stellar python -m tasks.task_b \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --output-dir results/task_b \
-  --representation orbital15 \
-  --target-mode trajectory_binary \
-  --group-size 32 \
-  --group-aggregation concat \
-  --prefix-len 200 \
-  --time-stride 1 \
+conda run -n stellar python scripts/task_b.py --resolution high \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --sampling-id 3 \
+  --prefix-len 128 \
   --time-horizon 10000 \
-  --models svm,cnn,tcn,attention \
-  --test-size 0.125 \
-  --val-size 0.1 \
-  --seed 42 \
-  --batch-size 256 \
+  --models mlp,cnn,tcn \
+  --split-manifest configs/splits/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv \
+  --batch-size 2048 \
   --epochs 50 \
   --early-stopping-patience 8 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --attention-heads 4 \
-  --dropout 0.2 \
-  --num-workers 0 \
-  --device cuda
+  --seed 42 \
+  --device cuda \
+  --output-dir results/task_b/sampling_3/reproduce_task_b_prefix128
 ```
 
-如需把新增的 GRU 一起加入 trajectory binary 对比，将上面的模型列表改为：
+Summary + XGBoost、Panda 和 Chronos-2 分支的入口见 [复现映射](docs/reproduction.md#task-bc-prefix-input) 与上文当前主实验的结果目录。旧版 sampling 2 的 SVM/CNN/TCN/GRU/Attention 和 `group_fraction` 实验由 `python scripts/task_b.py --resolution low` 运行；它们不属于上述 sampling 3 主结果。
+
+当前 sampling 3 主结果的 trajectory/system 两层指标由以下脚本从已保存预测统一计算：
 
 ```bash
---models svm,cnn,gru,tcn,attention
+conda run -n stellar python -m tasks.task_b.evaluate_highres_two_level
 ```
 
-GRU 默认使用两层单向结构；可通过 `--gru-layers` 和 `--hidden-dim` 调整层数与 hidden width。
-
-基于已保存的 common-split predictions 重算 trajectory binary 与聚合 system stability
-两层指标，并导出 CSV、Markdown 和 LaTeX 表格：
+以下命令仅用于 sampling 2 历史 common-split predictions 的两层评估，并导出 CSV、Markdown 和 LaTeX 表格：
 
 ```bash
-conda run -n stellar python scripts/evaluate_task_b_two_level.py
+conda run -n stellar python -m tasks.task_b.evaluate_two_level
 ```
 
-输出目录为 `results/task_b_common/two_level_evaluation/`。该命令只做评估和聚合，
+输出目录为 `results/task_b/sampling_2/task_b_common/two_level_evaluation/`。该命令只做评估和聚合，
 不会重新训练模型。
 
 运行 Task A/Task B at-risk system ablation，排除任意 variation 已在对应 prefix 内
 unbound 的 systems：
 
 ```bash
-conda run -n stellar python scripts/evaluate_task_ab_future_only_ablation.py
+conda run -n stellar python -m tasks.comparisons.future_only_ablation
 ```
 
-输出目录为 `results/task_ab_future_only_ablation/`；该命令同样只读取已保存预测并
+输出目录为 `results/comparisons/dataset_unknown/task_ab_future_only_ablation/`；该命令同样只读取已保存预测并
 执行过滤与指标计算。System-level 输出保留完整 32-variation system，并提供 paired
 bootstrap；trajectory-level 输出只保留在指定 cutoff 后仍 bound 的轨迹，使用
 stable-positive Accuracy/F1/AUROC/AUPRC。`T>2560` cohort 会在完全相同的 10,189 条
@@ -2939,33 +2138,9 @@ stable-positive Accuracy/F1/AUROC/AUPRC。`T>2560` cohort 会在完全相同的 
 `trajectory_at_risk_metrics.csv`、`trajectory_at_risk_table.md` 和
 `trajectory_at_risk_table.tex`。
 
-Group fraction / set-attention 版本：
+历史探索用的 `group_fraction` / `set_attention` 入口仍在 [tasks/task_b/main.py](tasks/task_b/main.py)，当前没有可复核的最终结果，不列入 sampling 3 主实验的复现命令。
 
-```bash
-conda run -n stellar python -m tasks.task_b \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --output-dir results/task_b_group_attention \
-  --target-mode group_fraction \
-  --group-size 32 \
-  --group-aggregation set_attention \
-  --prefix-len 100 \
-  --time-stride 1 \
-  --models group_attention \
-  --test-size 0.125 \
-  --val-size 0.1 \
-  --seed 42 \
-  --batch-size 256 \
-  --epochs 20 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --hidden-dim 96 \
-  --dropout 0.2 \
-  --num-workers 0 \
-  --device cuda
-```
-
-常用参数：
+旧版 `python scripts/task_b.py --resolution low` 的常用参数：
 
 - `--representation orbital15|full`: `orbital15` 是 15 通道；`full` 会使用更宽的 orbital + geometry/time stack
 - `--target-mode trajectory_binary|group_fraction`: 单 trajectory 分类或 system stable fraction 回归
@@ -2977,166 +2152,48 @@ conda run -n stellar python -m tasks.task_b \
 
 ### Task C
 
-当前 `results/task_c/config.json` 对应的主实验：
+当前 sampling 3 的 20-bin survival 主结果使用 `tasks.task_c.survival`。以下命令复现 raw/Stats 分支，配置对应 [sampling 3 raw config](results/task_c/sampling_3/task_c_sampling3_prefix128_raw/config.json)，使用与 Task B 相同的 complete-system manifest：
 
 ```bash
-conda run -n stellar python -m tasks.task_c \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --output-dir results/task_c \
-  --group-size 32 \
-  --prefix-len 100 \
-  --time-stride 1 \
-  --future-times 500,800,1500,2500,4000,6500,10000 \
-  --models baseline,direct,direct_mean_std,traj,dual \
-  --encoder-type cnn \
-  --test-ratio 0.2 \
-  --val-ratio 0.1 \
-  --seed 42 \
-  --batch-size 32 \
-  --epochs 40 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --hidden-dim 128 \
-  --dropout 0.2 \
-  --num-workers 0 \
-  --device cuda
-```
-
-Task C 的 initial-condition 子实验只使用每个 system 在 `t=0` 的一份
-`orbital15` 特征，不读取后续轨迹；由于 32 条 variation 的 IC 相同，使用
-一个简单的 `15 → 128 → 128 → 64 → 7` MLP 预测 7 个 future horizons：
-
-```bash
-conda run -n stellar python -m tasks.task_c \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --output-dir results/task_c_initial_condition_mlp \
-  --input-mode initial \
-  --group-size 32 \
-  --future-times 500,800,1500,2500,4000,6500,10000 \
-  --models baseline,ic_mlp \
-  --test-ratio 0.2 \
-  --val-ratio 0.1 \
-  --seed 42 \
-  --batch-size 128 \
-  --epochs 40 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --hidden-dim 128 \
-  --dropout 0.2 \
-  --num-workers 0 \
-  --device cuda
-```
-
-`initial` 模式固定读取 `orbital15` 的 `t=0` 特征，并将 32 条轨迹的
-survival labels 汇总成 system-level survival curve；它与 prefix 模式共享
-future horizons、system split、hazard head 和评估指标。
-
-常用参数：
-
-- `--max-shards`, `--rows-per-shard`, `--max-cases`: 限制数据量
-- `--future-times`: 修改 survival curve 的评估 horizons
-- `--models baseline,direct,direct_mean_std,traj,dual`: 选择要跑的模型
-- `--encoder-type cnn|gru|attention`: 神经网络 encoder
-- `--system-loss-weight`, `--consistency-weight`: 控制 `traj`/`dual` 双头 loss 中 system head 和一致性项的权重
-- `--no-geom --no-time`: 移除 geometry / normalized time features
-
-Prefix 长度与 variation 数量的二维 ablation 可使用：
-
-```bash
-conda run -n stellar python -m tasks.task_c.ablation \
-  --output-dir results/task_c_ablation \
-  --prefix-lens 10,20,50,100 \
-  --variation-counts 2,4,8,16,32 \
-  --models baseline,direct,traj,dual \
+conda run -n stellar python -m tasks.task_c.survival \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --sampling-id 3 \
+  --prefix-len 128 \
   --prefix-representation orbital15 \
+  --hazard-t-min 1 \
+  --hazard-t-max 10000 \
+  --hazard-bins 20 \
+  --future-times 500,800,1500,2500,4000,6500,10000 \
   --variation-target full32 \
-  --device cuda
+  --split-manifest configs/splits/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv \
+  --models baseline,stats,cnn,tcn,gru,attention \
+  --batch-size 64 \
+  --epochs 20 \
+  --seed 42 \
+  --device cuda \
+  --output-dir results/task_c/sampling_3/reproduce_task_c_raw
 ```
 
-该 runner 使用平衡、嵌套的 variation 子集；减少输入 variation 时仍预测完整
-32 条 variation 的 system-level survival fraction，并在 `summary.csv` 中汇总每个 cell。
-future horizons 沿用 Task C 原始的 `time_unbound` absolute 时间轴；不要用轨迹
-采样时间去平移它，因为两者单位不同。
-它会自动跳过已有 `metrics.json` 的 cell，适合中断后继续；需要重跑时加
-`--force`。runner 默认先在 `results/task_c_ablation/_cache` 构建一次共享 prefix
-cache；如果缓存放在更快的本地磁盘，可用 `--cache-dir PATH` 指定，并用
-`--rebuild-cache` 强制重建。
+Panda 与 Chronos-2 的 survival head 使用各自冻结的 embedding cache；运行参数见 [Panda config](results/task_c/sampling_3/task_c_sampling3_prefix128_panda/config.json) 和 [Chronos-2 config](results/task_c/sampling_3/task_c_sampling3_prefix128_chronos2/config.json)，cache 生成入口见 [复现映射](docs/reproduction.md)。完整的 Task C 主结果只使用上述 sampling 3 event-time 流程。
 
 ### Task D
 
-当前 Task D 的 initial-condition 主实验预测半长轴 Lyapunov proxy：
+当前 sampling 3 主结果的单目标中位数回归入口：
 
 ```bash
 conda run -n stellar python -m tasks.task_d \
-  --task-setting initial \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --group-size 32 \
-  --threshold 10000 \
-  --target-mode lyapunov_proxy \
-  --label-observable smax \
-  --aggregation min \
-  --censoring-rule all_pairs \
-  --feature-aggregation first \
-  --test-size 0.2 \
+  --dataset-dir dataset_sampling_3_prefix1024 \
+  --sampling-id 3 \
+  --threshold-power 5 \
+  --min-valid-pairs 8 \
+  --models constant,xgboost,mlp \
   --seed 42 \
-  --output-dir results/task_d_initial \
-  --completion-table-name completed_systems_sampling_2.txt \
-  --prefix-len 200 \
-  --prefix-time-stride 1 \
-  --sequence-aggregation mean_std \
-  --mlp-epochs 80 \
-  --cnn-epochs 80 \
-  --batch-size 128 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --dropout 0.1 \
-  --val-fraction 0.1 \
-  --patience 12 \
-  --loss huber \
-  --huber-beta 0.5
+  --bootstrap-samples 2000 \
+  --device cuda \
+  --output-dir results/task_d/sampling_3/reproduce_task_d_median
 ```
 
-Prefix setting：
-
-```bash
-conda run -n stellar python -m tasks.task_d \
-  --task-setting prefix \
-  --target-mode lyapunov_proxy \
-  --label-observable smax \
-  --dataset-dir dataset_v3 \
-  --sampling-id 2 \
-  --group-size 32 \
-  --threshold 1000 \
-  --aggregation min \
-  --censoring-rule all_pairs \
-  --prefix-len 200 \
-  --prefix-time-stride 1 \
-  --sequence-aggregation mean_std \
-  --output-dir results/task_d_prefix_tobs_200 \
-  --mlp-epochs 80 \
-  --cnn-epochs 80 \
-  --batch-size 128 \
-  --loss huber \
-  --huber-beta 0.5
-```
-
-常用参数：
-
-- `--force-recompute`: 忽略缓存标签并重新计算 proxy
-- `--target-mode lyapunov_proxy`: 预测 `R_ij(t) >= threshold` 的首次采样时间；这是默认模式
-- `--threshold`: 主实验默认 `10000`；建议用 sensitivity runner 同时报告 `1000/3000/10000/30000`
-- `--aggregation min|median|mean`: 聚合 16 个 pair 的 proxy time；默认 `min`
-- `--target-mode fitted_lyapunov_time`: 使用增长 slope 倒数的旧目标
-- `--lyapunov-aggregation max|median|mean`: 控制 Lyapunov pair slope 的聚合方式
-- `--require-pair-consistency`: 恢复 pair 间 MAD 一致性筛选
-- `--lambda-r2-min`, `--min-valid-lambda-pairs`, `--max-pair-log-mad`: 调整 slope 与 pair consistency 质量筛选
-- `--feature-aggregation first|mean_std`: initial setting 的 feature 聚合方式
-- `--no-mlp`, `--no-cnn-orbital`, `--no-cnn-phase-space`, `--no-set-cnn`: 关闭对应神经模型
-- `--loss mse|huber`: 神经网络回归损失
-- `--allow-incomplete-valid-group`: 放宽完整 `32` 条有效 variation 的要求
+当前保存的参考结果为 [task_d_median_decorrelation](results/task_d/sampling_3/task_d_median_decorrelation/metrics.json)。`--no-interpolation` 可切换为首次离散 crossing；这会改变标签定义，不能与上表指标直接对比。
 
 ### Task E
 
@@ -3205,7 +2262,7 @@ conda run -n stellar python -m tasks.task_e \
   --max_scaler_trajectories 70 \
   --max_windows_per_trajectory 5 \
   --epochs 2 \
-  --output_dir runs/task_e_tcn_smoke
+  --output_dir results/task_e/sampling_2/task_e_tcn_smoke
 ```
 
 常用参数：
@@ -3224,7 +2281,7 @@ conda run -n stellar python -m tasks.task_e \
 - `--require_complete_systems` / `--no-require_complete_systems`: 是否只保留完整有效的 32-variation system
 - `--amp`: 启用 mixed precision
 - `--hf-local-files-only` / `--no-hf-local-files-only`: foundation checkpoint 是否只从本地 cache 读取
-- Panda 依赖和 pretrained 权重约定见 [experiments/panda_threebody/README.md](experiments/panda_threebody/README.md)
+- Panda 依赖和 pretrained 权重约定见 [experiments/foundation_models/README.md](experiments/foundation_models/README.md)
 
 ### Task F
 
@@ -3238,7 +2295,7 @@ conda run --no-capture-output -n stellar python -m tasks.task_f \
   --time-stride 1 \
   --mask-ratios 0,25,50,75 \
   --models tcn \
-  --output-dir results/task_f_masked_prefix \
+  --output-dir results/task_f/sampling_3/task_f_masked_prefix \
   --device cuda
 
 conda run --no-capture-output -n stellar python -m tasks.task_f \
@@ -3248,57 +2305,23 @@ conda run --no-capture-output -n stellar python -m tasks.task_f \
   --time-stride 1 \
   --mask-ratios 0,25,50,75 \
   --models attention \
-  --output-dir results/task_f_masked_prefix_attention \
+  --output-dir results/task_f/sampling_3/task_f_masked_prefix_attention \
   --device cuda
 ```
 
-### Task G
-
-当前 `results/task_g_boundary_sensitivity/config.json` 对应的主实验：
-
-```bash
-conda run -n stellar python -m tasks.task_g \
-  --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
-  --completed-systems dataset_v3/completed_systems_sampling_2.txt \
-  --output-dir results/task_g_boundary_sensitivity \
-  --representation pair_ic54 \
-  --models constant logistic random_forest xgboost mlp \
-  --horizons 500 800 1500 2500 4000 6500 10000 \
-  --group-size 32 \
-  --seed 42 \
-  --rf-estimators 500 \
-  --rf-min-samples-leaf 2 \
-  --xgb-estimators 500 \
-  --xgb-learning-rate 0.05 \
-  --xgb-max-depth 4 \
-  --batch-size 512 \
-  --epochs 30 \
-  --lr 0.001 \
-  --weight-decay 0.0001 \
-  --dropout 0.2 \
-  --patience 8
-```
-
-常用参数：
-
-- `--representation pair_ic54|pair_ic72`: 选择 pair 初值特征维度
-- `--models constant logistic random_forest xgboost mlp`: 空格分隔的模型列表
-- `--horizons`: 空格分隔的评估时间点
-- `--max-systems N`: 限制 systems 数量做 smoke test
-- `--device cuda`: 显式指定 MLP 训练设备
-
 ## Environment
 
-大多数脚本默认在 `stellar` conda 环境下运行。基础依赖可以从 [environment.yml](environment.yml) 和 [requirement.txt](requirement.txt) 查看；foundation-model 额外依赖见 [requirements-foundation.txt](requirements-foundation.txt)。
+大多数脚本默认在 `stellar` conda 环境下运行。所有任务共用 [requirement.txt](requirement.txt) 的依赖输入和 [requirements.lock](requirements.lock) 的完整锁定版本；安装步骤见 [README](README.md#install)。
 
 ## Model Settings
 
 ### Task A
 - **XGBoost**
-- **MLP-flatten-base**: `544 → 256 → 128 → 64 → K` — params ~180K
+- **MLP-base**: `15 → 128 → 128 → 64 → 1`，逐 system 输入 `orbital15` 静态初值；回归与二分类分别使用对应的输出和损失
 
 ### Task B
-- default representation: `orbital15` prefix (`15` channels per step)
+- 当前 sampling 3 主实验：`orbital15` prefix（每步 `15` 通道），前缀为 `64/128/256/512`，模型包含 MLP、CNN、TCN、Panda、Chronos-2 和 Summary + XGBoost
+- 以下参数量对应旧版 sampling 2 入口的 SVM/CNN/TCN/Attention 自动规模：
 - **SVM**: params determined by `T * 15`
 - **CNN**
   - `T=100`: ~`92K`
@@ -3314,13 +2337,10 @@ conda run -n stellar python -m tasks.task_g \
   - `T=500`: ~`931K`
 
 ### Task C
-- **Shared CNN-DeepSets-Base** — params ~300K
-- **Dual Attention**: `d=128, time_layers=2, set_layers=2` — params ~1M–1.5M
+- 当前 sampling 3 模型：Stats、CNN、TCN、GRU、Attention，以及 Panda-72M / Chronos-2 冻结 embedding 的 survival head；具体结构与参数见各主结果的 `config.json`。
 
 ### Task D
-- **XGBoost**
-- **MLP-Base**: `summary → 256 → 128 → 64 → 1` — params ~100K
-- **CNN-Base prefix** — params ~100K–150K
+- 当前模型：constant median、XGBoost、`15 → 256 → 128 → 1` MLP；输入为一条 nominal variation 的 `orbital15` 静态初值。
 
 ### Task E
 - **TCN-Forecast-Base** — params ~0.5M–1M

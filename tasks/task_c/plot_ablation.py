@@ -391,7 +391,7 @@ def plot_best_config_bars(rows: list[dict[str, str]], output: Path) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plot Task C prefix/variation ablation results.")
-    parser.add_argument("--result-dir", type=Path, default=Path("results/task_c_ablation"))
+    parser.add_argument("--result-dir", type=Path, default=Path("results/task_c/sampling_2/task_c_ablation_common"))
     parser.add_argument("--allocation-model", choices=["best", *MODEL_ORDER], default="best")
     return parser
 

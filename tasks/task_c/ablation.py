@@ -26,7 +26,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task C prefix/variation-count ablation grid.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c_ablation"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c/sampling_2/task_c_ablation_common"))
     parser.add_argument(
         "--cache-dir",
         type=Path,

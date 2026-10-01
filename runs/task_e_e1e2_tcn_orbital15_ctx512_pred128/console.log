@@ -1,3 +1,0 @@
-[task_e] starting model=tcn representation=orbital15 device=cuda amp=False CUDA_VISIBLE_DEVICES=<unset>
-[task_e] CUDA device: NVIDIA RTX PRO 4500 Blackwell Server Edition
-[data] loaded prepared cache runs/task_e_prepared_cache_orbital15_ctx512_pred128: train=2678116, val=600998, test=579577

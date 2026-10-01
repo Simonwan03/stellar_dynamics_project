@@ -94,7 +94,7 @@ class PipelineConfig:
     exclude_censored: bool = False
     test_size: float = 0.2
     random_state: int = 42
-    output_dir: str | Path = "./results/task_d_initial_lyapunov_proxy"
+    output_dir: str | Path = "./results/task_d/sampling_2/task_d_initial_lyapunov_proxy"
     require_complete_valid_group: bool = True
     completion_table_name: str = "completed_systems_sampling_2.txt"
     max_shards: int | None = None

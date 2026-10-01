@@ -62,7 +62,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-windows", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--models", type=str, default="naive,timesfm,chronos,patchtst")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "runs" / "foundation_trajectory_baselines")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "results" / "task_e" / "sampling_2" / "foundation_trajectory_baselines")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--torch-dtype", choices=["auto", "float32", "bfloat16", "float16"], default="auto")

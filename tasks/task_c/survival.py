@@ -9,7 +9,7 @@ encoder whose system curve is the mean of the 32 variation curves.
 
 Run with::
 
-    python -m tasks.task_c.survival --prefix-cache results/task_c_ablation/_cache \
+    python -m tasks.task_c.survival --prefix-cache results/task_c/sampling_2/task_c_ablation_common/_cache \
         --prefix-len 100 --models baseline,stats,cnn --epochs 40
 
 For a precomputed frozen foundation-model cache, use
@@ -641,7 +641,7 @@ def _load_embedding_cases(args: argparse.Namespace) -> tuple[np.ndarray, Any, li
     label_candidates: list[Path] = []
     if args.embedding_labels is not None:
         label_candidates.append(Path(args.embedding_labels))
-    label_candidates.append(Path("results/task_b_prefix_ablation") / f"prefix_{args.prefix_len}" / "labels_filtered.csv")
+    label_candidates.append(Path("results/task_b/sampling_2/task_b_common") / f"prefix_{args.prefix_len}" / "labels_filtered.csv")
     label_candidates.append(args.dataset_dir / f"completed_systems_sampling_{args.sampling_id}.txt")
     labels_path = next((path for path in label_candidates if path.exists()), None)
     if labels_path is None:
@@ -990,7 +990,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task C event-time discrete survival model.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c_survival20"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_c/sampling_2/task_c_survival20"))
     parser.add_argument("--prefix-cache", type=Path, default=None)
     parser.add_argument(
         "--embedding-cache",

@@ -278,7 +278,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "runs" / "panda_temporal_adapter")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "results" / "task_e" / "sampling_2" / "panda_temporal_adapter")
     parser.add_argument("--panda-model-id", type=str, default="GilpinLab/panda-72M")
     parser.add_argument(
         "--hf-local-files-only",

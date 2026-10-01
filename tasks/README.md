@@ -9,32 +9,37 @@ conda environment; on AWS, use whichever environment contains `h5py`, `numpy`, `
 
 ```text
 tasks/
-├── common/   # code shared by multiple tasks
-├── task_a/   # stability classification
+├── common/      # code shared by multiple tasks
+├── comparisons/ # cross-task A/B/C comparisons and budget studies
+├── task_a/      # stability classification
 ├── task_b/   # prefix classification
 ├── task_c/   # survival prediction
 ├── task_d/   # divergence-time regression
 ├── task_e/   # trajectory forecasting
-├── task_f/   # masked-prefix stability classification
-└── task_g/   # boundary sensitivity
+└── task_f/   # masked-prefix stability classification
 ```
 
-Every task can be launched as a package, for example
-`python -m tasks.task_e --help`. Task-specific implementation stays inside its
-package; imports between tasks are explicit. General visualization utilities
-live in `tools/`.
+Each final task has a thin entry point in `scripts/task_a.py` through
+`scripts/task_f.py`. Task-specific implementation stays inside its package;
+imports between tasks are explicit. General visualization utilities live in `tools/`.
 
 ### Code map
 
 | Task | Package entry | Main implementation | Additional entry points |
 | --- | --- | --- | --- |
-| A: initial-condition stability | `python -m tasks.task_a` | `task_a/main.py` | — |
-| B: prefix classification | `python -m tasks.task_b` | `task_b/data.py`, `task_b/main.py` | `task_b/phase_ensemble.py` is used by sampling scripts |
-| C: survival | `python -m tasks.task_c.survival` | `task_c/survival.py`, `task_c/cache.py` | `python -m tasks.task_c` is the historical fraction objective; ablation and plotting are ancillary |
-| D: median decorrelation time | `python -m tasks.task_d` | `task_d/quantile.py` | `python -m tasks.task_d.sensitivity`; `pipeline.py` is historical |
-| E: forecasting | `python -m tasks.task_e` | `task_e/data.py`, `models.py`, `foundation.py`, `metrics.py` | `python -m tasks.task_e.prepare`, `python -m tasks.task_e.report` |
-| F: masked prefix | `python -m tasks.task_f` | `task_f/main.py`, `models.py`, `summaries.py` | comparison runners in `scripts/` |
-| G: historical boundary sensitivity (outside manuscript A–F) | `python -m tasks.task_g` | `task_g/main.py` | — |
+| A: initial-condition stability | `python scripts/task_a.py --resolution low` | `task_a/main.py` | `python -m tasks.task_a` remains available |
+| B: prefix classification | `python scripts/task_b.py` | `task_b/highres.py`, `task_b/data.py` | `--resolution low` selects `task_b/main.py` (sampling 2); `--resolution high` selects `task_b/highres.py` (sampling 3) |
+| C: survival | `python scripts/task_c.py --resolution low/high` | `task_c/survival.py`, `task_c/cache.py` | `python -m tasks.task_c` runs the historical fraction objective |
+| D: median decorrelation time | `python scripts/task_d.py --resolution high` | `task_d/main.py`, `task_d/quantile.py` | threshold analyses are in `task_d/`; `pipeline.py` is historical |
+| E: forecasting | `python scripts/task_e.py --resolution low/high` | `task_e/data.py`, `models.py`, `foundation.py`, `metrics.py` | `bash scripts/task_e.sh` runs the saved E1/E2 sequence; preparation/reporting are in `task_e/` |
+| F: masked prefix | `python scripts/task_f.py --resolution high` | `task_f/main.py`, `models.py`, `summaries.py` | summary, block-mask, and mixed-mask comparisons are in `task_f/` |
+
+The resolution selector uses sampling 2 for low and sampling 3 for high.
+A supports low, D/F support high, and B/C/E support both. C/E retain low as
+the default for existing commands; B defaults to high. For C at high
+resolution, the entry point sets prefix 128, the survival lower horizon of 1,
+and the committed system split. The historical Task D sampling 2 pipeline has
+a different target and is not available through this selector.
 
 `tasks/common/` owns the shared dataset field order and perturbation pairs
 (`orbital_schema.py`), B/F sequence layers (`sequence_layers.py`), E/F
@@ -45,10 +50,10 @@ Existing imports through `task_b.main`, `task_d.pipeline`, and
 `task_f.masking`/`task_f.mixed_masking` remain available.
 
 The final A–F map and reported configs are in [docs/reproduction.md](../docs/reproduction.md).
-Experiment runners outside the task packages are in `scripts/`; exploratory
-analysis and plots are in `analysis/` and `plot/`. Generated artifacts are
-written to `results/` or `runs/`. These directories are not Python package
-entry points.
+Cross-task auxiliary experiments live in `comparisons/`. Shared
+split generation and input preflight checks live in `common/`. `scripts/` only
+contains thin Task A–F entry points. Exploratory analysis and plots live in
+`analysis/`; generated artifacts are written under `results/` by task and dataset.
 
 Task E defaults to group-aware splitting (`32` variations per base system),
 completion-table filtering, and scaler statistics computed only from valid
@@ -67,7 +72,7 @@ variation is unbound before that time, the label is `0`.
 
 ```bash
 conda run -n stellar python -m tasks.task_a \
-  --output-dir results/task_a \
+  --output-dir results/task_a/sampling_2/task_a_main \
   --models equation2,equation4,mlp,xgboost \
   --epochs 80
 ```
@@ -76,7 +81,7 @@ Binary all-stable classification:
 
 ```bash
 conda run -n stellar python -m tasks.task_a \
-  --output-dir results/task_a_binary_any \
+  --output-dir results/task_a/sampling_2/task_a_binary_any \
   --target-mode binary_any \
   --time-horizon 10000 \
   --models equation2,equation4,mlp,xgboost \
@@ -156,8 +161,8 @@ Use `--regroup --overwrite-tokenized` if you need to rebuild
 Hard-label classification from early trajectory prefixes.
 
 ```bash
-conda run -n stellar python -m tasks.task_b \
-  --output-dir results/task_b \
+conda run -n stellar python scripts/task_b.py --resolution low \
+  --output-dir results/task_b/sampling_2/task_b_main \
   --representation orbital15 \
   --prefix-len 100 \
   --models svm,cnn,gru,tcn,attention \
@@ -168,8 +173,8 @@ To predict the stable fraction across each 32-trajectory perturbation group
 from early prefixes:
 
 ```bash
-conda run -n stellar python -m tasks.task_b \
-  --output-dir results/task_b_group_fraction \
+conda run -n stellar python scripts/task_b.py --resolution low \
+  --output-dir results/task_b/sampling_2/task_b_group_fraction \
   --representation orbital15 \
   --target-mode group_fraction \
   --group-aggregation set_attention \
@@ -204,7 +209,7 @@ Early stopping defaults to `--early-stopping-patience 8`; set it to `0` to disab
 For a quick AWS smoke test:
 
 ```bash
-conda run -n stellar python -m tasks.task_b \
+conda run -n stellar python scripts/task_b.py --resolution low \
   --output-dir /tmp/task_b_smoke \
   --max-shards 1 \
   --rows-per-shard 512 \
@@ -220,7 +225,7 @@ Trajectory-level multi-horizon survival prediction for 32-variation ensembles.
 
 ```bash
 conda run -n stellar python -m tasks.task_c \
-  --output-dir results/task_c \
+  --output-dir results/task_c/sampling_2/task_c_main \
   --prefix-len 200 \
   --time-stride 1 \
   --models baseline,direct,direct_mean_std,traj,dual \
@@ -246,11 +251,13 @@ fractions.
 
 ### Event-time/censoring upgrade (20 bins)
 
+For the reported sampling-3 prefix models, the default `--prefix-representation orbital15` uses the same six HDF5 fields and 15-channel ordering as Task B. It excludes the optional geometry and normalized-time channels; `--prefix-representation full` selects the older wider stack. Frozen Panda/Chronos-2 heads are trained on embeddings computed from `orbital15` prefixes, so their head input is not the raw 15-channel sequence.
+
 For the event-time formulation use the separate entry point:
 
 ```bash
 conda run -n stellar python -m tasks.task_c.survival \
-  --prefix-cache results/task_c_ablation/_cache \
+  --prefix-cache results/task_c/sampling_2/task_c_ablation_common/_cache \
   --prefix-len 100 \
   --prefix-representation orbital15 \
   --models baseline,stats,cnn \
@@ -284,6 +291,8 @@ variation in Task C, with the same channel-major ordering as the Task B
 XGBoost baseline. Task C still applies train-only trajectory standardisation
 before the summaries are computed.
 
+The saved Task B common-split directories currently contain metadata but no `labels_filtered.csv`; recreate aligned labels from the original completion table before running frozen-embedding examples. Pass the exact labels used to build an embedding cache through `--embedding-labels`, so the fingerprint check can verify row order.
+
 Precomputed frozen Panda/Chronos embeddings can use the same target, loss, and
 hazard head without running the backbone again. In addition to `embedding_direct`
 and `embedding_meanstd`, `embedding_attention` learns a softmax weight over the
@@ -292,12 +301,12 @@ head:
 
 ```bash
 conda run -n stellar python -m tasks.task_c.survival \
-  --embedding-cache experiments/panda_threebody/outputs/panda_unbound_dataset/panda_task_b_prefix_96_features_aligned.float16.npy \
-  --embedding-labels results/task_b_prefix_ablation/prefix_100/labels_filtered.csv \
+  --embedding-cache experiments/foundation_models/outputs/panda_unbound_dataset/panda_task_b_prefix_96_features_aligned.float16.npy \
+  --embedding-labels results/task_b/sampling_2/task_b_common/prefix_96/labels_filtered.csv \
   --prefix-len 96 \
   --models baseline,embedding_direct,embedding_meanstd,embedding_attention \
   --hazard-bins 20 --epochs 10 --device cuda \
-  --output-dir results/task_c_survival20_panda
+  --output-dir results/task_c/sampling_2/task_c_survival20_common_prefix96_panda
 ```
 
 Use `--models baseline,embedding_attention` to run this pooling variant. It
@@ -326,7 +335,7 @@ For the prefix/variation-count ablation, run the reproducible grid driver:
 
 ```bash
 conda run -n stellar python -m tasks.task_c.ablation \
-  --output-dir results/task_c_ablation \
+  --output-dir results/task_c/sampling_2/task_c_ablation_common \
   --prefix-lens 10,20,50,100 \
   --variation-counts 2,4,8,16,32 \
   --models baseline,direct,traj,dual \
@@ -342,7 +351,7 @@ notebook and avoids loading the large geometry/full-stack arrays. Each cell is s
 under `prefix_<T>/variations_<N>/`, with the grid
 summary in `summary.csv`. Existing cells with `metrics.json` are skipped so the
 grid can be resumed; pass `--force` to rerun them. The runner first builds a
-shared prefix cache under `results/task_c_ablation/_cache`; use `--cache-dir`
+shared prefix cache under `results/task_c/sampling_2/task_c_ablation_common/_cache`; use `--cache-dir`
 to put this cache on a faster local disk and `--rebuild-cache` to recreate it.
 The horizons stay on the original `time_unbound` absolute time axis; the
 trajectory sampling clock uses different units and is not added to the horizons.
@@ -372,7 +381,7 @@ conda run -n stellar python -m tasks.task_d \
   --dataset-dir dataset_sampling_3_prefix1024 \
   --threshold-power 5 \
   --models constant,xgboost,mlp \
-  --output-dir results/task_d_median_decorrelation \
+  --output-dir results/task_d/sampling_3/task_d_median_decorrelation \
   --device cuda
 ```
 
@@ -388,7 +397,7 @@ For a threshold sensitivity run:
 conda run -n stellar python -m tasks.task_d.sensitivity \
   --threshold-powers 4 5 6 \
   --models constant,xgboost \
-  --output-dir results/task_d_median_decorrelation_sensitivity
+  --output-dir results/task_d/sampling_3/task_d_median_decorrelation_sensitivity
 ```
 
 ## Task E
@@ -403,14 +412,14 @@ conda run -n stellar python -m tasks.task_e \
   --context-len 512 \
   --pred-len 128 \
   --stride 20 \
-  --output_dir runs/task_e_ridge_orbital15_ctx512_pred128
+  --output_dir results/task_e/sampling_2/task_e_ridge_orbital15_ctx512_pred128
 ```
 
 For a large run, prepare the HDF5 window index and train-only scaler once:
 
 ```bash
 conda run -n stellar python -m tasks.task_e.prepare \
-  --cache-dir runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --cache-dir results/task_e/sampling_2/task_e_prepared_cache_orbital15_ctx512_pred128 \
   --data-glob "dataset_v3/results_batch_*_sampling_2.hdf5" \
   --completion-table dataset_v3/completed_systems_sampling_2.txt \
   --context-len 512 --pred-len 128 --stride 20 \
@@ -421,10 +430,10 @@ Then reuse it for each model:
 
 ```bash
 conda run -n stellar python -m tasks.task_e \
-  --prepared-cache runs/task_e_prepared_cache_orbital15_ctx512_pred128 \
+  --prepared-cache results/task_e/sampling_2/task_e_prepared_cache_orbital15_ctx512_pred128 \
   --model chronos2 \
   --foundation_batch_size 32 \
-  --output_dir runs/task_e_chronos2
+  --output_dir results/task_e/sampling_2/task_e_chronos2
 ```
 
 The cache stores window records and metadata, not a copy of the HDF5 files. It
@@ -466,8 +475,8 @@ Task E 的主协议包括 E1 one-shot `512 -> 128` 和 E2 四个递归 `128` 步
 
 ```bash
 conda run -n stellar python -m tasks.task_e.report \
-  --run-dirs runs/task_e_e1e2_ridge runs/task_e_e1e2_tcn runs/task_e_e1e2_panda \
-  --output-dir results/task_e_e1e2_summary
+  --run-dirs results/task_e/sampling_2/task_e_e1e2_ridge results/task_e/sampling_2/task_e_e1e2_tcn results/task_e/sampling_2/task_e_e1e2_panda \
+  --output-dir results/task_e/sampling_2/task_e_e1e2_summary
 ```
 
 Every run writes `config.json`, `feature_metadata.json`, `scaler.npz`,
@@ -488,7 +497,7 @@ conda run -n stellar python -m tasks.task_e \
   --max_scaler_trajectories 70 \
   --max_windows_per_trajectory 5 \
   --epochs 2 \
-  --output_dir runs/task_e_tcn_smoke
+  --output_dir results/task_e/sampling_2/task_e_tcn_smoke
 ```
 
 Foundation dependencies are optional. Missing Chronos-2 or Panda
@@ -504,7 +513,7 @@ Dataset trajectory visualization:
 conda run -n stellar python tools/visualize_dataset_v3_trajectories.py \
   --row 0 \
   --time-stride 4 \
-  --output-dir results/dataset_v3_trajectory_viz
+  --output-dir results/shared_analysis/sampling_2/dataset_v3_trajectory_viz
 ```
 
 Add `--animation --time-stride 20` to save a GIF animation without making the
@@ -526,25 +535,9 @@ python -m tasks.task_f \
   --prefix-len 256 \
   --mask-ratios 0,25,50,75 \
   --models tcn \
-  --output-dir results/task_f_masked_prefix
+  --output-dir results/task_f/sampling_3/task_f_masked_prefix
 ```
 
 The masking implementation is in `tasks/common/`; the modules under
 `task_f/` keep the older import paths for experiment scripts. Summary-feature,
-block-mask, and mixed-mask comparisons have separate runners in `scripts/`.
-
-## Task G
-
-Predicts whether paired perturbations from the same system disagree on
-stability at each configured horizon:
-
-```bash
-python -m tasks.task_g \
-  --data-glob 'dataset_v3/results_batch_*_sampling_2.hdf5' \
-  --completed-systems dataset_v3/completed_systems_sampling_2.txt \
-  --representation pair_ic54 \
-  --output-dir results/task_g_boundary_sensitivity
-```
-
-The pair convention and initial-condition field order are defined in
-`tasks/common/orbital_schema.py`.
+block-mask, and mixed-mask comparisons live in `tasks/task_f/`.

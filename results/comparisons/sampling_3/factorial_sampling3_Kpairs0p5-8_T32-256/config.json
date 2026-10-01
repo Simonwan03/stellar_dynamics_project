@@ -1,0 +1,220 @@
+{
+  "K_definition": "M_pairs=0.5 observes one randomly selected member of one pair; M_pairs>=1 observes both members of each selected pair",
+  "audit_csv": "/home/ubuntu/github/stellar_dynamics_project/results/shared_analysis/sampling_3/system_level_audit_sampling_3/system_level_statistics.csv",
+  "bootstrap_replicates": 2000,
+  "cache_path": "/data/dataset_sampling_3_prefix1024_float64/.fixed_budget_sampling3_orbital15_prefix1024.f32",
+  "dataset_dir": "/data/dataset_sampling_3_prefix1024_float64",
+  "evaluation": {
+    "bootstrap_replicates": 2000,
+    "bootstrap_unit": "base system",
+    "holm_adjustment": "within each fixed-T pair-completion/breadth or fixed-M depth slice",
+    "primary_metric": "system-level MAE"
+  },
+  "experiment": "sampling3_pair_aware_KT_factorial",
+  "feature_cache": {
+    "dtype": "float32",
+    "path": "/data/dataset_sampling_3_prefix1024_float64/.fixed_budget_sampling3_orbital15_prefix1024.f32",
+    "shape": [
+      160000,
+      1024,
+      15
+    ]
+  },
+  "grid": [
+    {
+      "M_pairs": 0.5,
+      "T": 32,
+      "stored_points": 32,
+      "trajectories": 1
+    },
+    {
+      "M_pairs": 0.5,
+      "T": 64,
+      "stored_points": 64,
+      "trajectories": 1
+    },
+    {
+      "M_pairs": 0.5,
+      "T": 128,
+      "stored_points": 128,
+      "trajectories": 1
+    },
+    {
+      "M_pairs": 0.5,
+      "T": 256,
+      "stored_points": 256,
+      "trajectories": 1
+    },
+    {
+      "M_pairs": 1,
+      "T": 32,
+      "stored_points": 64,
+      "trajectories": 2
+    },
+    {
+      "M_pairs": 1,
+      "T": 64,
+      "stored_points": 128,
+      "trajectories": 2
+    },
+    {
+      "M_pairs": 1,
+      "T": 128,
+      "stored_points": 256,
+      "trajectories": 2
+    },
+    {
+      "M_pairs": 1,
+      "T": 256,
+      "stored_points": 512,
+      "trajectories": 2
+    },
+    {
+      "M_pairs": 2,
+      "T": 32,
+      "stored_points": 128,
+      "trajectories": 4
+    },
+    {
+      "M_pairs": 2,
+      "T": 64,
+      "stored_points": 256,
+      "trajectories": 4
+    },
+    {
+      "M_pairs": 2,
+      "T": 128,
+      "stored_points": 512,
+      "trajectories": 4
+    },
+    {
+      "M_pairs": 2,
+      "T": 256,
+      "stored_points": 1024,
+      "trajectories": 4
+    },
+    {
+      "M_pairs": 4,
+      "T": 32,
+      "stored_points": 256,
+      "trajectories": 8
+    },
+    {
+      "M_pairs": 4,
+      "T": 64,
+      "stored_points": 512,
+      "trajectories": 8
+    },
+    {
+      "M_pairs": 4,
+      "T": 128,
+      "stored_points": 1024,
+      "trajectories": 8
+    },
+    {
+      "M_pairs": 4,
+      "T": 256,
+      "stored_points": 2048,
+      "trajectories": 8
+    },
+    {
+      "M_pairs": 8,
+      "T": 32,
+      "stored_points": 512,
+      "trajectories": 16
+    },
+    {
+      "M_pairs": 8,
+      "T": 64,
+      "stored_points": 1024,
+      "trajectories": 16
+    },
+    {
+      "M_pairs": 8,
+      "T": 128,
+      "stored_points": 2048,
+      "trajectories": 16
+    },
+    {
+      "M_pairs": 8,
+      "T": 256,
+      "stored_points": 4096,
+      "trajectories": 16
+    }
+  ],
+  "group_size": 32,
+  "label_source": "/home/ubuntu/github/stellar_dynamics_project/results/task_b/sampling_3/task_b_sampling3_prefix512/labels_filtered.csv",
+  "model": {
+    "TCN_hidden": 160,
+    "TCN_levels": 5,
+    "architecture": "shared TCN + symmetric pair embedding + DeepSets",
+    "output": "sigmoid stable fraction",
+    "pair_features": [
+      "observed-member mean",
+      "absolute difference for full pair",
+      "observed member fraction"
+    ]
+  },
+  "models_saved": true,
+  "output_dir": "/home/ubuntu/github/stellar_dynamics_project/results/comparisons/sampling_3/factorial_sampling3_Kpairs0p5-8_T32-256",
+  "pair_draws": 10,
+  "pair_partition_seed": 42,
+  "pairing": "variation i with i+16 for i=0,...,15",
+  "prefix_endpoint_label_time": {
+    "128": 127.0,
+    "256": 254.99999999999997,
+    "32": 31.0,
+    "64": 63.0
+  },
+  "random_streams": {
+    "eval_all": 31073,
+    "eval_candidate": 41083,
+    "singleton_side_all": 71113,
+    "singleton_side_candidate": 81123,
+    "train_seeds": [
+      42
+    ],
+    "val_all": 51093,
+    "val_candidate": 61103,
+    "val_singleton_side_all": 91133,
+    "val_singleton_side_candidate": 101143
+  },
+  "run_scope": "preliminary single-seed grid",
+  "split_counts": {
+    "test": 750,
+    "train": 3498,
+    "val": 750
+  },
+  "split_seed": 42,
+  "split_version": 1,
+  "status": "complete_preliminary_single_seed",
+  "target_all_phase": "stable fraction among all 32 variations",
+  "target_heldout": "stable fraction among the fixed 8 held-out pairs (16 variations)",
+  "time_axis": {
+    "estimated_source_time_end": 100000000.0,
+    "label_horizon": 10000.0,
+    "median_sampling_interval": 10000.0,
+    "source_file": "/data/dataset_sampling_3_prefix1024_float64/results_batch_00_sampling_3.hdf5",
+    "source_time_end_attribute": 1.5370732097810436,
+    "source_time_end_attribute_used": false,
+    "source_time_steps": 10001,
+    "stored_time_end": 10230000.0,
+    "stored_time_start": 0.0,
+    "stored_time_steps": 1024
+  },
+  "total_budget": "varies by grid cell as 2*M_pairs*T; M_pairs=0.5 therefore uses T stored points",
+  "training": {
+    "batch_systems": 16,
+    "checkpoint": "mean validation MAE across 20 grid cells",
+    "epochs": 10,
+    "loss": "MSE for pair regressors; BCE for per-trajectory baseline",
+    "lr": 0.001,
+    "optimizer": "Adam",
+    "patience": 3,
+    "train_seeds": [
+      42
+    ],
+    "uniform_condition_sampling": "all 20 (M_pairs,T) cells",
+    "weight_decay": 0.0001
+  }
+}

@@ -55,7 +55,7 @@ GROUP_SIZE = 32
 DEFAULT_SAMPLING_ID = 3
 DEFAULT_DATASET_DIR = ROOT / "dataset_sampling_3_prefix1024"
 DEFAULT_FIGURE_DIR = ROOT / "figures"
-DEFAULT_ANALYSIS_DIR = ROOT / "results" / "analysis"
+DEFAULT_ANALYSIS_DIR = ROOT / "results" / "shared_analysis" / "sampling_3" / "analysis"
 DEFAULT_K_VALUES = (5, 10, 20, 50)
 ZERO_VARIANCE_TOLERANCE = 1.0e-12
 

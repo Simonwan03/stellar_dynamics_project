@@ -744,7 +744,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="stable_fraction",
         help="Predict the 32-variation stable fraction, or binary all-stable (any unbound => 0).",
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_a"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_a/sampling_2/task_a_main"))
     parser.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
     parser.add_argument("--regroup", action="store_true", help="Create/update ICs_sampling_*_groupof*.hdf5.")
     parser.add_argument("--overwrite-tokenized", action="store_true")

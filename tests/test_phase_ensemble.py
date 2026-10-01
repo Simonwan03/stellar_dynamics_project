@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tasks.common.case_split import create_case_split_manifest
-from scripts.run_fixed_budget_sampling3 import bootstrap_delta_mae
+from tasks.comparisons.fixed_budget_sampling3 import bootstrap_delta_mae
 from tasks.task_b.phase_ensemble import (
     DeepSetsRegressor,
     PairDeepSetsRegressor,

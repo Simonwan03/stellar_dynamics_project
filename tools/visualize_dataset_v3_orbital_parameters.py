@@ -86,7 +86,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "results" / "dataset_v3_orbital_parameter_viz",
+        default=ROOT / "results" / "shared_analysis" / "sampling_2" / "dataset_v3_orbital_parameter_viz",
     )
     return parser
 

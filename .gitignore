@@ -4,14 +4,15 @@ dataset/
 datasets/
 dataset_v2/
 dataset_v3/
+dataset_sampling_3_prefix1024
 
 # local pretrained checkpoints and model caches
 checkpoints/
 external_checkpoints/
 hf_cache/
 .cache/
-experiments/panda_threebody/data/panda_arrow/
-experiments/panda_threebody/outputs/
+experiments/foundation_models/data/panda_arrow/
+experiments/foundation_models/outputs/
 
 # Python cache
 __pycache__/
@@ -23,6 +24,10 @@ __pycache__/
 *.tar.gz
 *.7z
 *.csv
+!docs/artifact_inventory.csv
+!docs/artifact_path_map.csv
+!docs/artifact_merge_map.csv
+!configs/splits/*.csv
 *.parquet
 *.h5
 *.hdf5
@@ -32,9 +37,8 @@ __pycache__/
 *.npy
 *.npz
 
-# generated experiment trees; previously tracked provenance stays tracked
+# generated experiment tree; previously tracked provenance stays tracked
 results/
-runs/
 wandb/
 .pytest_cache/
 .ipynb_checkpoints/

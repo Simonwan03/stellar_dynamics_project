@@ -1,0 +1,156 @@
+{
+  "task": "initial conditions to median orbital-decorrelation time",
+  "config": {
+    "dataset_dir": "dataset_sampling_3_prefix1024",
+    "output_dir": "results/task_d/sampling_3/task_d_median_decorrelation",
+    "sampling_id": 3,
+    "completion_table_name": "completed_systems_sampling_3.txt",
+    "threshold_power": 5.0,
+    "min_valid_pairs": 8,
+    "interpolate_crossings": true,
+    "models": [
+      "constant",
+      "xgboost",
+      "mlp"
+    ],
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "seed": 42,
+    "epochs": 100,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "dropout": 0.15,
+    "patience": 15,
+    "device": "cuda",
+    "max_shards": null,
+    "max_systems": null,
+    "bootstrap_samples": 2000
+  },
+  "label_metadata": {
+    "num_systems": 4996,
+    "num_valid_pairs_required": 8,
+    "threshold_power": 5.0,
+    "threshold": 148.4131591025766,
+    "label": "log(median_r(T_cross,r(e^k)/P_out,0,r))",
+    "name": "median orbital-decorrelation time",
+    "divided_by_threshold_power": false,
+    "interpolate_crossings": true,
+    "time_steps": 1024,
+    "sample_spacing_periods": 1.0000000000000002
+  },
+  "feature_metadata": {
+    "representation": "first nominal variation only",
+    "features": [
+      "aratios_complete_0",
+      "mratios_complete_0",
+      "mratios_complete_1",
+      "eccs_complete_0",
+      "eccs_complete_1",
+      "incs_complete_0",
+      "incs_complete_1",
+      "sin_APs_complete_0",
+      "sin_APs_complete_1",
+      "cos_APs_complete_0",
+      "cos_APs_complete_1",
+      "sin_LANs_complete_0",
+      "sin_LANs_complete_1",
+      "cos_LANs_complete_0",
+      "cos_LANs_complete_1"
+    ],
+    "angles": "sin/cos encoded",
+    "feature_count": 15
+  },
+  "split": {
+    "train": 3497,
+    "val": 750,
+    "test": 749
+  },
+  "target_summary": {
+    "count": 4996,
+    "p25_periods": 4.601111551416797,
+    "median_periods": 17.087164484091044,
+    "p75_periods": 56.60262976184128
+  },
+  "model_metrics": {
+    "constant": {
+      "count": 749,
+      "mae_log": 1.2724908425818418,
+      "rmse_log": 1.469018324940896,
+      "spearman": null,
+      "factor_2_accuracy": 0.253671562082777,
+      "bootstrap_95_ci": {
+        "mae_log": {
+          "low": 1.2218616656368497,
+          "high": 1.3261183956402172
+        },
+        "rmse_log": {
+          "low": 1.4211815898884335,
+          "high": 1.5200343794843985
+        },
+        "spearman": {
+          "low": null,
+          "high": null
+        },
+        "factor_2_accuracy": {
+          "low": 0.22162883845126835,
+          "high": 0.28304405874499333
+        }
+      },
+      "bootstrap_samples": 2000
+    },
+    "xgboost": {
+      "count": 749,
+      "mae_log": 0.787005415860145,
+      "rmse_log": 0.9848537407676451,
+      "spearman": 0.7341823322362079,
+      "factor_2_accuracy": 0.520694259012016,
+      "bootstrap_95_ci": {
+        "mae_log": {
+          "low": 0.744660638492762,
+          "high": 0.8308604251218842
+        },
+        "rmse_log": {
+          "low": 0.9365559236939036,
+          "high": 1.0361195691678773
+        },
+        "spearman": {
+          "low": 0.6954610995634651,
+          "high": 0.7683517941308958
+        },
+        "factor_2_accuracy": {
+          "low": 0.4833110814419226,
+          "high": 0.5554072096128171
+        }
+      },
+      "bootstrap_samples": 2000
+    },
+    "mlp": {
+      "count": 749,
+      "mae_log": 0.6518833312797961,
+      "rmse_log": 0.8235598815317209,
+      "spearman": 0.8348425494241876,
+      "factor_2_accuracy": 0.6275033377837116,
+      "bootstrap_95_ci": {
+        "mae_log": {
+          "low": 0.6171942985533954,
+          "high": 0.6890699263883288
+        },
+        "rmse_log": {
+          "low": 0.7763860488600036,
+          "high": 0.8731970917052638
+        },
+        "spearman": {
+          "low": 0.806560317285071,
+          "high": 0.8572683584917584
+        },
+        "factor_2_accuracy": {
+          "low": 0.5927903871829105,
+          "high": 0.6635514018691588
+        }
+      },
+      "bootstrap_samples": 2000
+    }
+  }
+}

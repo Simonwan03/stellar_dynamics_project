@@ -603,7 +603,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Task B: prefix trajectory models.")
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset_v3"))
     parser.add_argument("--sampling-id", type=int, default=2)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/task_b"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/task_b/sampling_2/task_b_main"))
     parser.add_argument(
         "--representation",
         choices=["orbital15", "full"],

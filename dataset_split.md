@@ -1,4 +1,16 @@
-当前仓库有两套 split 口径：
+# 数据集划分记录
+
+> 本文主体记录的是早期 `sampling_2` 实验的 A/B/C 公共划分和 Task E 独立划分。下文 Task E 的 3847 个系统、64597 条轨迹及每条轨迹多窗口采样数字，均对应旧的 `sampling_2` 运行，不能作为当前论文 `sampling_3` Task E 主实验的数量。此处保留原始数字供历史结果溯源。
+
+## 当前论文主线的划分
+
+- Task B/C/F 使用 `sampling_3` 的完整系统划分；同一个 `raw_case_id` 的 variations 不跨训练、验证和测试集。Task C 最终配置记录 3498/750/750 个系统，但系统身份应以相应的 sampling 3 manifest 为准，不能只凭数量认定与旧数据相同。见[论文复现映射](docs/reproduction.md)。
+- Task D 每个系统构造一条目标记录，再按系统划分；它不直接套用 A/B/C 的公共 manifest。
+- Task E `sampling_3` 主协议先按完成状态与预测窗口条件过滤，再独立按系统划分。保存的[Chronos-2 配置](results/task_e/sampling_3/task_e_sampling3_first512_chronos2/config.json)记录训练/验证/测试各 **3037/650/652 个系统**、**62378/12713/13676 条轨迹**；每条轨迹最多采样一个起始窗口。这与下文 `sampling_2` 的 2692/577/578 个系统和多窗口配置是不同实验。
+
+## 历史 `sampling_2` 划分记录
+
+早期 `sampling_2` 实验有两套 split 口径：
 1. Task A/B/C：共用同一份 system-level split
 2. Task E：也按 system 分组，但使用自己的可预测子集和独立随机 split
 Task A/B/C 公共 Split
@@ -40,7 +52,7 @@ variation ablation 只改变每个 system 输入多少条 variations，不改变
 1
 这只用于平衡各集合的稳定性分布，不改变任务标签。
 Task E Split
-当前主协议使用：
+该历史 Task E 协议使用：
 orbital15
 context = 512
 prediction = 128
@@ -56,7 +68,7 @@ completion table 过滤后：
 但由于要求每条 trajectory 至少能形成完整的 640-step forecasting window，最终进入 Task E split 的是：
 3847 systems
 64597 trajectories
-当前 E1/E2 运行中的实际 split 为：
+该组 E1/E2 运行中的实际 split 为：
 Split	Systems	Trajectories
 Train	2692	44988
 Val	577	9961
@@ -64,7 +76,7 @@ Test	578	9648
 Total	3847	64597
 因此，Task E 中同一 system 仍不会跨 split，但一个 system 在过滤后不一定保留全部 32 条 trajectory。
 Task E 窗口数量
-当前 512 -> 128 主运行的 candidate windows：
+该组 512 -> 128 运行的 candidate windows：
 Split	Candidate windows
 Train	2,678,116
 Val	600,998
@@ -80,4 +92,4 @@ Scaler 只使用 train split 中、失稳事件之前且数值有限的窗口拟
 Task A/B/C 的 system membership
 不等于
 Task E 的 system membership
-另外，部分旧结果目录仍使用旧的 3498/500/1000 split，例如某些 Task C 结果；这些不能和当前 3498/750/750 公共 split 的结果直接混合比较。
+另外，部分旧结果目录仍使用旧的 3498/500/1000 split，例如某些 Task C 结果；这些不能和本节 3498/750/750 公共 split 的结果直接混合比较。

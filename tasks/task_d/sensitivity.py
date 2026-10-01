@@ -25,7 +25,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "results/task_d_median_decorrelation_sensitivity",
+        default=ROOT / "results/task_d/sampling_3/task_d_median_decorrelation_sensitivity",
     )
     parser.add_argument("--models", default="constant,xgboost")
     parser.add_argument("--seed", type=int, default=42)

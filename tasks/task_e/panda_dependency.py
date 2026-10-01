@@ -9,7 +9,7 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PANDA_VENDOR_ROOT = ROOT / "experiments" / "panda_threebody" / "vendor" / "panda"
+DEFAULT_PANDA_VENDOR_ROOT = ROOT / "experiments" / "foundation_models" / "vendor" / "panda"
 
 
 def panda_vendor_root() -> Path:

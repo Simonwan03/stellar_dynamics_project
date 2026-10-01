@@ -68,7 +68,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "results/task_d_median_decorrelation",
+        default=ROOT / "results/task_d/sampling_3/task_d_median_decorrelation",
     )
     return parser
 
