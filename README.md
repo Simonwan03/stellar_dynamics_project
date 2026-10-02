@@ -1,10 +1,61 @@
-# Stellar dynamics learning experiments
+# Learning What Is Predictable in Chaotic Three-Body Dynamics
 
-This repository contains research code for predicting stability, survival, divergence time, and future motion in perturbed three-body systems. Start with the [manuscript reproduction map](docs/reproduction.md) and [release audit](docs/reproducibility_audit.md). The longer [research log](readme.md) preserves earlier experiments and result tables.
+Official codebase for our study of **learnability in chaotic three-body dynamics**.
 
-## Install
+We use hierarchical three-body systems near the stability boundary as a controlled testbed to study how predictability depends on the **prediction target, available observations, physical representation, and model class**.
 
-The supported environment targets Linux x86_64, Python 3.12.12, and the PyTorch CUDA 13.0 wheels. `requirement.txt` is the single dependency input for all tasks, including the foundation models; `requirements.lock` fixes the complete pip dependency graph and wheel hashes. The Panda source is pinned by the Git submodule and its model weights are external.
+## Overview
+
+We study a hierarchy of prediction problems on hierarchical three-body systems with controlled perturbations:
+
+- **Stability prediction** from initial conditions and short trajectory prefixes (Tasks A and B)
+- **Survival prediction** over multiple time horizons (Task C)
+- **Finite-time divergence** prediction (Task D)
+- **Trajectory forecasting** at short and long horizons (Task E)
+- **Partial-observation robustness** under missing trajectory data (Task F)
+
+Our experiments compare standard supervised models, neural sequence models, and pretrained time-series foundation models. Coarse-grained stability can often be predicted from limited observations, while detailed trajectory forecasting is more sensitive to chaotic error growth. The [research record](record.md) contains task definitions, experiment settings, and result tables.
+
+## Repository Structure
+
+```text
+.
+├── tasks/                         # Data processing, models, training, and evaluation
+├── scripts/                       # Task A–F command-line entry points
+├── configs/                       # Shared split manifests and configurations
+├── experiments/foundation_models/ # Foundation-model integrations
+├── results/                       # Saved experimental results
+├── figures/                       # Research figures
+├── docs/                          # Reproduction and artifact documentation
+└── record.md                      # Detailed research record
+```
+
+See the [task code map](tasks/README.md) and [reproduction map](docs/reproduction.md) for the implementation and saved configurations of each experiment.
+
+## Dataset
+
+The dataset comprises approximately **160,000 hierarchical three-body trajectories** from 5,000 base systems, with 32 controlled variations per system. Trajectories include orbital and state representations, completion information, and the targets used by the prediction tasks. The [research record](record.md) describes the sampling 2 files and fields.
+
+The simulation data is **not tracked in this repository**, and there is no verified public download location here. Supply the data separately: sampling 2 experiments use `dataset_v3/`, while current sampling 3 experiments use `dataset_sampling_3_prefix1024/` or a path passed with `--dataset-dir`. The HDF5 shards and completion table must have matching sampling IDs. See the [reproduction map](docs/reproduction.md) for the required inputs and split manifests.
+
+## Experiments
+
+The main entry points are `scripts/task_a.py` through `scripts/task_f.py`. For example, to run the sampling 3 short-prefix stability experiment after supplying its data:
+
+```bash
+python -m tasks.common.preflight --task B --dataset-dir /path/to/sampling3
+python scripts/task_b.py --resolution high \
+  --dataset-dir /path/to/sampling3 \
+  --prefix-len 128 --models mlp,cnn,tcn \
+  --split-manifest configs/splits/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv \
+  --output-dir results/task_b/sampling_3/reproduce_task_b
+```
+
+The [reproduction map](docs/reproduction.md) links every task to its commands, reported settings, and saved results. Full reproduction requires the external simulation data; foundation-model experiments also require their pretrained weights.
+
+## Installation
+
+The supported environment targets Linux x86_64, Python 3.12.12, and PyTorch CUDA 13.0 wheels. From the repository root:
 
 ```bash
 conda env create -f environment.yml
@@ -13,37 +64,14 @@ git submodule update --init --recursive
 uv pip sync requirements.lock --python "$CONDA_PREFIX/bin/python" --torch-backend cu130 --require-hashes
 python -m pip check
 python scripts/check_environment.py
-python -m pytest -q
 ```
 
-Run these commands from the repository root. To change dependencies, edit `requirement.txt`, then regenerate and review the lock with:
-
-```bash
-uv pip compile requirement.txt --python "$CONDA_PREFIX/bin/python" --python-platform x86_64-unknown-linux-gnu --torch-backend cu130 --exclude-newer 2026-10-01T00:00:00Z --generate-hashes --no-annotate --custom-compile-command 'See README.md#install for the exact regeneration command' -o requirements.lock
-```
-
-Advance `--exclude-newer` deliberately when updating packages. A clean GPU installation and all model checkpoint runs still need validation on the target machine. Use `python scripts/task_<letter>.py --resolution low|high --help` to inspect each supported task profile; see the [entry point map](scripts/readme.md) for availability and defaults.
-
-## Data and code
-
-The simulation data is **not tracked**, and this repository provides no verified public download location. Supply sampling 3 shards as `dataset_sampling_3_prefix1024/results_batch_*_sampling_3.hdf5` plus `completed_systems_sampling_3.txt`, or pass the path to your own copy. On this development machine, `dataset_sampling_3_prefix1024` is an ignored symlink to `/data/dataset_sampling_3_prefix1024_float64`; a fresh clone needs its own data path or symlink. Earlier sampling 2 experiments use `dataset_v3/`; in this checkout that path is a machine-specific symlink. The completion table and shards must have the same sampling ID. For example, run `python scripts/task_b.py --resolution high --dataset-dir /path/to/sampling3 --prefix-len 128 --models mlp,cnn,tcn --split-manifest configs/splits/common_case_split_sampling_3_g32_h10000_r70-15-15_seed42.csv --output-dir results/task_b/sampling_3/reproduce_task_b`, or pass that directory as the second argument to `scripts/task_e.sh`.
-
-`tasks/` owns preprocessing, models, evaluation, and auxiliary experiments; `scripts/` contains Task A–F entry points; `experiments/foundation_models/` separates Panda, Chronos-2, shared baselines, and the Panda source submodule. `results/` is the single output tree. It groups classification, survival, divergence, forecasting, robustness, cross-task comparisons, and shared analysis by task and dataset. The [artifact inventory](docs/artifact_inventory.md) lists current paths, the [CSV index](docs/artifact_inventory.csv) records classification sources, the [path map](docs/artifact_path_map.csv) translates historical paths, and the [merge map](docs/artifact_merge_map.csv) records the final consolidation. New outputs are ignored by Git. `archive/` holds archived research notes; `tests/` contains basic checks.
-
-The reported Task B/C short-prefix inputs use the same 15-channel `orbital15` representation; the [reproduction map](docs/reproduction.md#task-bc-prefix-input) lists the exact fields and distinguishes frozen embeddings from raw sequences.
-
-## Reproduce results
-
-Run `python -m tasks.common.preflight --task B --dataset-dir /path/to/sampling3` before an expensive sampling-3 run. For Task A, use `--task A --dataset-dir /path/to/sampling2`. The checker reports missing data and validates the preserved B/C/F system split.
-
-[The reproduction map](docs/reproduction.md) connects Tasks A–F, each final model family, source code, and saved configuration. Training entry points evaluate validation and test in the same process. For the sampling 3 Task E E1/E2 protocol:
-
-```bash
-bash scripts/task_e.sh chronos2 dataset_sampling_3_prefix1024
-```
-
-Choose `chronos2`, `panda_zero_shot`, `toto2`, `itransformer`, or `tcn`. This creates a prepared cache and writes metrics under `results/task_e/sampling_3/reproduce_task_e_<model>/`. The supervised models run their saved base-and-resume sequence. Full reproduction requires externally supplied raw data, pretrained weights for foundation models, and significant compute.
+`requirement.txt` is the dependency input; `requirements.lock` pins the resolved packages and wheel hashes. Installation and model checkpoints still need validation on the target GPU machine.
 
 ## Citation
 
-Paper citation pending; cite the final paper once its bibliographic details are available.
+Paper citation details will be added when the manuscript is available.
+
+## License
+
+This repository does not currently include a license file.

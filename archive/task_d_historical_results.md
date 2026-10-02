@@ -1,6 +1,6 @@
 # Historical Task D experiments
 
-These are preserved research records. They use earlier quantile or sampling 2 targets and do not reproduce the current Task D median-decorrelation result. The text below preserves the old terminology and commands for provenance; its references to a "current" task describe the earlier code, and several flags are unsupported by the present CLI. Current definitions and commands are in [README](../readme.md#task-d-median-orbital-decorrelation-time) and [reproduction map](../docs/reproduction.md).
+These are preserved research records. They use earlier quantile or sampling 2 targets and do not reproduce the current Task D median-decorrelation result. The text below preserves the old terminology and commands for provenance; its references to a "current" task describe the earlier code, and several flags are unsupported by the present CLI. Current definitions and commands are in [README](../record.md#task-d-median-orbital-decorrelation-time) and [reproduction map](../docs/reproduction.md).
 
 ### Task D: Initial Conditions → Lyapunov-Time Quantiles
 

@@ -9,8 +9,9 @@
 - `Task E`: 直接做轨道/状态序列 forecasting，包括 Transformer 和 foundation baselines
 - `Task F`: 对随机掩码的高分辨率轨道前缀做稳定性预测
 
-完整结果索引见[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)；其中会区分正式
-主实验、ablation、历史重跑和没有最终指标的目录。
+各 Task 小节汇集任务定义、实验结果和复现入口；历史 notebook 与未完成运行单独列在任务章节之后。
+结果数值以对应目录的 `metrics.json`、`summary.csv`、`test_metrics.json` 和汇总 Markdown 为准；
+标签、split、horizon 或输入预算不同的实验不合并排名。
 
 当前主线代码在 [scripts](scripts) 和 [tasks](tasks)；六项任务的代码地图和运行入口见 [tasks/README.md](tasks/README.md)。Panda 论文 pretrained 参数通过外部 submodule 加载，主项目只维护三体数据适配、adapter 和评估入口；细节见 [experiments/foundation_models/README.md](experiments/foundation_models/README.md)。
 
@@ -167,6 +168,21 @@ local stable-fraction disagreement \(L_i\)。橙色曲线和误差条分别表�
 - 通常先用 `completed_systems_sampling_2.txt` 过滤 `time_unbound < 0` 或 `diagnosis != 0` 的样本。
 - 个别 `*_complete` 通道即使在有效样本里也会有 NaN / inf。
 - 所以主线脚本一般会做 finite-value screening，或者退回到更稳健的特征子集。
+
+### 数据诊断与传统基线
+
+主数据集规模为 160000 条 trajectory、5000 个 base systems；过滤后有 159953 条有效
+trajectory 和 4998 个完整的 32-variation systems。
+
+| 实验 | 关键设置 | 结果 |
+| --- | --- | --- |
+| 发散统计 | censor=10000，按 pair 取最早 divergence | raw rows/groups = 160000/5000，invalid rows = 47，排除 2 个不完整/无效 group；trajectory divergent 109553/159953 = **0.6849**；system divergent 4208/4998 = **0.8419**；trajectory divergence-time P50/P90/P99 = 255/4050/9062.4；system P50/P90/P99 = 70/2048/8255.45 |
+| 传统稳定性判据 | paper Eq.(2)，group prediction 取 pair margin 最小值 | individual accuracy 0.6806，balanced accuracy 0.7099，sensitivity 0.7891，specificity 0.6307；group accuracy 0.6232，balanced accuracy 0.7336，sensitivity 0.8949，specificity 0.5722 |
+| 轨道参数示例 | 6 个代表性 system，rows 0/800/1600/2400/3200/4000 | 生成 6 张 orbital-parameter 诊断图；大多数通道 finite fraction 为 1，periods_complete 在部分代表样本中存在缺失 |
+
+原始文件：[divergence_summary.json](results/task_d/sampling_2/divergence_statistics/divergence_summary.json)、
+[traditional_stability_summary.json](results/shared_analysis/sampling_2/traditional_stability/traditional_stability_summary.json)、
+[orbital examples summary](results/shared_analysis/sampling_2/dataset_v3_orbital_examples/summary.json)。
 
 ## Common Input Representations
 
@@ -703,6 +719,32 @@ System-level 指标由
 [`tasks/task_b/evaluate_highres_two_level.py`](tasks/task_b/evaluate_highres_two_level.py)
 从上述逐 trajectory 预测统一生成；汇总指标、逐 system 预测和独立 Markdown 表位于
 [`results/task_b/sampling_3/task_b_sampling3_two_level_evaluation/`](results/task_b/sampling_3/task_b_sampling3_two_level_evaluation/)。
+
+#### 历史非公共划分
+
+这些非公共划分的实验产物已按清理要求删除。当前结果与复现命令见上文的 Task A、Task B 主实验章节；不要将历史指标与公共划分指标合并比较。
+
+
+以下结果来自 `experiments/foundation_models` 的历史独立 pipeline，与当前 Task B 主实验分开比较。
+
+#### Panda 独立实验：unbound classifier
+
+| Run | Test n | Positive rate | Acc | Precision | Recall | F1 | AUROC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| legacy orbital15 dataset | 8000 | 0.642625 | 0.884375 | 0.968861 | 0.847306 | 0.904016 | 0.950854 |
+| Panda orbital15 dataset | 8000 | 0.642625 | **0.939250** | 0.966153 | **0.938339** | **0.952043** | **0.978368** |
+| Panda patch-mean keep-channels | 32032 | 0.684253 | 0.922203 | **0.969908** | 0.914682 | 0.941486 | 0.977106 |
+
+对应的 Task-B split（test 指标；文件中同时保存 unbound-positive 和互补的
+stable-positive）如下。这里的 head 以各目录的 <code>run_config.json</code> 为准：
+
+| Run / head | Unbound Acc | Unbound Prec | Unbound Recall | Unbound F1 | AUROC | Unbound AP | Stable F1 | Stable AP |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| prefix96 / linear | 0.508281 | 0.684763 | 0.520562 | 0.591478 | 0.500254 | 0.684630 | 0.382532 | 0.316294 |
+| prefix96 aligned / linear | 0.867150 | 0.941606 | 0.858993 | 0.898404 | 0.945449 | 0.974732 | 0.808123 | 0.883745 |
+| prefix512 / main | 0.928897 | 0.962739 | 0.932094 | **0.947169** | 0.978716 | 0.990267 | 0.891303 | 0.954518 |
+| prefix512 attention / attention | 0.921541 | **0.978409** | 0.905239 | 0.940403 | 0.979344 | 0.990641 | 0.885212 | 0.956522 |
+| prefix512 DeepSets / deepsets | 0.923793 | 0.974077 | **0.912849** | 0.942470 | **0.979450** | **0.990742** | 0.887160 | 0.956113 |
 
 ### Task C: System Survival Curves
 
@@ -1661,21 +1703,22 @@ Persistence 明显优于 Ridge，说明局部时间连续性比单个全局线�
 
 当前保存的 matched preliminary benchmark 使用相同的 `context_len=200`、
 `pred_len=50`、`split_seed=42`、32-variation group split、顺序采样和
-completion filtering。`orbital15` 测试集包含 `305` 个窗口，
-`raw_state18` 测试集包含 `306` 个窗口，因此两批结果基本匹配，但不是
+completion filtering。raw_state18 的 train/validation/test 窗口数为 `1400/292/306`；
+`orbital15` 测试集包含 `305` 个窗口，因此两批结果基本匹配，但不是
 逐窗口完全相同。由于两种表示的物理量和原始尺度不同，比较应使用共同的
 标准化指标 `MSE-Z`、`MAE-Z` 和 `Spearman-Z`，不应直接比较 raw-scale
 MSE。
 
-| Model | orbital15 MSE-Z | raw_state18 MSE-Z | orbital15 Spearman-Z | raw_state18 Spearman-Z |
-|---|---:|---:|---:|---:|
-| TimesFM | **0.2516** | 0.5252 | **0.8567** | 0.4242 |
-| Chronos | **0.3044** | 0.5805 | **0.8388** | 0.4283 |
-| TCN | **0.4261** | 0.6233 | **0.7289** | 0.2208 |
-| iTransformer | **0.3854** | 0.6237 | **0.7530** | 0.1938 |
-| PatchTST | **0.3725** | 0.6265 | **0.7671** | 0.1972 |
-| Persistence | **0.6938** | 1.0541 | **0.6372** | 0.2043 |
-| Ridge | **2.0256** | 2.5951 | **0.4742** | 0.0994 |
+| Model | orbital15 MSE-Z | raw_state18 MSE-Z | raw_state18 MAE-Z | orbital15 Spearman-Z | raw_state18 Spearman-Z |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TimesFM | **0.2516** | 0.525152 | **0.349141** | **0.8567** | 0.424185 |
+| Chronos T5-small | **0.3044** | 0.580466 | 0.355880 | **0.8388** | **0.428264** |
+| TCN | **0.4261** | 0.623281 | 0.431166 | **0.7289** | 0.220818 |
+| iTransformer | **0.3854** | 0.623715 | 0.419106 | **0.7530** | 0.193764 |
+| PatchTST | **0.3725** | 0.626541 | 0.419600 | **0.7671** | 0.197222 |
+| Transformer | — | 0.906040 | 0.481039 | — | 0.155406 |
+| Persistence | **0.6938** | 1.054121 | 0.525768 | **0.6372** | 0.204258 |
+| Ridge | **2.0256** | 2.595065 | 0.965088 | **0.4742** | 0.099415 |
 
 在所有具有共同运行结果的模型上，`orbital15` 都取得更低的标准化 MSE
 和更高的 Spearman 相关性。TimesFM 的 Spearman-Z 从 `raw_state18`
@@ -1690,6 +1733,42 @@ MSE。
 `orbital15`，整体上明显比直接预测位置和速度组成的 `raw_state18`
 更容易。完整运行口径和原始结果见
 [`docs/reproduction.md`](docs/reproduction.md)。
+
+#### E.1 补充：context=64 / prediction=32 历史对照
+
+这一组固定 orbital15、context=64、pred=32、stride=20、每 system 最多 2 条
+variation 和每条轨迹最多 2 个 sequential windows，test 共 2556 windows。
+
+| Model | MSE-z | MAE-z | Spearman-z | MSE transformed | MAE transformed | Spearman transformed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Chronos T5-small | 0.3984 | 0.3180 | 0.7893 | 0.1800 | 0.2030 | 0.8244 |
+| Panda GRU | 0.3717 | 0.4108 | 0.7726 | 0.1671 | 0.2589 | 0.8004 |
+| Panda GRU early-stop | 0.3417 | 0.3787 | 0.7949 | 0.1530 | 0.2387 | 0.8223 |
+| Panda MLP, epoch 15 | **0.2904** | 0.3227 | **0.8308** | **0.1290** | **0.2038** | **0.8531** |
+| Panda zero-shot | 0.3847 | 0.3688 | 0.7755 | 0.1665 | 0.2320 | 0.8146 |
+| TimesFM | 0.3305 | **0.3208** | 0.8132 | 0.1482 | **0.2052** | 0.8405 |
+
+同一 horizon run 的 GRU early-stop test overall 为
+MSE-z/MAE-z/RMSE-z = 0.341675/0.378713/0.584530，transformed
+MSE/MAE/Spearman = 0.152961/0.238729/0.822295；step 1 与 step 32 的 MSE-z
+为 0.2187/0.4128。MLP epoch 15 为
+0.290387/0.322718/0.538875 和 0.128972/0.203784/0.853114，step 1 与
+step 32 的 MSE-z 为 0.0636/0.4214。
+
+#### E.1 补充：其他历史运行
+
+| Run | Test result |
+| --- | --- |
+| Panda Adapter small-window | MSE 0.098633，MAE 0.169172，Spearman 0.891364；Val MSE 0.100773，best epoch 4 |
+| Panda Adapter resume | MSE 0.098756，MAE 0.168499，Spearman 0.891965；Val MSE 0.098271，best epoch 8 |
+| Panda zero-shot non-comparable | MSE 0.122947，MAE 0.198808，Spearman 0.861434 |
+| Preliminary persistence | MSE 0.336771，MAE 0.317444，Spearman 0.675598 |
+| Historical independent Panda adapter | z-MSE 0.173401，z-MAE 0.191221，raw-MSE 1992.260254，raw-MAE 2.509673；epoch 10 val MSE 1788.239416 |
+
+完整说明见 [docs/reproduction.md](docs/reproduction.md) 。只有 config/feature
+metadata 而没有最终 test metrics 的目录（例如
+<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_gru</code>、
+<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
 
 #### E.2 Foundation Forecasting
 
@@ -1716,6 +1795,7 @@ MSE。
   - Panda 源码来自 `experiments/foundation_models/vendor/panda` submodule
   - pretrained 权重使用 Hugging Face cache 或本地 `checkpoints/panda/`，不提交到 Git
 
+
 ### Task F: Random-Masked High-Resolution Stability
 
 入口脚本：[scripts/task_f.py](scripts/task_f.py)；实现：[tasks/task_f/main.py](tasks/task_f/main.py)
@@ -1729,130 +1809,16 @@ epoch-zero 掩码，掩码生成与标签独立。
 默认运行使用 40 个 shard、159,936 条有效 trajectory，system-level split 为
 `111,936/24,000/24,000`（train/validation/test），seed=`42`、batch size=`512`、
 最多 `50` epochs、early stopping patience=`8`、CUDA 和 mixed precision。已保存的
-TCN 与 attention 结果见下方[实验结果总汇](#实验结果总汇磁盘产物截至-2026-09-07)。
+TCN 与 attention 的完整测试指标见下方[随机掩码主实验结果](#随机掩码主实验结果)。
 
 另外，`prefix_len=256` 的 mixed-mask robustness benchmark 见下方
-[Task F mixed-mask 结果](#task-f-mixed-mask-robustness-benchmark-prefix256-seed42)。该实验
+[Task F mixed-mask 结果](#mixed-mask-robustness-benchmark-prefix-256-seed-42)。该实验
 使用同一个模型覆盖 clean、random point、single-block 和 multi-block corruption，
 并额外测试 `60%/70%` 的 OOD missing ratio 以及 `25%` Early/Middle/Late block location。
 
-## 实验结果总汇（磁盘产物，截至 2026-09-07）
+#### 随机掩码主实验结果
 
-本节是仓库现有实验的结果审计索引。指标以各实验目录中实际保存的
-<code>metrics.json</code>、<code>summary.csv</code>、<code>test_metrics.json</code> 和
-汇总 markdown 为准；训练日志、模型权重和曲线文件不逐个复制，但都保留在对应目录。
-不同的标签定义、split、horizon 或输入预算不会合并到同一张排行榜。主线任务的定义和
-复现实验命令仍见上文各 Task 小节。
-
-### 0. 数据与非学习基线
-
-主数据集规模为 160000 条 trajectory、5000 个 base systems；过滤后有 159953 条有效
-trajectory 和 4998 个完整的 32-variation systems。
-
-| 实验 | 关键设置 | 结果 |
-| --- | --- | --- |
-| 发散统计 | censor=10000，按 pair 取最早 divergence | raw rows/groups = 160000/5000，invalid rows = 47，排除 2 个不完整/无效 group；trajectory divergent 109553/159953 = **0.6849**；system divergent 4208/4998 = **0.8419**；trajectory divergence-time P50/P90/P99 = 255/4050/9062.4；system P50/P90/P99 = 70/2048/8255.45 |
-| 传统稳定性判据 | paper Eq.(2)，group prediction 取 pair margin 最小值 | individual accuracy 0.6806，balanced accuracy 0.7099，sensitivity 0.7891，specificity 0.6307；group accuracy 0.6232，balanced accuracy 0.7336，sensitivity 0.8949，specificity 0.5722 |
-| 轨道参数示例 | 6 个代表性 system，rows 0/800/1600/2400/3200/4000 | 生成 6 张 orbital-parameter 诊断图；大多数通道 finite fraction 为 1，periods_complete 在部分代表样本中存在缺失 |
-
-原始文件：[divergence_summary.json](results/task_d/sampling_2/divergence_statistics/divergence_summary.json)、
-[traditional_stability_summary.json](results/shared_analysis/sampling_2/traditional_stability/traditional_stability_summary.json)、
-[orbital examples summary](results/shared_analysis/sampling_2/dataset_v3_orbital_examples/summary.json)。
-
-### 1–2. Task A / Task B 历史非公共划分
-
-这些非公共划分的实验产物已按清理要求删除。当前结果与复现命令见上文的 Task A、Task B 主实验章节；不要将历史指标与公共划分指标合并比较。
-
-### 3. Task C：当前 sampling 3 survival
-
-当前 20-bin Task C 结果、配置及复现入口见上文 [Task C 主实验](#task-c-system-survival-curves)。
-
-### 4. Task D：当前 sampling 3 轨道去相关时间
-
-当前 Task D 的标签、模型、test 指标和复现入口见上文 [Task D 主实验](#task-d-median-orbital-decorrelation-time)。历史分位数与 sampling 2 结果见 [归档记录](archive/task_d_historical_results.md)。
-
-### 5. Task E：forecasting 与 foundation-model 对比
-
-#### 5.1 统一 benchmark
-
-统一 benchmark 使用 orbital15、context=200、prediction=50、512 tracks、20 shards、
-group split seed=42，train/validation/test windows=1398/292/305。指标是 transformed
-feature scale；历史文件中的 <code>*_raw</code> 字段对应此 scale。
-
-| Model | Training | Val MSE | Test MSE | Test MAE | Test Spearman |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Panda Adapter | frozen-backbone adapter | **0.098100** | **0.094817** | 0.161361 | **0.897936** |
-| TimesFM zero-shot | zero-shot | 0.122229 | 0.115029 | 0.177769 | 0.876202 |
-| Panda zero-shot | zero-shot | 0.136210 | 0.124031 | 0.198511 | 0.860429 |
-| Chronos T5-small | zero-shot | 0.153873 | 0.138688 | **0.165562** | 0.865887 |
-| PatchTST | supervised | 0.189831 | 0.172052 | 0.252842 | 0.797724 |
-| iTransformer | supervised | 0.193811 | 0.177432 | 0.266774 | 0.781257 |
-| TCN, 4 epochs | supervised | 0.218606 | 0.199553 | 0.298014 | 0.755576 |
-| Persistence | last value | 0.355868 | 0.325589 | 0.309381 | 0.689615 |
-| Ridge | linear | 0.998017 | 0.949673 | 0.583040 | 0.537908 |
-
-另一个 10-epoch TCN run 的 test MSE/MAE/Spearman =
-0.195304/0.292288/0.761872。Panda Adapter 的 test window 与其他模型相同，
-但只使用 256 个训练窗口，不能把它解释为相同训练预算下的公平比较。
-
-#### 5.2 raw_state18 matched benchmark
-
-raw_state18 对照使用 512 tracks、context=200、prediction=50，train/validation/test =
-1400/292/306；以下指标是在 standardized z scale 上。
-
-| Model | MSE-z | MAE-z | Spearman-z |
-| --- | ---: | ---: | ---: |
-| TimesFM | **0.525152** | **0.349141** | 0.424185 |
-| Chronos T5-small | 0.580466 | 0.355880 | **0.428264** |
-| TCN | 0.623281 | 0.431166 | 0.220818 |
-| iTransformer | 0.623715 | 0.419106 | 0.193764 |
-| PatchTST | 0.626541 | 0.419600 | 0.197222 |
-| Transformer | 0.906040 | 0.481039 | 0.155406 |
-| Persistence | 1.054121 | 0.525768 | 0.204258 |
-| Ridge | 2.595065 | 0.965088 | 0.099415 |
-
-#### 5.3 context=64 / prediction=32 horizon 对照
-
-这一组固定 orbital15、context=64、pred=32、stride=20、每 system 最多 2 条
-variation 和每条轨迹最多 2 个 sequential windows，test 共 2556 windows。
-
-| Model | MSE-z | MAE-z | Spearman-z | MSE transformed | MAE transformed | Spearman transformed |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Chronos T5-small | 0.3984 | 0.3180 | 0.7893 | 0.1800 | 0.2030 | 0.8244 |
-| Panda GRU | 0.3717 | 0.4108 | 0.7726 | 0.1671 | 0.2589 | 0.8004 |
-| Panda GRU early-stop | 0.3417 | 0.3787 | 0.7949 | 0.1530 | 0.2387 | 0.8223 |
-| Panda MLP, epoch 15 | **0.2904** | 0.3227 | **0.8308** | **0.1290** | **0.2038** | **0.8531** |
-| Panda zero-shot | 0.3847 | 0.3688 | 0.7755 | 0.1665 | 0.2320 | 0.8146 |
-| TimesFM | 0.3305 | **0.3208** | 0.8132 | 0.1482 | **0.2052** | 0.8405 |
-
-同一 horizon run 的 GRU early-stop test overall 为
-MSE-z/MAE-z/RMSE-z = 0.341675/0.378713/0.584530，transformed
-MSE/MAE/Spearman = 0.152961/0.238729/0.822295；step 1 与 step 32 的 MSE-z
-为 0.2187/0.4128。MLP epoch 15 为
-0.290387/0.322718/0.538875 和 0.128972/0.203784/0.853114，step 1 与
-step 32 的 MSE-z 为 0.0636/0.4214。
-
-#### 5.4 其他统一入口运行
-
-| Run | Test result |
-| --- | --- |
-| Panda Adapter small-window | MSE 0.098633，MAE 0.169172，Spearman 0.891364；Val MSE 0.100773，best epoch 4 |
-| Panda Adapter resume | MSE 0.098756，MAE 0.168499，Spearman 0.891965；Val MSE 0.098271，best epoch 8 |
-| Panda zero-shot non-comparable | MSE 0.122947，MAE 0.198808，Spearman 0.861434 |
-| Preliminary persistence | MSE 0.336771，MAE 0.317444，Spearman 0.675598 |
-| Historical independent Panda adapter | z-MSE 0.173401，z-MAE 0.191221，raw-MSE 1992.260254，raw-MAE 2.509673；epoch 10 val MSE 1788.239416 |
-
-完整说明见 [docs/reproduction.md](docs/reproduction.md) 和
-[README_task_e_horizon_results.md](README_task_e_horizon_results.md)。只有 config/feature
-metadata 而没有最终 test metrics 的目录（例如
-<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_gru</code>、
-<code>results/task_e/sampling_2/task_e_orbital15_ctx64_pred32_panda_mlp_2var2win</code>）标记为未完成，不列入排名。
-
-### 6. Task F：随机掩码高分辨率前缀稳定性预测
-
-Task F 使用 `dataset_sampling_3_prefix1024`、`prefix_len=256`、`time_stride=1`、
-`time_horizon=10000`、`group_size=32` 和相同的 `70/15/15` system-level split。
-过滤后有 `159,936` 条 trajectory，stable rate 为 `31.1187%`；模型输入形状为
+在上述数据和切分下，稳定样本比例为 `31.1187%`；模型输入形状为
 `[256, 16]`（15 个 `orbital15` channels 加 `observed_mask`）。TCN 使用
 `706,881` 个参数（hidden=160、levels=5），attention 使用 `597,505` 个参数
 （hidden=128、heads=4、layers=3）。
@@ -1877,8 +1843,7 @@ confusion matrix counts）保存在 [TCN metrics](results/task_f/sampling_3/task
 预测 CSV、曲线和模型权重也分别保留在
 `results/task_f/sampling_3/task_f_masked_prefix/` 与 `results/task_f/sampling_3/task_f_masked_prefix_attention/`。
 
-
-#### Task F mixed-mask robustness benchmark（prefix=256, seed=42）
+#### Mixed-mask robustness benchmark (prefix 256, seed 42)
 
 这是在同一 Task-F split 上运行的完整 partial-observation benchmark。过滤后仍为
 `159,936` 条 trajectory，stable rate 为 `31.1187%`。每个 training regime 为每个模型
@@ -1989,76 +1954,6 @@ threshold、AUROC、AUPRC 和 Brier）见 [mixed-mask comparison CSV](results/ta
 `results/task_f/sampling_3/task_f_mixed_mask_benchmark_seed42/`；可复现实验入口为
 [run_task_f_mixed_mask_benchmark.py](tasks/task_f/mixed_mask_benchmark.py)。
 
-### 7. Panda 独立实验区
-
-以下结果来自 <code>experiments/foundation_models</code> 的历史/隔离 pipeline，和主项目
-Task E 的统一窗口 benchmark 分开记录。
-
-#### 7.1 unbound classifier
-
-| Run | Test n | Positive rate | Acc | Precision | Recall | F1 | AUROC |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| legacy orbital15 dataset | 8000 | 0.642625 | 0.884375 | 0.968861 | 0.847306 | 0.904016 | 0.950854 |
-| Panda orbital15 dataset | 8000 | 0.642625 | **0.939250** | 0.966153 | **0.938339** | **0.952043** | **0.978368** |
-| Panda patch-mean keep-channels | 32032 | 0.684253 | 0.922203 | **0.969908** | 0.914682 | 0.941486 | 0.977106 |
-
-对应的 Task-B split（test 指标；文件中同时保存 unbound-positive 和互补的
-stable-positive）如下。这里的 head 以各目录的 <code>run_config.json</code> 为准：
-
-| Run / head | Unbound Acc | Unbound Prec | Unbound Recall | Unbound F1 | AUROC | Unbound AP | Stable F1 | Stable AP |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| prefix96 / linear | 0.508281 | 0.684763 | 0.520562 | 0.591478 | 0.500254 | 0.684630 | 0.382532 | 0.316294 |
-| prefix96 aligned / linear | 0.867150 | 0.941606 | 0.858993 | 0.898404 | 0.945449 | 0.974732 | 0.808123 | 0.883745 |
-| prefix512 / main | 0.928897 | 0.962739 | 0.932094 | **0.947169** | 0.978716 | 0.990267 | 0.891303 | 0.954518 |
-| prefix512 attention / attention | 0.921541 | **0.978409** | 0.905239 | 0.940403 | 0.979344 | 0.990641 | 0.885212 | 0.956522 |
-| prefix512 DeepSets / deepsets | 0.923793 | 0.974077 | **0.912849** | 0.942470 | **0.979450** | **0.990742** | 0.887160 | 0.956113 |
-
-#### 7.2 小样本 forecasting
-
-| Training mode | Prediction length | MSE | MAE | sMAPE |
-| --- | ---: | ---: | ---: | ---: |
-| fine-tune orbital15 | 64 | 4.33478e9 | 4043.69 | 57.3918 |
-| fine-tune orbital15 | 128 | 5.60501e9 | 4347.59 | 61.6773 |
-| scratch orbital15 | 64 | 2.09162e10 | 16308.8 | 96.4610 |
-| scratch orbital15 | 128 | 2.20187e10 | 16967.0 | 96.5859 |
-| zero-shot orbital15 | 64 | 4.17944e9 | 3950.24 | 55.5869 |
-| zero-shot orbital15 | 128 | 6.29700e9 | 4515.44 | 60.3770 |
-
-详细路径和训练配置见 [experiments/foundation_models/reports/results_summary.md](experiments/foundation_models/reports/results_summary.md)、
-[Panda classifier metrics](experiments/foundation_models/outputs/panda_unbound_dataset/panda_unbound_orbital15_dataset/metrics.json)
-及各 <code>panda_task_b_split_*</code> 子目录。
-
-### 8. Historical notebook-only 结果
-
-这些结果来自 notebook 的已保存输出，标签和 split 与当前 production runner 不完全相同，
-所以只作为历史记录，不与上面的正式表直接排序。
-
-| Notebook | 设置 | 已保存结果 |
-| --- | --- | --- |
-| task_a.ipynb | system label = “32 条 variation 中任意一条稳定”，train/test=3998/1000 | MLP AUC/AP/F1/Acc/Prec/Recall = 0.8489/0.9029/0.8434/0.7890/0.8280/0.8593；XGB = 0.8458/0.9045/0.8478/0.7900/0.8136/0.8850 |
-| task_b.ipynb | soft-time / early-prefix，64 bins，train/val/test=125963/13996/19994 | notebook 最终输出 AUC=0.9689，F1=0.8548，Acc=0.9039；模型名未在保存输出中可靠记录 |
-| task_d.ipynb | notebook 说明 threshold=10000、lyapunov proxy | 没有保存可复核的 stream metrics；对应目录中的旧 metrics 实际是 threshold=1000 |
-
-Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
-[task_b.ipynb](jupyter_notebook/task_b.ipynb)、
-[task_c.ipynb](jupyter_notebook/task_c.ipynb)、
-[task_d.ipynb](jupyter_notebook/task_d.ipynb)。
-
-### 9. 未完成、部分完成与不纳入正式排名的运行
-
-- Task A 的 <code>fraction_mlp_base_cuda</code>、<code>fraction_mlp_cuda_smoke</code> 没有
-  可用最终 metrics；<code>h=20000</code> 只属于超出数据有效范围的边界测试。
-- Task B 的新高分辨率 `sampling_3`、`prefix=64/128/256/512` 目前已有 MLP、CNN、TCN、
-  Panda-72M、Chronos-2 和 Stats XGBoost 的可复核结果；GRU/Attention 仍未完成。
-- Task B 的 group_fraction / group_attention 入口在代码中存在，但本仓库当前没有可复核的
-  最终结果文件，因此不虚构其测试指标。
-- Task E 有若干只保存 config/feature metadata 的目录；没有 test metrics 的运行不纳入
-  统一 benchmark。
-- <code>results/task_e/sampling_2/panda_temporal_adapter_full</code> 只有配置，没有最终 metrics；只有
-  <code>results/task_e/sampling_2/panda_temporal_adapter_full_20k</code> 的指标列入上面的历史 Panda adapter 记录。
-- 训练日志中的中间 epoch 指标和重复重跑结果都保留在产物目录，但本节只把有明确最终
-  test/validation 汇总的运行作为结果。
-
 ## Script Entry Points
 
 - `Task A`: [scripts/task_a.py](scripts/task_a.py)（`--resolution low`）
@@ -2072,7 +1967,7 @@ Notebook 文件：[task_a.ipynb](jupyter_notebook/task_a.ipynb)、
 
 ## Reproducible Commands
 
-下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；新机器请按 [README 安装说明](README.md#install) 使用 [environment.yml](environment.yml) 和 [requirements.lock](requirements.lock) 建立唯一环境。
+下面命令从仓库根目录运行。默认环境是 `stellar` conda 环境；新机器请按 [README 安装说明](README.md#installation) 使用 [environment.yml](environment.yml) 和 [requirements.lock](requirements.lock) 建立唯一环境。
 
 ### Task A
 
@@ -2311,7 +2206,7 @@ conda run --no-capture-output -n stellar python -m tasks.task_f \
 
 ## Environment
 
-大多数脚本默认在 `stellar` conda 环境下运行。所有任务共用 [requirement.txt](requirement.txt) 的依赖输入和 [requirements.lock](requirements.lock) 的完整锁定版本；安装步骤见 [README](README.md#install)。
+大多数脚本默认在 `stellar` conda 环境下运行。所有任务共用 [requirement.txt](requirement.txt) 的依赖输入和 [requirements.lock](requirements.lock) 的完整锁定版本；安装步骤见 [README](README.md#installation)。
 
 ## Model Settings
 

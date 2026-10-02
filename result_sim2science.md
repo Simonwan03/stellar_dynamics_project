@@ -457,7 +457,7 @@ The MLP is the best model under the recommended threshold=10,000 setting.
 
 The lower thresholds yield lower log-time errors, while threshold=10,000 gives the highest Spearman correlation in this sensitivity grid. Results from the historical threshold=1,000 initial run should not be mixed with the current threshold=10,000 main setting.
 
-Sources: [threshold=10,000 metrics](results/task_d/sampling_2/task_d_proxy_sensitivity/threshold_10000/aggregation_min/metrics.json) and [Task D protocol documentation](readme.md#task-d-lyapunov-proxy-regression).
+Sources: [threshold=10,000 metrics](results/task_d/sampling_2/task_d_proxy_sensitivity/threshold_10000/aggregation_min/metrics.json) and [Task D protocol documentation](record.md#task-d-lyapunov-proxy-regression).
 
 ## Task E: Long-horizon orbital forecasting
 
