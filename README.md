@@ -14,7 +14,7 @@ We study a hierarchy of prediction problems on hierarchical three-body systems w
 - **Trajectory forecasting** at short and long horizons (Task E)
 - **Partial-observation robustness** under missing trajectory data (Task F)
 
-Our experiments compare standard supervised models, neural sequence models, and pretrained time-series foundation models. Coarse-grained stability can often be predicted from limited observations, while detailed trajectory forecasting is more sensitive to chaotic error growth. The [research record](record.md) contains task definitions, experiment settings, and result tables.
+Our experiments compare standard supervised models, neural sequence models, and pretrained time-series foundation models. Coarse-grained stability can often be predicted from limited observations, while detailed trajectory forecasting is more sensitive to chaotic error growth. The [research record](record_en.md) contains task definitions, experiment settings, and result tables.
 
 ## Repository Structure
 
