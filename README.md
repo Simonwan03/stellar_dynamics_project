@@ -34,7 +34,7 @@ See the [task code map](tasks/README.md) and [reproduction map](docs/reproductio
 
 ## Dataset
 
-The dataset comprises approximately **160,000 hierarchical three-body trajectories** from 5,000 base systems, with 32 controlled variations per system. Trajectories include orbital and state representations, completion information, and the targets used by the prediction tasks. The [research record](record.md) describes the sampling 2 files and fields.
+The dataset comprises approximately **160,000 hierarchical three-body trajectories** from 5,000 base systems, with 32 controlled variations per system. Trajectories include orbital and state representations, completion information, and the targets used by the prediction tasks. The [research record](record_en.md) describes the sampling 2 files and fields.
 
 The simulation data is **not tracked in this repository**, and there is no verified public download location here. Supply the data separately: sampling 2 experiments use `dataset_v3/`, while current sampling 3 experiments use `dataset_sampling_3_prefix1024/` or a path passed with `--dataset-dir`. The HDF5 shards and completion table must have matching sampling IDs. See the [reproduction map](docs/reproduction.md) for the required inputs and split manifests.
 
